@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-RTU UDP System V1.0.0 — a Python-based Remote Terminal Unit (RTU) implementing the **Solarize Modbus Protocol V2.0.10**. Communicates with a cloud server via UDP using custom binary packets (H01–H06), and with solar inverters/protection relays via Modbus RTU over RS485.
+RTU UDP System V1.1.0 — a Python-based Remote Terminal Unit (RTU) implementing the **Solarize Modbus Protocol V2.0.11**. Communicates with a cloud server via UDP using custom binary packets (H01–H06), and with solar inverters/protection relays/weather stations via Modbus RTU over RS485.
 
 ## Running the System
 
@@ -26,16 +26,22 @@ python pc_programs/udp_test_server.py
 
 # Run the equipment simulator (multi-device Modbus slave on PC)
 python pc_programs/equipment_simulator.py
+
+# Run the DER-AVM master (control utility)
+python pc_programs/der_avm_master.py
+
+# Run RS485 cross-test (hardware diagnostics)
+python -m rtu_program.rs485_cross_test
 ```
 
 All batch launchers are in `launchers/`:
-- `START_DASHBOARD.bat` — 운영 대시보드 (web_server_prod/)
+- `START_DASHBOARD.bat` — 운영 대시보드 (web_server_prod/, watchdog auto-restart)
 - `START_DASHBOARD_DEV.bat` — 개발 대시보드 (web_server/, DB 초기화)
-- `START_UDP_SERVER.bat` — 운영 UDP 서버
+- `START_UDP_SERVER.bat` — 운영 UDP 서버 (auto-restart)
 - `START_TEST_SERVER.bat` — 테스트 UDP 서버
 - `START_SIMULATOR.bat` — 장비 시뮬레이터
-- `START_MODEL_MAKER.bat` — 레지스터맵 생성기
-- `INSTALL_RTU_DEV.bat` — RTU 원클릭 설치
+- `START_MODEL_MAKER.bat` — 레지스터맵 생성기 (auto-installs PyMuPDF, openpyxl, anthropic)
+- `INSTALL_RTU_DEV.bat` — RTU 원클릭 설치 (305-line comprehensive setup)
 - `SETUP_CM4_BOOT.bat` — CM4 부트 설정
 
 There is no build step, no test runner, and no lint configuration.
@@ -44,17 +50,27 @@ There is no build step, no test runner, and no lint configuration.
 
 ### Module Layout
 
-- **`common/protocol_constants.py`** — Single source of truth for all protocol values: packet versions (H01–H06), device types, models, timing (60s H01 cycle, 30s ACK timeout), network defaults (server port 13132, RTU port 9100), control command codes, and response codes.
+- **`common/protocol_constants.py`** — Single source of truth for all protocol values: packet versions (H01–H06), device types (RTU/Inverter/Sensor/PowerMeter/Relay/Weather), models, timing (60s H01 cycle, 30s ACK timeout), network defaults (server port 13132, RTU port 9100), control command codes, and response codes.
+- **`common/config_loader.py`** — Configuration loading utilities for INI files (`config/rtu_config.ini`, `config/rs485_ch*.ini`, `config/device_models.ini`).
+- **`common/*_registers.py`** — Register map modules per inverter brand (solarize, huawei, kstar, sungrow, ekos, goodwe, senergy) and device type (relay, weather). Each `*_mm_registers.py` variant is the Model Maker reference copy.
 - **`rtu_program/rtu_client.py`** — Main application. Three daemon threads: receive (H02/H03/H06), send (periodic H01 every 60s + backup recovery), and backup monitor (timeout/retry/cleanup). Tracks per-device control state (`on_off`, `active_power_limit`, `power_factor`, `reactive_power`).
 - **`rtu_program/protocol_handler.py`** — Packet serialization/deserialization. 20-byte binary header + variable body. Implements all six packet types.
-- **`rtu_program/modbus_handler.py`** — `MultiDeviceModbusHandler` with four RS485 modes: CM4 native UART (pyserial), Waveshare 2-CH RS485 HAT (SPI/SC16IS752), PC USB-RS485 (pymodbus), or simulation generating time-varying inverter/relay data. Mode auto-detected via `config/rtu_config.ini [RS485] mode`. Dynamic register module loading (`load_register_module`) for new inverter brands.
+- **`rtu_program/modbus_handler.py`** (V3.0.0) — `MultiDeviceModbusHandler` with four RS485 modes: CM4 native UART, Waveshare 2-CH RS485 HAT (SPI/SC16IS752), PC USB-RS485 (pymodbus), or simulation. Mode auto-detected via `config/rtu_config.ini [RS485] mode`. Dynamic register module loading (`load_register_module`) for new inverter brands.
+- **`rtu_program/lib/`** — RS485 channel abstraction layer (new in V1.1.0):
+  - `rs485_channel.py` — Abstract RS485 channel interface
+  - `modbus_master.py` — Generic Modbus RTU master (1,006 lines)
+  - `modbus_utils.py` — CRC, framing utilities
+  - `cm4_serial/` — CM4 native UART via pyserial
+  - `waveshare_2_CH_RS485_HAT/` — Waveshare HAT driver (SPI/SC16IS752)
 - **`rtu_program/der_avm_slave.py`** — Modbus RTU slave for DER-AVM master integration. Runs on RS485 CH2, exposes real-time inverter data (FC03) and accepts control commands (FC06/FC16) per inverter slave ID.
 - **`rtu_program/watchdog_supervisor.py`** — Process supervisor for CM4 deployment. Monitors RTU heartbeat file, auto-restarts on crash or freeze (30s timeout).
 - **`rtu_program/backup_manager.py`** — Two-tier fault tolerance: short-term in-memory with 3 retries, long-term SQLite (`rtu_backup.db`) storing packets for 48 hours. Recovery mode activates after 3+ consecutive ACK failures.
+- **`pc_programs/udp_server.py`** (V1.1.0) — Production UDP server with SQLite persistence, duplicate detection, rate limiting, data retention, built-in FTP server for firmware distribution.
 - **`pc_programs/udp_test_server.py`** — Interactive test server for debugging. Parses packets, sends ACKs, provides menu for H03 commands.
-- **`pc_programs/udp_server.py`** — Production UDP server with SQLite persistence, duplicate detection, rate limiting, data retention.
-- **`web_server/`** — Development dashboard (FastAPI + SQLite + WebSocket). Use `launchers/START_DASHBOARD_DEV.bat`.
-- **`web_server_prod/`** — Production dashboard with security hardening: env-based credentials, SFTP path whitelist, duplicate detection, rate limiting, data retention, WAL checkpoint, RTU timeout tracking.
+- **`pc_programs/equipment_simulator.py`** — Multi-device Modbus slave simulator (2,633 lines). Config via `simulator_config.json`.
+- **`pc_programs/der_avm_master.py`** — DER-AVM master control utility for testing slave integration.
+- **`web_server_prod/`** — Production dashboard (FastAPI + SQLite WAL + WebSocket + React 18 frontend). Env vars: `RTU_UDP_PORT`, `RTU_WEB_PORT`, `RTU_DB_PATH`, `RTU_FTP_USER`, `RTU_FTP_PASS`. Includes SFTP path whitelist, duplicate detection, rate limiting, data retention, stale RTU detection.
+- **`model_maker/`** — GUI tool for generating register maps from inverter Modbus PDFs. Main file: `modbus_to_udp_mapper.py` (8,500+ lines). 3-stage pipeline (`stage_pipeline.py`) with optional AI assist (`ai_generator.py`).
 
 ### Communication Flow
 
@@ -75,31 +91,42 @@ RTU Client                          Server / Test Server
 
 All packets share a **20-byte header**: Version(1) + Sequence(2) + RTU_ID(4) + Timestamp(8) + DeviceType(1) + DeviceNumber(1) + Model(1) + BackupFlag(1) + BodyType(1).
 
-- **H01 Inverter body:** 44 bytes base + variable MPPT (4 channels × 4 bytes) + String arrays
+- **H01 Inverter body:** 44 bytes base + variable MPPT (4 channels x 4 bytes) + String arrays
 - **H01 Relay body:** 68 bytes (3-phase voltages, currents, power, energy, DO/DI)
-- **H03/H04:** 8–9 bytes (control type + value)
+- **H03/H04:** 8-9 bytes (control type + value)
 
 ### Key Design Decisions
 
 - **Simulation mode** activates automatically when pymodbus is unavailable or no RS485 port is configured — no code changes needed.
 - **Backup flag** in every H01 packet header distinguishes live vs. recovered backup data on the server side.
 - **Sequence numbers** are used to match ACKs to sent packets; the backup manager tracks unacknowledged sequences.
-- **Control values are scaled integers**: active power limit 0–1000 = 0–100%, power factor -1000–1000 = -1.0–1.0.
-- Default RTU ID is `48810978`; configured in `rtu_client.py` constructor.
+- **Control values are scaled integers**: active power limit 0-1000 = 0-100%, power factor -1000-1000 = -1.0-1.0.
+- **ACK-first pattern**: server sends ACK before parsing/storing data to minimize RTU wait time.
+- Default RTU ID is `12345678`; configured in `config/rtu_config.ini [RTU] rtu_id`.
+
+### Supported Device Types
+
+| Type | Models | Protocol Names |
+|------|--------|---------------|
+| Inverter | Solarize, Huawei, Kstar, Sungrow, EKOS, Goodwe, Senergy | `solarize`, `huawei`, `kstar`, `sungrow`, `ekos`, `goodwe`, `senergy` |
+| Protection Relay | KDU-300, VIPAM3500C-DG | `relay`, `vipam` |
+| Weather Station | SEM5046 | `weather` |
+
+Device configuration in `config/rs485_ch*.ini`. Model-to-protocol mapping in `config/device_models.ini`.
 
 ## RTU 수정 시 필수 절차
 
 RTU 관련 코드(`rtu_program/`, `common/`, `config/`)를 수정한 후 반드시:
 
 1. **펌웨어 패키지 생성**: Model Maker GUI의 "Build Package" 버튼 또는 아래 명령
-2. **배포**: `pc_programs/firmware/` 디렉토리에 `.tar.gz` 생성됨 → 대시보드 Firmware 탭으로 Pi에 배포 가능
+2. **배포**: `pc_programs/firmware/` 디렉토리에 `.tar.gz` 생성됨 -> 대시보드 Firmware 탭으로 Pi에 배포 가능
 
 ```bash
 # 수동 펌웨어 빌드 (Model Maker 없이)
 python -c "
 import tarfile, os
 from datetime import datetime
-project_dir = 'C:/CM4_4rs485/RTU_UDP_System_V1_0_0'
+project_dir = 'C:/CM4_4rs485/RTU_UDP_System_V1_1_0'
 firmware_dir = os.path.join(project_dir, 'pc_programs', 'firmware')
 os.makedirs(firmware_dir, exist_ok=True)
 ts = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -124,14 +151,14 @@ print(f'Created: {pkg}')
 
 ### 개요
 
-`model_maker/modbus_to_udp_mapper.py`는 인버터 Modbus PDF → RTU 호환 `*_registers.py` 파일을 자동 생성하는 GUI 도구. 생성된 파일은 `rtu_program/modbus_handler.py`의 동적 로딩(`load_register_module`)으로 즉시 사용 가능.
+`model_maker/modbus_to_udp_mapper.py`는 인버터 Modbus PDF -> RTU 호환 `*_registers.py` 파일을 자동 생성하는 GUI 도구. 생성된 파일은 `rtu_program/modbus_handler.py`의 동적 로딩(`load_register_module`)으로 즉시 사용 가능.
 
 ### 새 업체 PDF로 레지스터맵 생성하는 절차
 
 1. **Model Maker 실행**: `START_MODEL_MAKER.bat` 또는 `python -m model_maker.modbus_to_udp_mapper`
 2. **PDF 로드**: Tab1에서 제조사 Modbus Protocol PDF 열기
 3. **자동 매핑**: Tab2에서 MPPT/String 수 설정 후 "자동 매핑 실행"
-4. **Code Generator**: Tab6에서 설정 후 "Generate Code" → "Save"
+4. **Code Generator**: Tab6에서 설정 후 "Generate Code" -> "Save"
    - **Protocol Name**: `config/rs485_ch*.ini`에서 사용할 이름 (예: `newbrand`)
    - **Class Name**: 반드시 `RegisterMap` (modbus_handler 호환)
    - **IV Scan / DER-AVM 체크**: Solarize 프로토콜이면 둘 다 ON

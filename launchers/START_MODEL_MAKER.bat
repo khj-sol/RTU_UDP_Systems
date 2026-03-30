@@ -1,35 +1,18 @@
 @echo off
 chcp 65001 > nul
 title Model Maker v1.3.0
+cd /d "%~dp0.."
 
-:: Check Python
-python --version > nul 2>&1
+:: Use explicit Python path to avoid Windows Store alias errors
+set "PYTHON=C:\Program Files\Python312\python.exe"
+
+:: Check and install dependencies
+"%PYTHON%" -c "import subprocess,sys;[subprocess.check_call([sys.executable,'-m','pip','install',p,'--quiet']) for m,p in [('fitz','PyMuPDF'),('openpyxl','openpyxl'),('anthropic','anthropic')] if not __import__('importlib').util.find_spec(m)]" 2>nul
+
+echo [INFO] Starting Model Maker...
+"%PYTHON%" -m model_maker.modbus_to_udp_mapper
 if errorlevel 1 (
-    echo [ERROR] Python not found. Install Python 3.8+ and add to PATH.
+    echo.
+    echo [ERROR] Model Maker exited with an error.
     pause
-    exit /b 1
 )
-
-:: Check required packages
-python -c "import fitz" > nul 2>&1
-if errorlevel 1 (
-    echo [INFO] Installing PyMuPDF...
-    python -m pip install PyMuPDF --quiet
-)
-
-:: Check openpyxl (required for 3-Stage Pipeline Excel export/import)
-python -c "import openpyxl" > nul 2>&1
-if errorlevel 1 (
-    echo [INFO] Installing openpyxl (required for Stage Pipeline Excel features)...
-    python -m pip install openpyxl --quiet
-)
-
-:: Check anthropic package for AI Generate / AI Assist features
-python -c "import anthropic" > nul 2>&1
-if errorlevel 1 (
-    echo [INFO] Installing anthropic (required for AI Generate / AI Assist buttons)...
-    python -m pip install anthropic --quiet
-)
-
-cd /d "%~dp0..\model_maker"
-python modbus_to_udp_mapper.py
