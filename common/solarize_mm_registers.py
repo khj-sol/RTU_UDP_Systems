@@ -547,7 +547,7 @@ def generate_iv_current_data(isc, voc, v_min, data_points=64):
     for i in range(data_points):
         v = v_min + step * i
         ratio = v / voc if voc > 0 else 0
-        current = max(0.0, isc * (1.0 - ratio ** 2))
+        current = max(0.0, isc * (1.0 - ratio ** 20))
         regs.append(int(current * 100) & 0xFFFF)
     return regs
 

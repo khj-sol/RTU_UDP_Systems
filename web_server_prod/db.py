@@ -64,6 +64,30 @@ class DB:
                 r_voltage REAL, s_voltage REAL, t_voltage REAL,
                 r_current REAL, s_current REAL, t_current REAL,
                 total_power REAL, power_factor REAL, frequency REAL,
+                received_energy REAL, sent_energy REAL,
+                do_status INTEGER, di_status INTEGER,
+                inverter_power REAL, load_power REAL,
+                backup INTEGER DEFAULT 0, original_timestamp TEXT)""")
+        # Migrate: add columns if missing (existing DB)
+        for col, typ in [('received_energy','REAL'), ('sent_energy','REAL'),
+                         ('do_status','INTEGER'), ('di_status','INTEGER'),
+                         ('inverter_power','REAL'), ('load_power','REAL')]:
+            try:
+                await self.db.execute(f"ALTER TABLE relay_data ADD COLUMN {col} {typ} DEFAULT 0")
+            except Exception:
+                pass
+
+        await self.db.execute("""
+            CREATE TABLE IF NOT EXISTS weather_data (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
+                rtu_id INTEGER, device_number INTEGER,
+                air_temp REAL, humidity REAL, air_pressure REAL,
+                wind_speed REAL, wind_direction REAL,
+                module_temp_1 REAL, module_temp_2 REAL,
+                module_temp_3 REAL, module_temp_4 REAL,
+                horizontal_radiation REAL, horizontal_accum REAL,
+                inclined_radiation REAL, inclined_accum REAL,
                 backup INTEGER DEFAULT 0, original_timestamp TEXT)""")
 
         await self.db.execute("""
@@ -105,11 +129,36 @@ class DB:
                 power_factor REAL, frequency REAL,
                 status_flags INTEGER)""")
 
+        await self.db.execute("""
+            CREATE TABLE IF NOT EXISTS rtu_registry (
+                rtu_id INTEGER PRIMARY KEY,
+                ip TEXT, port INTEGER, status TEXT DEFAULT 'offline',
+                model TEXT, phone TEXT, serial TEXT, firmware TEXT,
+                rtu_type TEXT,
+                first_seen TEXT, last_seen TEXT, last_info_update TEXT,
+                note TEXT)""")
+        # Migrate existing rtu_registry tables
+        for col, typ in [('model','TEXT'), ('phone','TEXT'), ('serial','TEXT'),
+                         ('firmware','TEXT'), ('rtu_type','TEXT'),
+                         ('last_info_update','TEXT'), ('note','TEXT')]:
+            try:
+                await self.db.execute(f"ALTER TABLE rtu_registry ADD COLUMN {col} {typ}")
+            except Exception:
+                pass
+
+        await self.db.execute("""
+            CREATE TABLE IF NOT EXISTS rtu_connection_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
+                rtu_id INTEGER, event TEXT, ip TEXT, detail TEXT)""")
+
         await self.db.execute("CREATE INDEX IF NOT EXISTS idx_inv_rtu_ts ON inverter_data(rtu_id, timestamp)")
         await self.db.execute("CREATE INDEX IF NOT EXISTS idx_relay_rtu_ts ON relay_data(rtu_id, timestamp)")
+        await self.db.execute("CREATE INDEX IF NOT EXISTS idx_weather_rtu_ts ON weather_data(rtu_id, timestamp)")
         await self.db.execute("CREATE INDEX IF NOT EXISTS idx_event_rtu_ts ON event_log(rtu_id, timestamp)")
         await self.db.execute("CREATE INDEX IF NOT EXISTS idx_ctrl_status_rtu_ts ON control_status(rtu_id, timestamp)")
         await self.db.execute("CREATE INDEX IF NOT EXISTS idx_ctrl_monitor_rtu_ts ON control_monitor(rtu_id, timestamp)")
+        await self.db.execute("CREATE INDEX IF NOT EXISTS idx_conn_log_rtu ON rtu_connection_log(rtu_id, timestamp)")
 
         await self.db.commit()
         self._last_commit = time.time()
@@ -165,22 +214,63 @@ class DB:
         await self._maybe_commit()
 
     async def get_rtus(self):
-        async with self.db.execute(
-            "SELECT rtu_id, ip, port, first_seen, last_seen, status FROM rtu_registry ORDER BY rtu_id"
-        ) as cursor:
+        async with self.db.execute("SELECT * FROM rtu_registry ORDER BY rtu_id") as cursor:
             return [dict(row) for row in await cursor.fetchall()]
 
     async def get_rtu(self, rtu_id: int):
-        async with self.db.execute(
-            "SELECT rtu_id, ip, port, first_seen, last_seen, status FROM rtu_registry WHERE rtu_id=?", (rtu_id,)
-        ) as cursor:
+        async with self.db.execute("SELECT * FROM rtu_registry WHERE rtu_id=?", (rtu_id,)) as cursor:
             row = await cursor.fetchone()
             return dict(row) if row else None
 
     async def set_rtu_offline(self, rtu_id: int):
         await self.db.execute("UPDATE rtu_registry SET status='offline', last_seen=? WHERE rtu_id=?", (now_kst(), rtu_id))
         await self.db.commit()
-        self._pending_writes = 0  # Reset counter after explicit commit
+        self._pending_writes = 0
+
+    async def save_rtu_info(self, rtu_id: int, info: dict):
+        """UPSERT RTU info from H05 rtu_info event."""
+        ts = now_kst()
+        model = info.get('model', '')
+        rtu_type = 'RIP' if 'SRPV' in model else ('SOLARIZE' if model else '')
+        existing = await self.get_rtu(rtu_id)
+        if existing:
+            await self.db.execute("""
+                UPDATE rtu_registry SET model=?, phone=?, serial=?, firmware=?,
+                    rtu_type=?, last_info_update=?, last_seen=?
+                WHERE rtu_id=?
+            """, (model, info.get('phone',''), info.get('serial',''),
+                  info.get('firmware',''), rtu_type, ts, ts, rtu_id))
+        else:
+            await self.db.execute("""
+                INSERT INTO rtu_registry (rtu_id, model, phone, serial, firmware,
+                    rtu_type, first_seen, last_seen, last_info_update)
+                VALUES (?,?,?,?,?,?,?,?,?)
+            """, (rtu_id, model, info.get('phone',''), info.get('serial',''),
+                  info.get('firmware',''), rtu_type, ts, ts, ts))
+        await self.db.commit()
+
+    async def log_rtu_connection(self, rtu_id: int, event: str, ip: str = '', detail: str = ''):
+        """Log online/offline event."""
+        await self.db.execute(
+            "INSERT INTO rtu_connection_log (timestamp, rtu_id, event, ip, detail) VALUES (?,?,?,?,?)",
+            (now_kst(), rtu_id, event, ip, detail))
+        await self._maybe_commit()
+
+    async def get_rtu_connection_log(self, rtu_id: int = None, limit: int = 100):
+        query = "SELECT * FROM rtu_connection_log WHERE 1=1"
+        params = []
+        if rtu_id is not None:
+            query += " AND rtu_id=?"; params.append(rtu_id)
+        query += " ORDER BY timestamp DESC LIMIT ?"
+        params.append(limit)
+        async with self.db.execute(query, params) as cursor:
+            return [dict(row) for row in await cursor.fetchall()]
+
+    async def delete_rtu(self, rtu_id: int):
+        """Permanently delete RTU from registry and connection log."""
+        await self.db.execute("DELETE FROM rtu_registry WHERE rtu_id=?", (rtu_id,))
+        await self.db.execute("DELETE FROM rtu_connection_log WHERE rtu_id=?", (rtu_id,))
+        await self.db.commit()
 
     # ----- Inverter Data -----
 
@@ -240,12 +330,17 @@ class DB:
                 r_voltage, s_voltage, t_voltage,
                 r_current, s_current, t_current,
                 total_power, power_factor, frequency,
+                received_energy, sent_energy, do_status, di_status,
+                inverter_power, load_power,
                 backup, original_timestamp
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (ts, rtu_id, parsed.get('device_number', 0),
               parsed.get('r_voltage', 0), parsed.get('s_voltage', 0), parsed.get('t_voltage', 0),
               parsed.get('r_current', 0), parsed.get('s_current', 0), parsed.get('t_current', 0),
               parsed.get('total_power', 0), parsed.get('power_factor', 0), parsed.get('frequency', 0),
+              parsed.get('received_energy', 0), parsed.get('sent_energy', 0),
+              parsed.get('do_status', 0), parsed.get('di_status', 0),
+              parsed.get('inverter_power', 0), parsed.get('load_power', 0),
               is_backup, original_ts))
         await self._maybe_commit()
 
@@ -253,6 +348,51 @@ class DB:
                                 from_ts=None, to_ts=None, limit=100):
         limit = min(limit, 10000)
         query = "SELECT * FROM relay_data WHERE 1=1"
+        params = []
+        if rtu_id is not None:
+            query += " AND rtu_id=?"; params.append(rtu_id)
+        if device_num is not None:
+            query += " AND device_number=?"; params.append(device_num)
+        if from_ts:
+            query += " AND timestamp>=?"; params.append(from_ts)
+        if to_ts:
+            query += " AND timestamp<=?"; params.append(to_ts)
+        query += " ORDER BY timestamp DESC LIMIT ?"
+        params.append(limit)
+        async with self.db.execute(query, params) as cursor:
+            return [dict(row) for row in await cursor.fetchall()]
+
+    # ----- Weather Data -----
+
+    async def save_weather_data(self, rtu_id: int, parsed: dict):
+        is_backup = parsed.get('backup', 0)
+        original_ts = parsed.get('original_timestamp')
+        ts = original_ts if (is_backup and original_ts) else now_kst()
+
+        await self.db.execute("""
+            INSERT INTO weather_data (
+                timestamp, rtu_id, device_number,
+                air_temp, humidity, air_pressure,
+                wind_speed, wind_direction,
+                module_temp_1, module_temp_2, module_temp_3, module_temp_4,
+                horizontal_radiation, horizontal_accum,
+                inclined_radiation, inclined_accum,
+                backup, original_timestamp
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (ts, rtu_id, parsed.get('device_number', 0),
+              parsed.get('air_temp', 0), parsed.get('humidity', 0), parsed.get('air_pressure', 0),
+              parsed.get('wind_speed', 0), parsed.get('wind_direction', 0),
+              parsed.get('module_temp_1', 0), parsed.get('module_temp_2', 0),
+              parsed.get('module_temp_3', 0), parsed.get('module_temp_4', 0),
+              parsed.get('horizontal_radiation', 0), parsed.get('horizontal_accum', 0),
+              parsed.get('inclined_radiation', 0), parsed.get('inclined_accum', 0),
+              is_backup, original_ts))
+        await self._maybe_commit()
+
+    async def get_weather_history(self, rtu_id=None, device_num=None,
+                                  from_ts=None, to_ts=None, limit=100):
+        limit = min(limit, 10000)
+        query = "SELECT * FROM weather_data WHERE 1=1"
         params = []
         if rtu_id is not None:
             query += " AND rtu_id=?"; params.append(rtu_id)
@@ -325,12 +465,14 @@ class DB:
             (now_kst(), rtu_id, event_type, body_type, detail))
         await self._maybe_commit()
 
-    async def get_events(self, rtu_id=None, limit=100, offset=0):
+    async def get_events(self, rtu_id=None, limit=100, offset=0, from_ts=None):
         limit = min(limit, 10000)
         query = "SELECT * FROM event_log WHERE 1=1"
         params = []
         if rtu_id is not None:
             query += " AND rtu_id=?"; params.append(rtu_id)
+        if from_ts:
+            query += " AND timestamp>=?"; params.append(from_ts)
         query += " ORDER BY timestamp DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
         async with self.db.execute(query, params) as cursor:
@@ -363,8 +505,10 @@ class DB:
         # Each downsample step is independently committed
         result['5min_inserted'] += await self._downsample_inverter(cutoff_1y, cutoff_30d, 5)
         result['5min_inserted'] += await self._downsample_relay(cutoff_1y, cutoff_30d, 5)
+        result['5min_inserted'] += await self._downsample_weather(cutoff_1y, cutoff_30d, 5)
         result['1h_inserted'] += await self._downsample_inverter(None, cutoff_1y, 60)
         result['1h_inserted'] += await self._downsample_relay(None, cutoff_1y, 60)
+        result['1h_inserted'] += await self._downsample_weather(None, cutoff_1y, 60)
 
         return result
 
@@ -464,6 +608,61 @@ class DB:
             await self.db.commit()
         except Exception as e:
             logger.error(f"Downsample relay error: {e}")
+            try:
+                await self.db.rollback()
+            except Exception as rb_err:
+                logger.error(f"Rollback failed: {rb_err}")
+            raise
+        return len(rows)
+
+    async def _downsample_weather(self, ts_from, ts_to, interval_min: int) -> int:
+        """Atomically aggregate weather_data into interval_min-minute buckets."""
+        where = "WHERE timestamp < ?"
+        params = [ts_to]
+        if ts_from:
+            where = "WHERE timestamp >= ? AND timestamp < ?"
+            params = [ts_from, ts_to]
+
+        async with self.db.execute(f"SELECT COUNT(*) FROM weather_data {where}", params) as cur:
+            count = (await cur.fetchone())[0]
+        if count == 0:
+            return 0
+
+        bucket = f"strftime('%Y-%m-%d %H:', timestamp) || printf('%02d', (CAST(strftime('%M', timestamp) AS INTEGER) / {interval_min}) * {interval_min}) || ':00'"
+        agg_q = f"""
+            SELECT {bucket} as ts_bucket, rtu_id, device_number,
+                   AVG(air_temp), AVG(humidity), AVG(air_pressure),
+                   AVG(wind_speed), AVG(wind_direction),
+                   AVG(module_temp_1), AVG(module_temp_2),
+                   AVG(module_temp_3), AVG(module_temp_4),
+                   AVG(horizontal_radiation), AVG(horizontal_accum),
+                   AVG(inclined_radiation), AVG(inclined_accum), 0, NULL
+            FROM weather_data {where}
+            GROUP BY ts_bucket, rtu_id, device_number
+        """
+        async with self.db.execute(agg_q, params) as cur:
+            rows = await cur.fetchall()
+        if not rows:
+            return 0
+
+        await self.db.execute("BEGIN IMMEDIATE")
+        try:
+            await self.db.execute(f"DELETE FROM weather_data {where}", params)
+            for r in rows:
+                await self.db.execute("""
+                    INSERT INTO weather_data
+                    (timestamp, rtu_id, device_number,
+                     air_temp, humidity, air_pressure,
+                     wind_speed, wind_direction,
+                     module_temp_1, module_temp_2, module_temp_3, module_temp_4,
+                     horizontal_radiation, horizontal_accum,
+                     inclined_radiation, inclined_accum,
+                     backup, original_timestamp)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """, tuple(r))
+            await self.db.commit()
+        except Exception as e:
+            logger.error(f"Downsample weather error: {e}")
             try:
                 await self.db.rollback()
             except Exception as rb_err:

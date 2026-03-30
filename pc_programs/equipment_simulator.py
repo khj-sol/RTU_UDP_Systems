@@ -682,12 +682,14 @@ class RelaySimulator:
     NOMINAL_POWER = 100000.0
     NOMINAL_POWER_FACTOR = 0.90
     
-    def __init__(self, logger=None):
+    def __init__(self, logger=None, inverter_sims=None):
         self.logger = logger or logging.getLogger("RelaySim")
         self.running = False
-        
+        self.inverter_sims = inverter_sims or []  # Reference to inverter simulators
+
         self.start_time = time.time()
-        self.total_energy_wh = 50000.0
+        self.received_energy_wh = 50000.0   # 수전유효전력량 (+WH)
+        self.sent_energy_wh = 0.0           # 송전유효전력량 (-WH)
         self.total_energy_varh = 20000.0
         
         self.max_values = {
@@ -716,48 +718,80 @@ class RelaySimulator:
         
         return store
     
-    def _get_load_factor(self):
-        """Get factory load factor (0.0 ~ 1.0)"""
+    def _get_total_inverter_power_w(self):
+        """Get total AC power from all connected inverters (W)"""
+        total = 0.0
+        for sim in self.inverter_sims:
+            if hasattr(sim, '_current') and sim._current:
+                total += sim._current.get('ac_power_kw', 0.0) * 1000.0
+        return total
+
+    def _get_load_power_w(self, inverter_power_w):
+        """Get factory load power (W) — peak is ~2x inverter generation
+
+        Factory load pattern based on time of day:
+        - 06~09: Morning ramp-up (0.5~1.5x inverter power)
+        - 09~12: Morning peak (1.5~2.0x)
+        - 12~13: Lunch dip (1.0x)
+        - 13~18: Afternoon peak (1.5~2.0x)
+        - 18~22: Evening decline (0.8~0.3x)
+        - 22~06: Night base load (0.2~0.1x)
+        """
         now = datetime.now()
         hour = now.hour + now.minute / 60.0
-        fluctuation = random.uniform(-0.03, 0.03)
-        
+        fluctuation = random.uniform(-0.05, 0.05)
+
+        # Base multiplier relative to inverter power
         if hour < 6.0:
-            base = 0.30
+            mult = 0.15
         elif hour < 9.0:
-            base = 0.30 + (hour - 6.0) / 3.0 * 0.50
+            mult = 0.5 + (hour - 6.0) / 3.0 * 1.0  # 0.5 → 1.5
+        elif hour < 12.0:
+            mult = 1.5 + 0.5 * math.sin((hour - 9.0) / 3.0 * math.pi)  # 1.5 → 2.0 → 1.5
+        elif hour < 13.0:
+            mult = 1.0  # Lunch dip
         elif hour < 18.0:
-            base = 0.80 + 0.20 * math.sin((hour - 9.0) / 9.0 * math.pi)
+            mult = 1.5 + 0.5 * math.sin((hour - 13.0) / 5.0 * math.pi)  # 1.5 → 2.0 → 1.5
         elif hour < 22.0:
-            base = 0.80 - (hour - 18.0) / 4.0 * 0.30
+            mult = 0.8 - (hour - 18.0) / 4.0 * 0.5  # 0.8 → 0.3
         else:
-            base = 0.50 - (hour - 22.0) / 2.0 * 0.20
-        
-        return max(0.1, min(1.0, base + fluctuation))
+            mult = 0.2 - (hour - 22.0) / 2.0 * 0.1  # 0.2 → 0.1
+
+        mult = max(0.1, mult + fluctuation)
+
+        # Use inverter power as reference, with minimum base load of 30kW
+        ref_power = max(inverter_power_w, 50000.0)
+        return ref_power * mult
     
     def _update_registers(self):
-        """Update all register values using store.setValues()"""
-        load_factor = self._get_load_factor()
+        """Update all register values — PCC net power model"""
+        # Get inverter generation and factory load
+        inverter_power_w = self._get_total_inverter_power_w()
+        load_power_w = self._get_load_power_w(inverter_power_w)
+
+        # Net power at PCC = Load - Inverter Generation
+        # Positive = consuming from grid, Negative = exporting to grid
+        net_power_w = load_power_w - inverter_power_w
+
         pf = self.NOMINAL_POWER_FACTOR + random.uniform(-0.03, 0.03)
-        
+
         # Voltage
         v_base = self.NOMINAL_LINE_VOLTAGE * (1.0 + random.uniform(-0.02, 0.02))
         v12 = v_base * (1.0 + random.uniform(-0.01, 0.01))
         v23 = v_base * (1.0 + random.uniform(-0.01, 0.01))
         v31 = v_base * (1.0 + random.uniform(-0.01, 0.01))
-        
+
         v1 = v12 / math.sqrt(3) * (1.0 + random.uniform(-0.005, 0.005))
         v2 = v23 / math.sqrt(3) * (1.0 + random.uniform(-0.005, 0.005))
         v3 = v31 / math.sqrt(3) * (1.0 + random.uniform(-0.005, 0.005))
-        
+
         freq = self.NOMINAL_FREQUENCY + random.uniform(-0.1, 0.1)
-        
-        # Power
-        total_active_power = self.NOMINAL_POWER * load_factor
-        w1 = total_active_power / 3 * (1.0 + random.uniform(-0.03, 0.03))
-        w2 = total_active_power / 3 * (1.0 + random.uniform(-0.03, 0.03))
-        w3 = total_active_power - w1 - w2
-        total_w = w1 + w2 + w3
+
+        # Power — net_power_w can be negative (export to grid)
+        total_w = net_power_w
+        w1 = total_w / 3 * (1.0 + random.uniform(-0.03, 0.03))
+        w2 = total_w / 3 * (1.0 + random.uniform(-0.03, 0.03))
+        w3 = total_w - w1 - w2
         
         pf_angle = math.acos(pf)
         total_reactive = total_w * math.tan(pf_angle)
@@ -784,8 +818,13 @@ class RelaySimulator:
         p2_angle = math.degrees(math.acos(min(pf2, 1.0)))
         p3_angle = math.degrees(math.acos(min(pf3, 1.0)))
         
-        self.total_energy_wh += total_w * (2.0 / 3600.0)
-        self.total_energy_varh += total_var * (2.0 / 3600.0)
+        # Energy accumulation based on power direction
+        energy_delta = abs(total_w) * (1.0 / 3600.0)  # 1s update interval
+        if total_w >= 0:
+            self.received_energy_wh += energy_delta   # 수전 (+WH)
+        else:
+            self.sent_energy_wh += energy_delta        # 역송 (-WH)
+        self.total_energy_varh += abs(total_var) * (1.0 / 3600.0)
         
         # Update max values
         self.max_values['v12'] = max(self.max_values['v12'], v12)
@@ -830,8 +869,8 @@ class RelaySimulator:
         set_float(KDU300RegisterMap.PF3, pf3)
         set_float(KDU300RegisterMap.AVG_PF, avg_pf)
         set_float(KDU300RegisterMap.FREQUENCY, freq)
-        set_float(KDU300RegisterMap.POSITIVE_WH, self.total_energy_wh)
-        set_float(KDU300RegisterMap.NEGATIVE_WH, 0.0)
+        set_float(KDU300RegisterMap.POSITIVE_WH, self.received_energy_wh)
+        set_float(KDU300RegisterMap.NEGATIVE_WH, self.sent_energy_wh)
         set_float(KDU300RegisterMap.POSITIVE_VARH, self.total_energy_varh)
         set_float(KDU300RegisterMap.NEGATIVE_VARH, 0.0)
         set_float(KDU300RegisterMap.V12_MAX, self.max_values['v12'])
@@ -851,20 +890,25 @@ class RelaySimulator:
         set_float(KDU300RegisterMap.REVERSE_WATT2, 0.0)
         set_float(KDU300RegisterMap.REVERSE_WATT3, 0.0)
         
-        # WORD registers
-        self.store.setValues(3, KDU300RegisterMap.DO_STATUS, [0x0001])
+        # DO status: 0x0001 if exporting to grid (reverse power), 0x0000 if consuming
+        do_status = 0x0001 if total_w < 0 else 0x0000
+        self.store.setValues(3, KDU300RegisterMap.DO_STATUS, [do_status])
         self.store.setValues(3, KDU300RegisterMap.OVR, [0, 0, 0, 0, 0])  # OVR, UVR, OFR, UFR, RPR
-        self.store.setValues(3, KDU300RegisterMap.DI1, [0x0001, 0x0000])  # DI1, DI2
+        self.store.setValues(3, KDU300RegisterMap.DI1, [do_status, 0x0000])  # DI1=역전력차단기 접점, DI2
         
         # Store for display
         self._current = {
-            'load_factor': load_factor,
-            'total_w': total_w / 1000,
+            'inverter_kw': inverter_power_w / 1000,
+            'load_kw': load_power_w / 1000,
+            'net_kw': total_w / 1000,
             'total_var': total_var / 1000,
             'avg_pf': avg_pf,
             'freq': freq,
             'v12': v12,
-            'a1': a1
+            'a1': a1,
+            'do_status': do_status,
+            'received_kwh': self.received_energy_wh / 1000,
+            'sent_kwh': self.sent_energy_wh / 1000,
         }
 
 
@@ -2076,6 +2120,8 @@ class EquipmentSimulator:
         self.devices = []  # list of (slave_id, type, name, protocol, simulator)
         device_map = {}    # slave_id -> store
 
+        # First pass: create inverters and weather
+        relay_configs = []
         for dc in self.device_config:
             sid = dc['slave_id']
             dtype = dc['type']
@@ -2085,7 +2131,8 @@ class EquipmentSimulator:
             if dtype == 'inverter':
                 sim = _create_inverter_by_protocol(proto, self.logger)
             elif dtype == 'relay':
-                sim = RelaySimulator(self.logger)
+                relay_configs.append(dc)
+                continue  # Create relay after all inverters
             elif dtype == 'weather':
                 sim = WeatherSimulator(self.logger)
             else:
@@ -2094,6 +2141,22 @@ class EquipmentSimulator:
             self.devices.append({
                 'slave_id': sid,
                 'type': dtype,
+                'name': name,
+                'protocol': proto,
+                'sim': sim,
+            })
+            device_map[sid] = sim.store
+
+        # Second pass: create relays with inverter references
+        inverter_sims = [d['sim'] for d in self.devices if d['type'] == 'inverter']
+        for dc in relay_configs:
+            sid = dc['slave_id']
+            name = dc['name']
+            proto = dc.get('protocol', '')
+            sim = RelaySimulator(self.logger, inverter_sims=inverter_sims)
+            self.devices.append({
+                'slave_id': sid,
+                'type': 'relay',
                 'name': name,
                 'protocol': proto,
                 'sim': sim,
@@ -2171,12 +2234,17 @@ class EquipmentSimulator:
                         print(f"  PV: {pv_kw:.2f} kW | AC: {ac_kw:.2f} kW | V: {voltage:.1f} V")
 
                     elif dtype == 'relay':
-                        print(f"\n  [RELAY {name}] Slave ID: {sid} | FC03")
+                        print(f"\n  [RELAY {name}] Slave ID: {sid} | FC03 (PCC)")
                         print("-" * 80)
-                        load = cur.get('load_factor', 0) * 100
-                        total_w = cur.get('total_w', 0)
-                        v12 = cur.get('v12', 0)
-                        print(f"  Load: {load:.1f}% | Power: {total_w:.2f} kW | V: {v12:.1f} V")
+                        inv_kw = cur.get('inverter_kw', 0)
+                        load_kw = cur.get('load_kw', 0)
+                        net_kw = cur.get('net_kw', 0)
+                        do_st = cur.get('do_status', 0)
+                        rx_kwh = cur.get('received_kwh', 0)
+                        tx_kwh = cur.get('sent_kwh', 0)
+                        direction = "<<EXPORT" if net_kw < 0 else "IMPORT>>"
+                        print(f"  INV: {inv_kw:.1f}kW | Load: {load_kw:.1f}kW | Net: {net_kw:.1f}kW [{direction}]")
+                        print(f"  DO: 0x{do_st:04X} | +WH: {rx_kwh:.1f}kWh | -WH: {tx_kwh:.1f}kWh")
 
                     elif dtype == 'weather':
                         print(f"\n  [WEATHER {name}] Slave ID: {sid} | FC03")

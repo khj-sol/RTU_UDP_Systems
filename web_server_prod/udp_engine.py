@@ -139,6 +139,7 @@ class RTUState:
     connected: bool = False
     avg_interval: float = 0.0  # observed avg seconds between H01 batches
     _prev_seen: float = 0.0   # previous last_seen for interval calc
+    rtu_info: dict = field(default_factory=dict)  # {model, phone, serial, firmware}
 
 
 # ============================================================================
@@ -188,6 +189,11 @@ class UDPEngine:
         self.on_raw_packet: Optional[Callable] = None  # (rtu_id, info_dict)
         self.on_control_status: Optional[Callable] = None   # (rtu_id, dev_num, data_dict)
         self.on_control_monitor: Optional[Callable] = None  # (rtu_id, dev_num, data_dict)
+        self.on_h01_cycle_complete: Optional[Callable] = None  # (rtu_id) — called after H01 cycle
+
+        # H01 cycle detection: timer per RTU to detect end of H01 burst
+        self._h01_cycle_timers: dict[int, threading.Timer] = {}
+        self._h01_cycle_lock = threading.Lock()
 
         # NAT keepalive: send H03 RTU info request between H01 cycles
         self.keepalive_enabled = True
@@ -491,6 +497,33 @@ class UDPEngine:
                 if self.on_h01_data:
                     self.on_h01_data(rtu_id, device_key, parsed)
 
+                # H01 cycle detection: reset 2-second timer per RTU
+                if not rec.get('backup_flag') and self.on_h01_cycle_complete:
+                    self._reset_h01_cycle_timer(rtu_id)
+
+    def _reset_h01_cycle_timer(self, rtu_id: int):
+        """Reset the 2-second timer for H01 cycle completion detection.
+        After last H01 in a burst, timer fires and sends H03(13) per inverter."""
+        with self._h01_cycle_lock:
+            old = self._h01_cycle_timers.get(rtu_id)
+            if old:
+                old.cancel()
+            t = threading.Timer(2.0, self._on_h01_cycle_complete, args=[rtu_id])
+            t.daemon = True
+            t.start()
+            self._h01_cycle_timers[rtu_id] = t
+
+    def _on_h01_cycle_complete(self, rtu_id: int):
+        """Called 2 seconds after last H01 — trigger control check for this RTU."""
+        with self._h01_cycle_lock:
+            self._h01_cycle_timers.pop(rtu_id, None)
+        if self.on_h01_cycle_complete:
+            try:
+                self.on_h01_cycle_complete(rtu_id)
+                logger.info(f"H01 cycle complete for RTU:{rtu_id} → control check sent")
+            except Exception as e:
+                logger.error(f"H01 cycle complete callback error: {e}")
+
     def _expected_body_size(self, dev_type: int, body_type: int, body: bytes) -> int:
         """Calculate expected body size for a single record.
         Returns 0 if unknown (caller should treat as single record)."""
@@ -744,6 +777,14 @@ class UDPEngine:
                         info_parts.append(f"{field_name}={value}")
                         pos += size
             detail = ", ".join(info_parts) if info_parts else "RTU info (empty)"
+            # Store rtu_info in RTUState
+            if rtu_id in self.rtu_registry:
+                info_dict = {}
+                for part in info_parts:
+                    k, _, v = part.partition('=')
+                    info_dict[k] = v
+                with self._lock:
+                    self.rtu_registry[rtu_id].rtu_info = info_dict
 
         elif body_type == BODY_TYPE_POWER_OUTAGE:
             event_type = "power_outage"
@@ -856,6 +897,9 @@ class UDPEngine:
 
                 if has_session:
                     detail = f"INV{dev_num}: IV string {str_num}/{total_str} ({point_count}pts, {received}/{total_str} done)"
+                    # Send each string progress via on_event
+                    if self.on_event:
+                        self.on_event(rtu_id, "iv_scan_data", detail)
                     if received >= total_str:
                         logger.info(f"IV Scan complete: RTU:{rtu_id} INV{dev_num}, {total_str} strings")
                         if self.on_event:
@@ -1061,6 +1105,14 @@ class UDPEngine:
                         total_solar += data.get('ac_power', 0)
                     elif dt == 4:
                         total_grid += data.get('total_power', 0)
+                # Determine RTU type from model name
+                model = state.rtu_info.get('model', '')
+                if 'SRPV' in model:
+                    rtu_type = 'RIP'  # RI Power RTU
+                elif model:
+                    rtu_type = 'SOLARIZE'
+                else:
+                    rtu_type = ''  # Unknown (no RTU Info received yet)
                 result.append({
                     'rtu_id': rtu_id,
                     'ip': state.ip,
@@ -1071,6 +1123,8 @@ class UDPEngine:
                     'total_solar_power': total_solar,
                     'total_grid_power': total_grid,
                     'avg_interval': round(state.avg_interval),
+                    'rtu_type': rtu_type,
+                    'rtu_info': state.rtu_info,
                 })
         return result
 

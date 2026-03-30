@@ -24,7 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 import uvicorn
 
-from common.protocol_constants import DEVICE_INVERTER, DEVICE_PROTECTION_RELAY, CTRL_INV_CONTROL_CHECK
+from common.protocol_constants import DEVICE_INVERTER, DEVICE_PROTECTION_RELAY, DEVICE_WEATHER_STATION, CTRL_INV_CONTROL_CHECK
 
 from web_server_prod.udp_engine import UDPEngine
 from web_server_prod.db import DB
@@ -100,6 +100,17 @@ app.include_router(api_routes.router)
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 if os.path.isdir(static_dir):
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+
+@app.middleware("http")
+async def no_cache_static(request, call_next):
+    """Prevent browser caching of JS/CSS files during development."""
+    response = await call_next(request)
+    if request.url.path.endswith(('.js', '.css')):
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
 
 
 @app.get("/favicon.ico")
@@ -196,7 +207,20 @@ async def _handle_h01_async(rtu_id: int, device_key: tuple, parsed: dict):
     if dev_type == DEVICE_INVERTER:
         await database.save_inverter_data(rtu_id, parsed)
     elif dev_type == DEVICE_PROTECTION_RELAY:
+        # Calculate inverter total AC power for PCC power flow
+        inv_total_w = 0.0
+        rtu_info = engine.rtu_registry.get(rtu_id)
+        if rtu_info:
+            with engine._lock:
+                for dkey, ddata in rtu_info.devices.items():
+                    if isinstance(dkey, tuple) and dkey[0] == DEVICE_INVERTER and not ddata.get('error'):
+                        inv_total_w += ddata.get('ac_power', 0)
+        parsed['inverter_power'] = inv_total_w
+        net_power = parsed.get('total_power', 0)
+        parsed['load_power'] = net_power + inv_total_w  # Load = Grid + Inverter
         await database.save_relay_data(rtu_id, parsed)
+    elif dev_type == DEVICE_WEATHER_STATION:
+        await database.save_weather_data(rtu_id, parsed)
 
     await ws_manager.broadcast({
         'type': 'h01_data',
@@ -208,9 +232,9 @@ async def _handle_h01_async(rtu_id: int, device_key: tuple, parsed: dict):
 
 
 # High-frequency events: log only, skip DB to prevent bloat
-_LOG_ONLY_EVENTS = {"duplicate_dropped", "rate_limited", "heartbeat", "iv_scan_data", "backup_recovery"}
+_LOG_ONLY_EVENTS = {"duplicate_dropped", "rate_limited", "heartbeat", "backup_recovery"}
 # Events that should broadcast to WebSocket but NOT save to event_log DB
-_WS_ONLY_EVENTS = {"h04_response", "H03_SENT", "rtu_info"}
+_WS_ONLY_EVENTS = {"h04_response", "H03_SENT", "rtu_info", "iv_scan_data"}
 
 # Track comm_fail state per device: {(rtu_id, detail): True/False}
 # True = currently in comm_fail state, suppress duplicate logs
@@ -248,6 +272,25 @@ async def _handle_event_async(rtu_id: int, event_type: str, detail: str):
             oldest = next(iter(_comm_fail_state))
             del _comm_fail_state[oldest]
         _comm_fail_state[key] = True
+
+    # Log RTU online event
+    if event_type == "rtu_event" and "PORT OPEN" in detail:
+        rtu_state = engine.rtu_registry.get(rtu_id)
+        ip = f"{rtu_state.ip}:{rtu_state.port}" if rtu_state else ''
+        await database.log_rtu_connection(rtu_id, 'online', ip, detail)
+        # Ensure RTU exists in registry DB
+        existing = await database.get_rtu(rtu_id)
+        if not existing:
+            await database.save_rtu_info(rtu_id, {})
+
+    # Save RTU info to DB when received
+    if event_type == "rtu_info":
+        info_dict = {}
+        for part in detail.split(', '):
+            k, _, v = part.partition('=')
+            if k and v:
+                info_dict[k.strip()] = v.strip()
+        await database.save_rtu_info(rtu_id, info_dict)
 
     # WS-only events: broadcast but don't save to DB (Control tab only)
     if event_type not in _WS_ONLY_EVENTS:
@@ -341,6 +384,7 @@ async def _stale_rtu_checker():
 
             for rtu_id, threshold in stale_ids:
                 await database.set_rtu_offline(rtu_id)
+                await database.log_rtu_connection(rtu_id, 'offline', '', f"No data for {int(threshold)}s")
                 await database.save_event(rtu_id, "rtu_offline",
                     f"No data for {int(threshold)}s")
                 logger.info(f"RTU {rtu_id} marked offline (stale > {int(threshold)}s)")
@@ -425,56 +469,46 @@ _manual_command_ts: dict[tuple, float] = {}    # when last manual command was se
 def _is_periodic_response(rtu_id: int, dev_num: int) -> bool:
     """Determine if a control response should be suppressed (periodic) or shown (manual).
 
-    Logic: compare timestamps of last periodic check vs last manual command.
-    - Manual more recent → show (return False)
-    - Periodic more recent → suppress (return True)
-    - Neither exists → show (return False, safe default)
+    Rule: If a manual command was sent within the last 30 seconds, ALWAYS show.
+    Only suppress if no manual command is active AND periodic check is recent.
     """
     key = (rtu_id, dev_num)
     manual_ts = _manual_command_ts.get(key, 0)
     periodic_ts = _periodic_check_ts.get(key, 0)
     now = time.time()
 
-    # Manual command was sent more recently than periodic check → show
-    if manual_ts > periodic_ts and (now - manual_ts) < 30:
+    # Manual command sent within 30 seconds → ALWAYS show (never suppress)
+    if manual_ts > 0 and (now - manual_ts) < 30:
         return False
 
-    # Periodic check was sent recently → suppress
+    # No recent manual command, but periodic check was recent → suppress
     if periodic_ts > 0 and (now - periodic_ts) < 30:
         return True
 
-    # No recent activity from either → default to show
+    # No recent activity → default to show
     return False
 
 def mark_manual_command(rtu_id: int, dev_num: int):
     """Called by api_routes when a manual H03 command is sent."""
     _manual_command_ts[(rtu_id, dev_num)] = time.time()
 
-async def _periodic_status_check():
-    """Every 30s: send H03(type=13) Status Check to all online RTU inverters.
-    Responses are saved to DB only (no event_log, no WebSocket broadcast)."""
-    await asyncio.sleep(60)  # Initial delay: wait for RTUs to connect
-    while True:
-        try:
-            await asyncio.sleep(30)
-            with engine._lock:
-                rtus = [(rid, s) for rid, s in engine.rtu_registry.items() if s.connected]
-            for rtu_id, state in rtus:
-                for dk in list(state.devices.keys()):
-                    dev_type, dev_num = dk
-                    if dev_type == DEVICE_INVERTER:
-                        _periodic_check_ts[(rtu_id, dev_num)] = time.time()
-                        engine.send_h03(rtu_id, CTRL_INV_CONTROL_CHECK, dev_type, dev_num, 0)
-            # Cleanup stale entries (older than 60s)
-            now = time.time()
-            for d in (_periodic_check_ts, _manual_command_ts):
-                stale = [k for k, v in d.items() if now - v > 60]
-                for k in stale:
-                    del d[k]
-        except asyncio.CancelledError:
-            break
-        except Exception as e:
-            logger.error(f"Periodic status check error: {e}")
+def send_control_check_for_rtu(rtu_id: int):
+    """Called by udp_engine after H01 cycle complete — send H03(13) to each inverter."""
+    with engine._lock:
+        state = engine.rtu_registry.get(rtu_id)
+    if not state or not state.connected:
+        return
+    for dk in list(state.devices.keys()):
+        dev_type, dev_num = dk
+        if dev_type == DEVICE_INVERTER:
+            _periodic_check_ts[(rtu_id, dev_num)] = time.time()
+            engine.send_h03(rtu_id, CTRL_INV_CONTROL_CHECK, dev_type, dev_num, 0)
+    # Cleanup stale entries (older than 120s)
+    now = time.time()
+    for d in (_periodic_check_ts, _manual_command_ts):
+        stale = [k for k, v in d.items() if now - v > 120]
+        for k in stale:
+            del d[k]
 
 
 # ---------------------------------------------------------------------------
@@ -494,6 +528,23 @@ async def startup():
     await database.db.commit()
     await database.save_event(0, "server_start", "Dashboard server started")
     logger.info("Event log cleared on startup")
+
+    # Restore RTU info from DB into engine RTUState (survives server restart)
+    db_rtus = await database.get_rtus()
+    for rtu_db in db_rtus:
+        rid = rtu_db.get('rtu_id')
+        if rid and rtu_db.get('model'):
+            from web_server_prod.udp_engine import RTUState
+            if rid not in engine.rtu_registry:
+                engine.rtu_registry[rid] = RTUState(rtu_id=rid)
+            engine.rtu_registry[rid].rtu_info = {
+                'model': rtu_db.get('model', ''),
+                'phone': rtu_db.get('phone', ''),
+                'serial': rtu_db.get('serial', ''),
+                'firmware': rtu_db.get('firmware', ''),
+            }
+    if db_rtus:
+        logger.info(f"Restored {len(db_rtus)} RTU(s) from DB")
 
     # Get the running event loop for bridging threaded callbacks to async
     loop = asyncio.get_event_loop()
@@ -551,8 +602,8 @@ async def startup():
     _background_tasks.append(asyncio.create_task(_data_retention_task()))
     _background_tasks.append(asyncio.create_task(_wal_checkpoint_task()))
     _background_tasks.append(asyncio.create_task(_downsample_task()))
-    _background_tasks.append(asyncio.create_task(_periodic_status_check()))
-    logger.info("Background tasks started (stale checker, data retention, WAL checkpoint, downsample, status check)")
+    engine.on_h01_cycle_complete = send_control_check_for_rtu
+    logger.info("Background tasks started (stale checker, data retention, WAL checkpoint, downsample)")
 
     # Start built-in FTP server for firmware updates
     global ftp_manager

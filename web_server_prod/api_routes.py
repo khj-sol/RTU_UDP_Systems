@@ -265,7 +265,9 @@ async def delete_rtu(rtu_id: int):
     # Remove from database
     if database:
         try:
-            for table in ('inverter_data', 'relay_data', 'event_log'):
+            for table in ('inverter_data', 'relay_data', 'weather_data',
+                         'event_log', 'control_status', 'control_monitor',
+                         'rtu_connection_log'):
                 await database.db.execute(
                     f"DELETE FROM {table} WHERE rtu_id=?", (rtu_id,))
             await database.db.execute(
@@ -458,9 +460,31 @@ async def get_relay_data(
     return {"data": rows, "count": len(rows)}
 
 
+@router.get("/data/weather")
+async def get_weather_data(
+    rtu_id: Optional[int] = Query(None),
+    device_num: Optional[int] = Query(None),
+    from_ts: Optional[str] = Query(None),
+    to_ts: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=10000),
+):
+    """Query weather station data history."""
+    if not database:
+        raise HTTPException(status_code=503, detail="Database not available")
+    _validate_timestamp(from_ts, "from_ts")
+    _validate_timestamp(to_ts, "to_ts")
+    rows = await database.get_weather_history(rtu_id, device_num, from_ts, to_ts, limit)
+    return {"data": rows, "count": len(rows)}
+
+
 # =========================================================================
 # Control Endpoints
 # =========================================================================
+
+_CONTROL_COMMANDS_NEEDING_CHECK = {
+    CTRL_INV_ON_OFF, CTRL_INV_ACTIVE_POWER, CTRL_INV_POWER_FACTOR,
+    CTRL_INV_REACTIVE_POWER, CTRL_INV_CONTROL_INIT,
+}
 
 async def _send_control(cmd: ControlCommand, ctrl_type: int, dev_type: int = DEVICE_INVERTER):
     """Helper to send an H03 control command."""
@@ -483,6 +507,15 @@ async def _send_control(cmd: ControlCommand, ctrl_type: int, dev_type: int = DEV
             "type": "event", "rtu_id": cmd.rtu_id,
             "event_type": "H03_SENT",
             "detail": f"{ctrl_name} dev={cmd.device_num} val={cmd.value}"})
+
+    # Auto-send control check after control commands to get updated status
+    if ctrl_type in _CONTROL_COMMANDS_NEEDING_CHECK:
+        async def _delayed_check():
+            await asyncio.sleep(2)
+            mark_manual_command(cmd.rtu_id, cmd.device_num)
+            engine.send_h03(cmd.rtu_id, CTRL_INV_CONTROL_CHECK, dev_type, cmd.device_num, 0)
+        asyncio.create_task(_delayed_check())
+
     return {
         "status": "sent",
         "rtu_id": cmd.rtu_id,
@@ -993,11 +1026,12 @@ async def get_events(
     rtu_id: Optional[int] = Query(None),
     limit: int = Query(100, ge=1, le=10000),
     offset: int = Query(0, ge=0),
+    from_ts: Optional[str] = Query(None),
 ):
     """Query the event log."""
     if not database:
         raise HTTPException(status_code=503, detail="Database not available")
-    events = await database.get_events(rtu_id, limit, offset)
+    events = await database.get_events(rtu_id, limit, offset, from_ts=from_ts)
     return {"events": events, "count": len(events)}
 
 

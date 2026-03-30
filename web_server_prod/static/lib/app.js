@@ -328,7 +328,9 @@ function OverviewTab({
     title: r.status
   })), /*#__PURE__*/React.createElement("td", {
     className: "font-mono"
-  }, r.rtu_id), /*#__PURE__*/React.createElement("td", null, r.ip || '--', ":", r.port || '--'), /*#__PURE__*/React.createElement("td", {
+  }, r.rtu_id, " ", r.rtu_type && /*#__PURE__*/React.createElement("span", {
+    className: `ml-1 text-xs px-1.5 py-0.5 rounded ${r.rtu_type === 'RIP' ? 'bg-purple-600' : 'bg-teal-600'}`
+  }, r.rtu_type)), /*#__PURE__*/React.createElement("td", null, r.ip || '--', ":", r.port || '--'), /*#__PURE__*/React.createElement("td", {
     className: "text-center text-gray-400"
   }, r.avg_interval > 0 ? Math.round(r.avg_interval / 60) + '\uBD84' : '-'), /*#__PURE__*/React.createElement("td", null, fmtTime(r.last_seen)), /*#__PURE__*/React.createElement("td", null, r.device_count || 0), /*#__PURE__*/React.createElement("td", null, fmt((r.total_solar_power || 0) / 1000, 2), " kW"), /*#__PURE__*/React.createElement("td", {
     className: "text-center"
@@ -449,13 +451,13 @@ function RelayCard({
     className: "text-gray-400"
   }, "T I:"), " ", fmt(d.t_current), " A"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
     className: "text-gray-400"
-  }, "R P:"), " ", fmt(d.r_power), " W"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+  }, "R P:"), " ", fmt((d.r_power || 0) / 1000, 2), " kW"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
     className: "text-gray-400"
-  }, "S P:"), " ", fmt(d.s_power), " W"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+  }, "S P:"), " ", fmt((d.s_power || 0) / 1000, 2), " kW"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
     className: "text-gray-400"
-  }, "T P:"), " ", fmt(d.t_power), " W"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+  }, "T P:"), " ", fmt((d.t_power || 0) / 1000, 2), " kW"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
     className: "text-gray-400"
-  }, "Total P:"), " ", fmt(d.total_power), " W"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+  }, "Total P:"), " ", fmt((d.total_power || 0) / 1000, 2), " kW"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
     className: "text-gray-400"
   }, "PF:"), " ", fmt(d.power_factor, 3)), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
     className: "text-gray-400"
@@ -517,7 +519,8 @@ function WeatherCard({
 function DevicesTab({
   selectedRtu,
   rtus,
-  wsUpdateCounter
+  wsUpdateCounter,
+  onRtuChange
 }) {
   const [rtuId, setRtuId] = useState(selectedRtu || '');
   const [devices, setDevices] = useState([]);
@@ -549,7 +552,7 @@ function DevicesTab({
   }, /*#__PURE__*/React.createElement("select", {
     className: "bg-gray-700 text-white rounded px-3 py-2",
     value: rtuId,
-    onChange: e => setRtuId(e.target.value)
+    onChange: e => { setRtuId(e.target.value); onRtuChange && onRtuChange(e.target.value); }
   }, /*#__PURE__*/React.createElement("option", {
     value: ""
   }, "-- Select RTU --"), rtus.map(r => /*#__PURE__*/React.createElement("option", {
@@ -587,7 +590,8 @@ function DevicesTab({
 function ControlTab({
   rtus,
   selectedRtu,
-  wsEvents = []
+  wsEvents = [],
+  onRtuChange
 }) {
   const [rtuId, setRtuId] = useState(selectedRtu || '');
   useEffect(() => {
@@ -715,7 +719,7 @@ function ControlTab({
         if (String(e.rtu_id) === rtuId && RESPONSE_LOG_TYPES.has(e.event_type)) {
           // Deduplicate: skip if same type+detail within 2 seconds
           // Control responses (control_check, control_result, h04_response) are never deduped
-          const NO_DEDUP = new Set(['control_check', 'control_result', 'h04_response', 'H03_SENT']);
+          const NO_DEDUP = new Set(['control_check', 'control_result', 'h04_response', 'H03_SENT', 'iv_scan_data', 'iv_scan_success', 'iv_scan_complete']);
           if (!NO_DEDUP.has(e.event_type)) {
             const dedupKey = `${e.event_type}:${e.detail}`;
             const now = Date.now();
@@ -977,6 +981,7 @@ function ControlTab({
     value: rtuId,
     onChange: e => {
       setRtuId(e.target.value);
+      onRtuChange && onRtuChange(e.target.value);
       setDeviceNum('');
       setSelectedDevs(new Set());
     }
@@ -1166,7 +1171,8 @@ function ControlTab({
 // ==== HISTORY TAB ====
 function HistoryTab({
   rtus,
-  selectedRtu
+  selectedRtu,
+  onRtuChange
 }) {
   const [rtuId, setRtuId] = useState(selectedRtu || '');
   useEffect(() => {
@@ -1177,6 +1183,7 @@ function HistoryTab({
   const [deviceType, setDeviceType] = useState('inverter');
   const [limit, setLimit] = useState(100);
   const [data, setData] = useState([]);
+  const [clearTs, setClearTs] = useState(() => sessionStorage.getItem('history_clear_ts') || '');
   useEffect(() => {
     if (!rtuId) return;
     const pd = d => {
@@ -1192,40 +1199,70 @@ function HistoryTab({
       setDevices(devs);
       if (devs.length > 0 && !deviceNum) {
         setDeviceNum(String(devs[0].device_number));
-        setDeviceType(devs[0].device_type === 1 ? 'inverter' : 'relay');
+        setDeviceType(devs[0].device_type === 1 ? 'inverter' : devs[0].device_type === 5 ? 'weather' : 'relay');
       }
     }).catch(() => {});
   }, [rtuId]);
   const loadData = () => {
     if (!rtuId || !deviceNum) return;
-    fetcher(`/data/${deviceType}?rtu_id=${rtuId}&device_num=${deviceNum}&limit=${limit}`).then(d => setData(Array.isArray(d?.data) ? d.data : Array.isArray(d) ? d : [])).catch(() => setData([]));
+    const fromParam = clearTs ? `&from_ts=${encodeURIComponent(clearTs)}` : '';
+    fetcher(`/data/${deviceType}?rtu_id=${rtuId}&device_num=${deviceNum}&limit=${limit}${fromParam}`).then(d => setData(Array.isArray(d?.data) ? d.data : Array.isArray(d) ? d : [])).catch(() => setData([]));
   };
   useEffect(() => {
     loadData();
-  }, [rtuId, deviceNum, deviceType, limit]);
+  }, [rtuId, deviceNum, deviceType, limit, clearTs]);
   const rev = useMemo(() => data.slice().reverse(), [data]);
   const powerSeries = useMemo(() => deviceType === 'inverter' ? [{
     name: 'PV Power',
     color: '#F59E0B',
     data: rev.map(d => ({
       time: d.timestamp,
-      value: d.pv_power || 0
+      value: (d.pv_power || 0) / 1000
     }))
   }, {
     name: 'AC Power',
     color: '#3B82F6',
     data: rev.map(d => ({
       time: d.timestamp,
-      value: d.ac_power || 0
+      value: (d.ac_power || 0) / 1000
     }))
-  }] : [{
-    name: 'Total Power',
+  }] : deviceType === 'relay' ? [{
+    name: 'Inverter',
+    color: '#F59E0B',
+    data: rev.map(d => ({
+      time: d.timestamp,
+      value: (d.inverter_power || 0) / 1000
+    }))
+  }, {
+    name: 'Load',
+    color: '#10B981',
+    data: rev.map(d => ({
+      time: d.timestamp,
+      value: (d.load_power || 0) / 1000
+    }))
+  }, {
+    name: 'Grid',
     color: '#3B82F6',
     data: rev.map(d => ({
       time: d.timestamp,
-      value: d.total_power || 0
+      value: (d.total_power || 0) / 1000
     }))
-  }], [rev, deviceType]);
+  }] : [], [rev, deviceType]);
+  const relayEnergySeries = useMemo(() => deviceType === 'relay' ? [{
+    name: 'Import (+WH)',
+    color: '#10B981',
+    data: rev.map(d => ({
+      time: d.timestamp,
+      value: (d.received_energy || 0) / 1000
+    }))
+  }, {
+    name: 'Export (-WH)',
+    color: '#EF4444',
+    data: rev.map(d => ({
+      time: d.timestamp,
+      value: (d.sent_energy || 0) / 1000
+    }))
+  }] : [], [rev, deviceType]);
   const voltageSeries = useMemo(() => deviceType === 'inverter' ? [{
     name: 'R Voltage',
     color: '#EF4444',
@@ -1278,6 +1315,28 @@ function HistoryTab({
       value: (d.cumulative_energy || 0) / 1000
     }))
   }] : [], [rev, deviceType]);
+  const radiationSeries = useMemo(() => deviceType === 'weather' ? [{
+    name: 'Horizontal',
+    color: '#F59E0B',
+    data: rev.map(d => ({ time: d.timestamp, value: d.horizontal_radiation || 0 }))
+  }, {
+    name: 'Inclined',
+    color: '#EF4444',
+    data: rev.map(d => ({ time: d.timestamp, value: d.inclined_radiation || 0 }))
+  }] : [], [rev, deviceType]);
+  const tempSeries = useMemo(() => deviceType === 'weather' ? [{
+    name: 'Air Temp',
+    color: '#3B82F6',
+    data: rev.map(d => ({ time: d.timestamp, value: d.air_temp || 0 }))
+  }, {
+    name: 'Module 1',
+    color: '#EF4444',
+    data: rev.map(d => ({ time: d.timestamp, value: d.module_temp_1 || 0 }))
+  }, {
+    name: 'Module 2',
+    color: '#10B981',
+    data: rev.map(d => ({ time: d.timestamp, value: d.module_temp_2 || 0 }))
+  }] : [], [rev, deviceType]);
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "flex gap-4 mb-4 flex-wrap items-end"
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
@@ -1287,6 +1346,7 @@ function HistoryTab({
     value: rtuId,
     onChange: e => {
       setRtuId(e.target.value);
+      onRtuChange && onRtuChange(e.target.value);
       setDeviceNum('');
     }
   }, /*#__PURE__*/React.createElement("option", {
@@ -1302,14 +1362,14 @@ function HistoryTab({
     onChange: e => {
       setDeviceNum(e.target.value);
       const dev = devices.find(d => String(d.device_number) === e.target.value);
-      if (dev) setDeviceType(dev.device_type === 1 || dev.device_type === 'inverter' ? 'inverter' : 'relay');
+      if (dev) setDeviceType(dev.device_type === 1 || dev.device_type === 'inverter' ? 'inverter' : dev.device_type === 5 ? 'weather' : 'relay');
     }
   }, /*#__PURE__*/React.createElement("option", {
     value: ""
   }, "-- Device --"), devices.map(d => /*#__PURE__*/React.createElement("option", {
     key: d.device_number,
     value: d.device_number
-  }, "#", d.device_number, " (", d.device_type === 1 ? MODEL_NAMES[d.model] || 'Inverter' : 'Relay', ")")))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+  }, "#", d.device_number, " (", d.device_type === 1 ? MODEL_NAMES[d.model] || 'Inverter' : d.device_type === 5 ? 'Weather' : 'Relay', ")")))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
     className: "text-gray-400 text-xs block mb-1"
   }, "Limit"), /*#__PURE__*/React.createElement("select", {
     className: "bg-gray-700 rounded px-3 py-2",
@@ -1321,12 +1381,25 @@ function HistoryTab({
   }, n)))), /*#__PURE__*/React.createElement("button", {
     onClick: loadData,
     className: "bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded"
-  }, "Refresh")), rev.length > 1 && /*#__PURE__*/React.createElement("div", {
+  }, "Refresh"), data.length > 0 && /*#__PURE__*/React.createElement("button", {
+    onClick: () => { const now = new Date(); const kst = new Date(now.getTime() + 9*60*60*1000); const ts = kst.toISOString().replace('T',' ').substring(0,19); sessionStorage.setItem('history_clear_ts', ts); setClearTs(ts); setData([]); },
+    className: "bg-red-600 hover:bg-red-500 px-4 py-2 rounded text-sm"
+  }, "Clear")), rev.length > 1 && /*#__PURE__*/React.createElement("div", {
     className: "grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4"
   }, /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("div", {
     className: "text-gray-400 text-sm mb-1"
-  }, "Power (W)"), /*#__PURE__*/React.createElement(MultiLineChart, {
-    series: powerSeries,
+  }, deviceType === 'weather' ? "Radiation (W/m\u00B2)" : deviceType === 'inverter' ? "Power (kW)" : "Power Flow (kW)"), /*#__PURE__*/React.createElement(MultiLineChart, {
+    series: deviceType === 'weather' ? radiationSeries : powerSeries,
+    height: 220
+  })), deviceType === 'weather' ? /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("div", {
+    className: "text-gray-400 text-sm mb-1"
+  }, "Temperature (\u00B0C)"), /*#__PURE__*/React.createElement(MultiLineChart, {
+    series: tempSeries,
+    height: 220
+  })) : null, relayEnergySeries.length > 0 && /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("div", {
+    className: "text-gray-400 text-sm mb-1"
+  }, "Energy (kWh)"), /*#__PURE__*/React.createElement(MultiLineChart, {
+    series: relayEnergySeries,
     height: 220
   })), voltageSeries.length > 0 && /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("div", {
     className: "text-gray-400 text-sm mb-1"
@@ -1353,37 +1426,67 @@ function HistoryTab({
     className: "py-1 text-left"
   }, "Time"), deviceType === 'inverter' ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("th", {
     className: "text-right"
-  }, "PV V"), /*#__PURE__*/React.createElement("th", {
+  }, "PV V (V)"), /*#__PURE__*/React.createElement("th", {
     className: "text-right"
-  }, "PV I"), /*#__PURE__*/React.createElement("th", {
+  }, "PV I (A)"), /*#__PURE__*/React.createElement("th", {
     className: "text-right"
-  }, "PV P"), /*#__PURE__*/React.createElement("th", {
+  }, "PV P (kW)"), /*#__PURE__*/React.createElement("th", {
     className: "text-right"
-  }, "AC R/S/T V"), /*#__PURE__*/React.createElement("th", {
+  }, "AC R/S/T (V)"), /*#__PURE__*/React.createElement("th", {
     className: "text-right"
-  }, "AC R/S/T I"), /*#__PURE__*/React.createElement("th", {
+  }, "AC R/S/T (A)"), /*#__PURE__*/React.createElement("th", {
     className: "text-right"
-  }, "AC P"), /*#__PURE__*/React.createElement("th", {
-    className: "text-right"
-  }, "PF"), /*#__PURE__*/React.createElement("th", {
-    className: "text-right"
-  }, "Freq"), /*#__PURE__*/React.createElement("th", {
-    className: "text-right"
-  }, "Energy"), /*#__PURE__*/React.createElement("th", {
-    className: "text-right"
-  }, "Status")) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("th", {
-    className: "text-right"
-  }, "R V"), /*#__PURE__*/React.createElement("th", {
-    className: "text-right"
-  }, "S V"), /*#__PURE__*/React.createElement("th", {
-    className: "text-right"
-  }, "T V"), /*#__PURE__*/React.createElement("th", {
-    className: "text-right"
-  }, "Total P"), /*#__PURE__*/React.createElement("th", {
+  }, "AC P (kW)"), /*#__PURE__*/React.createElement("th", {
     className: "text-right"
   }, "PF"), /*#__PURE__*/React.createElement("th", {
     className: "text-right"
-  }, "Freq")))), /*#__PURE__*/React.createElement("tbody", null, data.slice(0, 200).map((d, i) => /*#__PURE__*/React.createElement("tr", {
+  }, "Freq (Hz)"), /*#__PURE__*/React.createElement("th", {
+    className: "text-right"
+  }, "Energy (kWh)"), /*#__PURE__*/React.createElement("th", {
+    className: "text-right"
+  }, "Status")) : deviceType === 'weather' ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("th", {
+    className: "text-right"
+  }, "Temp(\u00B0C)"), /*#__PURE__*/React.createElement("th", {
+    className: "text-right"
+  }, "Hum(%)"), /*#__PURE__*/React.createElement("th", {
+    className: "text-right"
+  }, "Press(hPa)"), /*#__PURE__*/React.createElement("th", {
+    className: "text-right"
+  }, "Wind(m/s)"), /*#__PURE__*/React.createElement("th", {
+    className: "text-right"
+  }, "Dir(\u00B0)"), /*#__PURE__*/React.createElement("th", {
+    className: "text-right"
+  }, "H.Rad(W/m\u00B2)"), /*#__PURE__*/React.createElement("th", {
+    className: "text-right"
+  }, "I.Rad(W/m\u00B2)"), /*#__PURE__*/React.createElement("th", {
+    className: "text-right"
+  }, "Mod1(\u00B0C)"), /*#__PURE__*/React.createElement("th", {
+    className: "text-right"
+  }, "Mod2(\u00B0C)")) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("th", {
+    className: "text-right"
+  }, "R (V)"), /*#__PURE__*/React.createElement("th", {
+    className: "text-right"
+  }, "S (V)"), /*#__PURE__*/React.createElement("th", {
+    className: "text-right"
+  }, "T (V)"), /*#__PURE__*/React.createElement("th", {
+    className: "text-right"
+  }, "Grid (kW)"), /*#__PURE__*/React.createElement("th", {
+    className: "text-right"
+  }, "INV (kW)"), /*#__PURE__*/React.createElement("th", {
+    className: "text-right"
+  }, "Load (kW)"), /*#__PURE__*/React.createElement("th", {
+    className: "text-right"
+  }, "PF"), /*#__PURE__*/React.createElement("th", {
+    className: "text-right"
+  }, "Freq (Hz)"), /*#__PURE__*/React.createElement("th", {
+    className: "text-right"
+  }, "Import (kWh)"), /*#__PURE__*/React.createElement("th", {
+    className: "text-right"
+  }, "Export (kWh)"), /*#__PURE__*/React.createElement("th", {
+    className: "text-right"
+  }, "DO"), /*#__PURE__*/React.createElement("th", {
+    className: "text-right"
+  }, "DI")))), /*#__PURE__*/React.createElement("tbody", null, data.slice(0, 200).map((d, i) => /*#__PURE__*/React.createElement("tr", {
     key: i,
     className: "border-b border-gray-700/30 hover:bg-gray-800/50"
   }, /*#__PURE__*/React.createElement("td", {
@@ -1392,15 +1495,15 @@ function HistoryTab({
     className: "text-right"
   }, fmt(d.pv_voltage)), /*#__PURE__*/React.createElement("td", {
     className: "text-right"
-  }, fmt(d.pv_current)), /*#__PURE__*/React.createElement("td", {
+  }, fmt((d.pv_current || 0) / 10, 1)), /*#__PURE__*/React.createElement("td", {
     className: "text-right"
-  }, fmt(d.pv_power)), /*#__PURE__*/React.createElement("td", {
+  }, fmt((d.pv_power || 0) / 1000, 2)), /*#__PURE__*/React.createElement("td", {
     className: "text-right text-xs"
   }, fmt(d.r_voltage), "/", fmt(d.s_voltage), "/", fmt(d.t_voltage)), /*#__PURE__*/React.createElement("td", {
     className: "text-right text-xs"
   }, fmt((d.r_current || 0) / 10, 1), "/", fmt((d.s_current || 0) / 10, 1), "/", fmt((d.t_current || 0) / 10, 1)), /*#__PURE__*/React.createElement("td", {
     className: "text-right font-medium"
-  }, fmt(d.ac_power)), /*#__PURE__*/React.createElement("td", {
+  }, fmt((d.ac_power || 0) / 1000, 2)), /*#__PURE__*/React.createElement("td", {
     className: "text-right"
   }, fmt(d.power_factor, 3)), /*#__PURE__*/React.createElement("td", {
     className: "text-right"
@@ -1408,7 +1511,25 @@ function HistoryTab({
     className: "text-right"
   }, fmt((d.cumulative_energy || 0) / 1000, 1)), /*#__PURE__*/React.createElement("td", {
     className: `text-right ${d.status === 3 ? 'text-green-400' : d.status === 5 ? 'text-red-400' : 'text-yellow-400'}`
-  }, INVERTER_STATUS[d.status] || d.status)) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("td", {
+  }, INVERTER_STATUS[d.status] || d.status)) : deviceType === 'weather' ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("td", {
+    className: "text-right"
+  }, fmt(d.air_temp, 1)), /*#__PURE__*/React.createElement("td", {
+    className: "text-right"
+  }, fmt(d.humidity, 1)), /*#__PURE__*/React.createElement("td", {
+    className: "text-right"
+  }, fmt(d.air_pressure, 1)), /*#__PURE__*/React.createElement("td", {
+    className: "text-right"
+  }, fmt(d.wind_speed, 1)), /*#__PURE__*/React.createElement("td", {
+    className: "text-right"
+  }, fmt(d.wind_direction, 0)), /*#__PURE__*/React.createElement("td", {
+    className: "text-right font-medium"
+  }, fmt(d.horizontal_radiation, 0)), /*#__PURE__*/React.createElement("td", {
+    className: "text-right font-medium"
+  }, fmt(d.inclined_radiation, 0)), /*#__PURE__*/React.createElement("td", {
+    className: "text-right"
+  }, fmt(d.module_temp_1, 1)), /*#__PURE__*/React.createElement("td", {
+    className: "text-right"
+  }, fmt(d.module_temp_2, 1))) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("td", {
     className: "text-right"
   }, fmt(d.r_voltage)), /*#__PURE__*/React.createElement("td", {
     className: "text-right"
@@ -1416,11 +1537,23 @@ function HistoryTab({
     className: "text-right"
   }, fmt(d.t_voltage)), /*#__PURE__*/React.createElement("td", {
     className: "text-right font-medium"
-  }, fmt(d.total_power)), /*#__PURE__*/React.createElement("td", {
+  }, fmt((d.total_power || 0) / 1000, 2)), /*#__PURE__*/React.createElement("td", {
+    className: "text-right text-yellow-400"
+  }, fmt((d.inverter_power || 0) / 1000, 2)), /*#__PURE__*/React.createElement("td", {
+    className: "text-right text-green-400"
+  }, fmt((d.load_power || 0) / 1000, 2)), /*#__PURE__*/React.createElement("td", {
     className: "text-right"
   }, fmt(d.power_factor, 3)), /*#__PURE__*/React.createElement("td", {
     className: "text-right"
-  }, fmt(d.frequency))))))), data.length === 0 && /*#__PURE__*/React.createElement("div", {
+  }, fmt(d.frequency)), /*#__PURE__*/React.createElement("td", {
+    className: "text-right"
+  }, fmt((d.received_energy || 0) / 1000, 1)), /*#__PURE__*/React.createElement("td", {
+    className: "text-right"
+  }, fmt((d.sent_energy || 0) / 1000, 1)), /*#__PURE__*/React.createElement("td", {
+    className: "text-right text-xs"
+  }, `0x${((d.do_status || 0) & 0xFFFF).toString(16).toUpperCase().padStart(4, '0')}`), /*#__PURE__*/React.createElement("td", {
+    className: "text-right text-xs"
+  }, `0x${((d.di_status || 0) & 0xFFFF).toString(16).toUpperCase().padStart(4, '0')}`)))))), data.length === 0 && /*#__PURE__*/React.createElement("div", {
     className: "text-gray-500 text-center py-4"
   }, "No data"))));
 }
@@ -1431,11 +1564,13 @@ function EventsTab({
 }) {
   const [events, setEvents] = useState([]);
   const [filter, setFilter] = useState('');
+  const [clearTs, setClearTs] = useState(() => sessionStorage.getItem('events_clear_ts') || '');
   const scrollRef = useRef(null);
   useEffect(() => {
     const parseEv = d => Array.isArray(d?.events) ? d.events : Array.isArray(d) ? d : [];
-    fetcher('/events?limit=200').then(d => setEvents(parseEv(d))).catch(() => {});
-  }, [wsUpdateCounter]);
+    const fromParam = clearTs ? `&from_ts=${encodeURIComponent(clearTs)}` : '';
+    fetcher(`/events?limit=200${fromParam}`).then(d => setEvents(parseEv(d))).catch(() => {});
+  }, [wsUpdateCounter, clearTs]);
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = 0;
   }, [events]);
@@ -1448,7 +1583,7 @@ function EventsTab({
     value: filter,
     onChange: e => setFilter(e.target.value)
   }), /*#__PURE__*/React.createElement("button", {
-    onClick: () => setEvents([]),
+    onClick: () => { const now = new Date(); const kst = new Date(now.getTime() + 9*60*60*1000); const ts = kst.toISOString().replace('T',' ').substring(0,19); sessionStorage.setItem('events_clear_ts', ts); setClearTs(ts); setEvents([]); },
     className: "px-4 py-2 rounded text-sm font-medium bg-red-700 hover:bg-red-600"
   }, "Clear")), /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("div", {
     ref: scrollRef,
@@ -1624,6 +1759,9 @@ function ConfigTab({
   useEffect(() => {
     localStorage.setItem('rtu_config_local_mode', String(localMode));
   }, [localMode]);
+
+  // Auto-load files on tab entry
+  useEffect(() => { loadFiles(); }, []);
 
   // Open Files: 항상 PC 로컬 파일 읽기 (SSH 불필요)
   const loadFiles = async () => {
@@ -2072,11 +2210,17 @@ function App() {
     className: "bg-gray-800/50 border-b border-gray-700"
   }, /*#__PURE__*/React.createElement("div", {
     className: "max-w-7xl mx-auto flex gap-1 px-4 overflow-x-auto"
-  }, TABS.map(t => /*#__PURE__*/React.createElement("button", {
-    key: t,
-    onClick: () => setTab(t),
-    className: `px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${tab === t ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500'}`
-  }, t)))), /*#__PURE__*/React.createElement("main", {
+  }, (() => {
+    const selRtuObj = rtus.find(r => String(r.rtu_id) === String(selectedRtu));
+    const isRIP = selRtuObj && selRtuObj.rtu_type === 'RIP';
+    const disabledTabs = isRIP ? ['Firmware', 'Config'] : [];
+    return TABS.map(t => /*#__PURE__*/React.createElement("button", {
+      key: t,
+      onClick: () => { if (!disabledTabs.includes(t)) setTab(t); },
+      className: `px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${disabledTabs.includes(t) ? 'border-transparent text-gray-600 cursor-not-allowed' : tab === t ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500'}`,
+      title: disabledTabs.includes(t) ? 'RI Power RTU는 지원하지 않습니다' : ''
+    }, t));
+  })())), /*#__PURE__*/React.createElement("main", {
     className: "max-w-7xl mx-auto p-4"
   }, tab === 'Overview' && /*#__PURE__*/React.createElement(OverviewTab, {
     rtus: rtus,
@@ -2084,14 +2228,17 @@ function App() {
   }), tab === 'Devices' && /*#__PURE__*/React.createElement(DevicesTab, {
     selectedRtu: selectedRtu,
     rtus: rtus,
-    wsUpdateCounter: wsUpdateCounter
+    wsUpdateCounter: wsUpdateCounter,
+    onRtuChange: id => setSelectedRtu(String(id))
   }), tab === 'Control' && /*#__PURE__*/React.createElement(ControlTab, {
     rtus: rtus,
     selectedRtu: selectedRtu,
-    wsEvents: wsEvents
+    wsEvents: wsEvents,
+    onRtuChange: id => setSelectedRtu(String(id))
   }), tab === 'History' && /*#__PURE__*/React.createElement(HistoryTab, {
     rtus: rtus,
-    selectedRtu: selectedRtu
+    selectedRtu: selectedRtu,
+    onRtuChange: id => setSelectedRtu(String(id))
   }), tab === 'Events' && /*#__PURE__*/React.createElement(EventsTab, {
     wsUpdateCounter: wsUpdateCounter
   }), tab === 'Firmware' && /*#__PURE__*/React.createElement(FirmwareTab, {
