@@ -355,6 +355,16 @@ function InverterCard({
 }) {
   const d = dev.data || dev || {};
   const m = d.model || dev.model || 1;
+  // Monitor 값이 있으면 AC 데이터를 Monitor로 오버라이드
+  const acI_r = d.mon ? fmt(d.mon.current_r, 1) : fmt((d.r_current || 0) / 10, 1);
+  const acI_s = d.mon ? fmt(d.mon.current_s, 1) : fmt((d.s_current || 0) / 10, 1);
+  const acI_t = d.mon ? fmt(d.mon.current_t, 1) : fmt((d.t_current || 0) / 10, 1);
+  const acV_r = d.mon ? fmt(d.mon.voltage_rs, 1) : fmt(d.r_voltage);
+  const acV_s = d.mon ? fmt(d.mon.voltage_st, 1) : fmt(d.s_voltage);
+  const acV_t = d.mon ? fmt(d.mon.voltage_tr, 1) : fmt(d.t_voltage);
+  const acPower = d.mon ? fmt(d.mon.active_power_kw, 2) : fmt((d.ac_power || 0) / 1000, 2);
+  const acPF = d.mon ? fmt(d.mon.power_factor, 3) : fmt(d.power_factor, 3);
+  const acFreq = d.mon ? fmt(d.mon.frequency, 1) : fmt(d.frequency);
   return /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("div", {
     className: "flex justify-between items-center mb-3"
   }, /*#__PURE__*/React.createElement("span", {
@@ -370,6 +380,15 @@ function InverterCard({
   }) : /*#__PURE__*/React.createElement(Badge, {
     text: INVERTER_STATUS[d.status] || 'Unknown',
     color: INV_STATUS_COLOR[d.status] || 'bg-gray-600'
+  }), d.ctrl && d.ctrl.active_power_pct > 0 && d.ctrl.active_power_pct < 1000 && /*#__PURE__*/React.createElement(Badge, {
+    text: `P${fmt((d.ctrl.active_power_pct || 0) / 10, 0)}%`,
+    color: 'bg-orange-600'
+  }), d.ctrl && d.ctrl.power_factor > 0 && d.ctrl.power_factor < 1000 && /*#__PURE__*/React.createElement(Badge, {
+    text: `PF${fmt((d.ctrl.power_factor || 0) / 1000, 2)}`,
+    color: 'bg-cyan-600'
+  }), d.ctrl && d.ctrl.reactive_power_pct > 0 && /*#__PURE__*/React.createElement(Badge, {
+    text: `Q${fmt((d.ctrl.reactive_power_pct || 0) / 10, 0)}%`,
+    color: 'bg-purple-600'
   }))), /*#__PURE__*/React.createElement("div", {
     className: "grid grid-cols-3 gap-2 text-xs"
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
@@ -380,23 +399,23 @@ function InverterCard({
     className: "text-gray-400"
   }, "PV P:"), " ", fmt((d.pv_power || 0) / 1000, 2), " kW"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
     className: "text-gray-400"
-  }, "AC R V:"), " ", fmt(d.r_voltage), " V"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+  }, "AC R V:"), " ", acV_r, " V"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
     className: "text-gray-400"
-  }, "AC S V:"), " ", fmt(d.s_voltage), " V"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+  }, "AC S V:"), " ", acV_s, " V"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
     className: "text-gray-400"
-  }, "AC T V:"), " ", fmt(d.t_voltage), " V"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+  }, "AC T V:"), " ", acV_t, " V"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
     className: "text-gray-400"
-  }, "AC R I:"), " ", fmt((d.r_current || 0) / 10, 1), " A"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+  }, "AC R I:"), " ", acI_r, " A"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
     className: "text-gray-400"
-  }, "AC S I:"), " ", fmt((d.s_current || 0) / 10, 1), " A"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+  }, "AC S I:"), " ", acI_s, " A"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
     className: "text-gray-400"
-  }, "AC T I:"), " ", fmt((d.t_current || 0) / 10, 1), " A"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+  }, "AC T I:"), " ", acI_t, " A"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
     className: "text-gray-400"
-  }, "AC Power:"), " ", fmt((d.ac_power || 0) / 1000, 2), " kW"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+  }, "AC Power:"), " ", acPower, " kW"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
     className: "text-gray-400"
-  }, "PF:"), " ", fmt(d.power_factor, 3)), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+  }, "PF:"), " ", acPF), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
     className: "text-gray-400"
-  }, "Freq:"), " ", fmt(d.frequency), " Hz"), /*#__PURE__*/React.createElement("div", {
+  }, "Freq:"), " ", acFreq, " Hz"), /*#__PURE__*/React.createElement("div", {
     className: "col-span-3"
   }, /*#__PURE__*/React.createElement("span", {
     className: "text-gray-400"
