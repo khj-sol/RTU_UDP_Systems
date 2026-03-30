@@ -112,19 +112,19 @@
     "KDU300RegisterMap"
   ],
   [
-    "Inverter",
-    "6",
-    "Inverter",
-    "senergy_registers.py",
-    "senergy",
-    "RegisterMap"
-  ],
-  [
     "Weather",
     "2",
     "weather",
     "weather_registers.py",
     "weather",
     "SEM5046RegisterMap"
+  ],
+  [
+    "Inverter",
+    "6",
+    "Senergy",
+    "senergy_registers.py",
+    "senergy",
+    "RegisterMap"
   ]
 ]
