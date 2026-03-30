@@ -251,9 +251,17 @@ def _parse_register_tables(pages_text, full_text):
                 section = current_section
             # 다음 줄들에서 definition, address, regs, type 등 수집
             reg = _collect_register_entry(all_lines, i, index, section)
-            if reg and reg.get('address'):
-                # 메타데이터/목차 항목 필터링
+            if reg and reg.get('address') is not None:
                 defn = reg.get('definition', '').lower()
+                addr_val = reg.get('address', 0)
+                # Skip noise: range values as definitions, invalid addresses
+                if re.match(r'^\[[\d,\s\.\-]+\]', defn):
+                    i += 1; continue
+                if addr_val > 65535 or addr_val < 0:
+                    i += 1; continue
+                # Skip empty definitions (likely page numbers or noise)
+                if not defn or len(defn) < 2:
+                    i += 1; continue
                 _skip_defs = [
                     'function code', 'appendix', 'rems register',
                     'error code table', 'table of contents',
@@ -265,8 +273,6 @@ def _parse_register_tables(pages_text, full_text):
                 ]
                 sect = reg.get('section', '').lower()
                 _skip_sections = ['rems register']
-                # DER-AVM Parameters 섹션에서 낮은 주소(< 0x0100)는 프로토콜 설명
-                addr_val = reg.get('address', 0)
                 is_protocol_desc = ('der-avm' in sect and addr_val < 0x0100)
                 if (not any(sd in defn for sd in _skip_defs)
                         and not any(ss in sect for ss in _skip_sections)
@@ -282,6 +288,7 @@ def _collect_register_entry(lines, start_idx, index, section):
     """
     Index 줄 이후의 연속 줄들에서 레지스터 정보를 수집.
     PDF 테이블은 각 셀이 별도 줄로 나오는 경우가 많다.
+    Supports both index-first (Solarize) and address-first (Goodwe) formats.
     """
     reg = {
         'index': index,
@@ -294,45 +301,55 @@ def _collect_register_entry(lines, start_idx, index, section):
         'unit': '',
         'rw': 'RO',
         'comment': '',
+        'scale_factor': '',
     }
 
-    # Index 다음 줄부터 탐색 (최대 15줄)
+    _TYPE_SET = {'U16', 'S16', 'U32', 'S32', 'U8', 'S8', 'STR', 'STRING', 'FLOAT', 'FLOAT32'}
+    _RW_SET = {'RO', 'RW', 'WO'}
+    _UNIT_SET = {'V', 'A', 'W', 'kW', 'kWh', 'KWH', 'Wh', 'Hz', '%', 'Var', 'VA',
+                 'NA', 'N/A', 'Hr', 's', 'degC', 'degree C', 'mA', '1mA'}
+    _SKIP_RE = [
+        re.compile(p, re.IGNORECASE) for p in [
+            r'^Project\s+No', r'^MODBUS', r'^Security', r'^Confidential',
+            r'^\d+\s*/\s*\d+$', r'^APD\s+CONF',
+            r'^Index$', r'^Definition$', r'^Address$', r'^Register$',
+            r'^Number$', r'^Type$', r'^Comment$', r'^R/W$', r'^Unit$',
+            r'^#$', r'^SF\s+Gain', r'^Length', r'^Range$', r'^Note:?\s*$',
+        ]]
+
+    # Collect raw lines after the index/address line
     collected = []
     j = start_idx + 1
     limit = min(j + 15, len(lines))
     while j < limit:
         ln = lines[j].strip()
-        # 다른 index/address 시작이면 중단
+        if not ln:
+            j += 1
+            continue
+        # Stop: next register address/index
         next_num = re.match(r'^(\d{1,5})\s*$', ln)
         if next_num and int(next_num.group(1)) != index:
             break
-        # 섹션 헤더면 중단
+        # Stop: section headers
         if any(re.search(p, ln, re.IGNORECASE)
                for p, _ in [
-                   (r'Device\s+information', ''),
-                   (r'Inverter\s+real\s*time', ''),
-                   (r'DEA-AVM', ''),
-                   (r'DER-AVM', ''),
-                   (r'Inverter\s+param', ''),
+                   (r'Device\s+information', ''), (r'Inverter\s+real\s*time', ''),
+                   (r'DEA-AVM', ''), (r'DER-AVM', ''), (r'Inverter\s+param', ''),
+                   (r'Register\s+Address', ''),
+                   (r'The following registers', ''), (r'Address\s+\d+-\d+\s+for', ''),
                ]):
             break
-        # 헤더/푸터 스킵
-        skip = False
-        for sp in [r'^Project\s+No', r'^NA$', r'^MODBUS', r'^Security',
-                    r'^Confidential', r'^\d+\s*/\s*\d+', r'^APD\s+CONF',
-                    r'^Index$', r'^Definition$', r'^Address$', r'^Register$',
-                    r'^Number$', r'^Type$', r'^Comment$', r'^R/W$', r'^Unit$']:
-            if re.match(sp, ln, re.IGNORECASE):
-                skip = True
-                break
-        if not skip and ln:
-            collected.append(ln)
+        # Skip headers/footers
+        if any(sp.match(ln) for sp in _SKIP_RE):
+            j += 1
+            continue
+        collected.append(ln)
         j += 1
 
     if not collected:
         return None
 
-    # 주소 추출 (hex 우선, decimal 폴백)
+    # ── Address extraction ──
     addr_hex = None
     addr_val = None
     for ci, c in enumerate(collected):
@@ -342,79 +359,87 @@ def _collect_register_entry(lines, start_idx, index, section):
             addr_hex = f"0x{addr_val:04X}"
             collected[ci] = ''
             break
-    # Decimal address fallback (e.g., Goodwe uses plain decimal addresses)
     if addr_val is None:
         for ci, c in enumerate(collected):
-            m = re.match(r'^(\d{3,5})$', c.strip())
-            if m:
-                addr_val = int(m.group(1))
+            if re.match(r'^(\d{3,5})$', c.strip()):
+                addr_val = int(c.strip())
                 addr_hex = f"0x{addr_val:04X}"
                 collected[ci] = ''
                 break
-
-    # If no address found in collected lines, use index as address (address-first format)
     if addr_val is None:
-        if index >= 100:  # Likely a decimal register address (e.g., Goodwe 768, 550)
+        if index >= 100:
             addr_val = index
             addr_hex = f"0x{addr_val:04X}"
         else:
             return None
-
     reg['address'] = addr_val
     reg['address_hex'] = addr_hex
 
-    # 타입 추출
-    type_patterns = ['U16', 'S16', 'U32', 'S32', 'U8', 'S8', 'STR', 'string', 'float', 'Float32']
-    for ci, c in enumerate(collected):
-        for tp in type_patterns:
-            if c.strip().upper() == tp.upper() or c.strip() == tp:
-                reg['type'] = c.strip()
-                collected[ci] = ''
-                break
+    # ── Structured parsing: classify each collected line ──
+    defn_parts = []
+    comment_parts = []
+    found_rw = False
+    found_type = False
+    phase = 'definition'  # definition → rw → type → regs → scale → unit → comment
 
-    # 레지스터 수 추출
     for ci, c in enumerate(collected):
-        if re.match(r'^[1-9]\d{0,2}$', c.strip()) and not collected[ci]:
+        c_stripped = c.strip()
+        if not c_stripped:
             continue
-        if re.match(r'^[1-9]$|^[1-9]\d$|^[12]\d{2}$', c.strip()):
-            try:
-                val = int(c.strip())
-                if 1 <= val <= 128:
-                    reg['regs'] = val
-                    collected[ci] = ''
-                    break
-            except ValueError:
-                pass
 
-    # R/W 추출
-    for ci, c in enumerate(collected):
-        if c.strip() in ('RO', 'RW', 'WO'):
-            reg['rw'] = c.strip()
-            collected[ci] = ''
-            break
+        c_upper = c_stripped.upper()
 
-    # Unit 추출
-    unit_patterns = [
-        r'^0\.\d+[VAWHz%]+', r'^\d+[VAWHz%]+$',
-        r'^[VAWHz%°C]+$', r'^kWh$', r'^Wh$',
-        r'^0\.1V$', r'^0\.01A$', r'^0\.1W$', r'^0\.01Hz$',
-        r'^0\.001$', r'^1°C$', r'^1%$', r'^10Wh$',
-        r'^0\.1kW$', r'^0\.1Hz$', r'^0\.1A$', r'^Var$',
-        r'^0\.1Var$', r'^0\.1kVAR$', r'^ASCII$', r'^Hour$',
-    ]
-    for ci, c in enumerate(collected):
-        for up in unit_patterns:
-            if re.match(up, c.strip(), re.IGNORECASE):
-                reg['unit'] = c.strip()
-                collected[ci] = ''
-                break
+        # R/W
+        if c_stripped in _RW_SET and not found_rw:
+            reg['rw'] = c_stripped
+            found_rw = True
+            phase = 'type'
+            continue
 
-    # 나머지를 Definition과 Comment로
-    remaining = [c for c in collected if c.strip()]
-    if remaining:
-        reg['definition'] = remaining[0]
-        if len(remaining) > 1:
-            reg['comment'] = ' | '.join(remaining[1:])
+        # Type
+        if c_upper in _TYPE_SET and not found_type:
+            reg['type'] = c_stripped
+            found_type = True
+            phase = 'regs'
+            continue
+
+        # After type: register count (single digit 1-8)
+        if phase == 'regs' and re.match(r'^[1-8]$', c_stripped):
+            reg['regs'] = int(c_stripped)
+            phase = 'scale'
+            continue
+
+        # Scale factor (e.g., "10", "100", "1")
+        if phase == 'scale' and re.match(r'^\d{1,4}$', c_stripped):
+            val = int(c_stripped)
+            if val in (1, 10, 100, 1000, 10000):
+                reg['scale_factor'] = str(val)
+                phase = 'unit'
+                continue
+
+        # Unit
+        if phase in ('scale', 'unit') and c_stripped in _UNIT_SET:
+            reg['unit'] = c_stripped
+            phase = 'comment'
+            continue
+
+        # Range values like [0, 1200] → comment
+        if re.match(r'^\[[\d,\s\.\-]+\]', c_stripped):
+            comment_parts.append(c_stripped)
+            phase = 'comment'
+            continue
+
+        # Before R/W found: accumulate as definition
+        if not found_rw:
+            defn_parts.append(c_stripped)
+        else:
+            # After unit/scale: remaining is comment
+            comment_parts.append(c_stripped)
+
+    # Build definition (merge multi-line)
+    reg['definition'] = ' '.join(defn_parts).strip()
+    if comment_parts:
+        reg['comment'] = ' | '.join(comment_parts).strip()
 
     return reg
 
