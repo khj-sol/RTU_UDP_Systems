@@ -14,3 +14,6 @@ manuals/*.img.xz
 *.log
 .claude/
 model_maker/comparison_output_all/
+model_maker_web.7z
+model_maker_web/temp/*
+!model_maker_web/temp/.gitkeep
