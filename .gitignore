@@ -9,3 +9,4 @@ pc_programs/firmware/*.tar.gz
 *.db-shm
 *.db-wal
 *.bak_orig
+manuals/*.img.xz
