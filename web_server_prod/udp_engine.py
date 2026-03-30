@@ -897,9 +897,6 @@ class UDPEngine:
 
                 if has_session:
                     detail = f"INV{dev_num}: IV string {str_num}/{total_str} ({point_count}pts, {received}/{total_str} done)"
-                    # Send each string progress via on_event
-                    if self.on_event:
-                        self.on_event(rtu_id, "iv_scan_data", detail)
                     if received >= total_str:
                         logger.info(f"IV Scan complete: RTU:{rtu_id} INV{dev_num}, {total_str} strings")
                         if self.on_event:
