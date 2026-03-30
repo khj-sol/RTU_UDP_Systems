@@ -508,13 +508,8 @@ async def _send_control(cmd: ControlCommand, ctrl_type: int, dev_type: int = DEV
             "event_type": "H03_SENT",
             "detail": f"{ctrl_name} dev={cmd.device_num} val={cmd.value}"})
 
-    # Auto-send control check after control commands to get updated status
-    if ctrl_type in _CONTROL_COMMANDS_NEEDING_CHECK:
-        async def _delayed_check():
-            await asyncio.sleep(2)
-            mark_manual_command(cmd.rtu_id, cmd.device_num)
-            engine.send_h03(cmd.rtu_id, CTRL_INV_CONTROL_CHECK, dev_type, cmd.device_num, 0)
-        asyncio.create_task(_delayed_check())
+    # RTU automatically sends control_check + control_result after control commands,
+    # so no need for server-side auto Status Check (was causing duplicates)
 
     return {
         "status": "sent",
