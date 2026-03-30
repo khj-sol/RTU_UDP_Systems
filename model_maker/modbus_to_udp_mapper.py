@@ -195,6 +195,8 @@ def _parse_register_tables(pages_text, full_text):
         (r'I-V\s+curve', 'IV Scan'),
         (r'IV\s+scan', 'IV Scan'),
         (r'REMS\s+register', 'REMS Register'),
+        # Generic: "Register Address" section header (e.g., Goodwe "8. Register Address of Device")
+        (r'Register\s+Address', 'Registers'),
     ]
 
     # 주소 패턴: 0xHHHH 또는 단순 십진수(큰 수)
@@ -227,11 +229,28 @@ def _parse_register_tables(pages_text, full_text):
                 break
 
         # 레지스터 항목 탐지: 숫자(index)로 시작하는 줄
+        # Pattern 1: 1-3 digit index (Solarize/Senergy style)
+        # Pattern 2: 3-5 digit address (Goodwe/generic style - address-first format)
         idx_match = re.match(r'^(\d{1,3})\s*$', line)
-        if idx_match and current_section:
-            index = int(idx_match.group(1))
+        addr_match = re.match(r'^(\d{3,5})\s*$', line) if not idx_match else None
+        # For addr_match: verify next line looks like a register definition (not error table)
+        if addr_match and i + 1 < len(all_lines):
+            next_ln = all_lines[i + 1].strip()
+            # Skip if next line is also a bare number (page number, bit value, etc.)
+            if re.match(r'^\d{1,5}\s*$', next_ln) or re.match(r'^0[xX]', next_ln):
+                addr_match = None
+            # Skip hex bit values in error tables (0x0001, 0x0002, etc.)
+            if re.match(r'^[0-9A-Fa-f]{8}$', next_ln):
+                addr_match = None
+        if (idx_match and current_section) or addr_match:
+            if addr_match:
+                index = int(addr_match.group(1))
+                section = current_section or 'Registers'
+            else:
+                index = int(idx_match.group(1))
+                section = current_section
             # 다음 줄들에서 definition, address, regs, type 등 수집
-            reg = _collect_register_entry(all_lines, i, index, current_section)
+            reg = _collect_register_entry(all_lines, i, index, section)
             if reg and reg.get('address'):
                 # 메타데이터/목차 항목 필터링
                 defn = reg.get('definition', '').lower()
@@ -283,8 +302,9 @@ def _collect_register_entry(lines, start_idx, index, section):
     limit = min(j + 15, len(lines))
     while j < limit:
         ln = lines[j].strip()
-        # 다른 index 시작이면 중단
-        if re.match(r'^\d{1,3}\s*$', ln) and int(ln) != index:
+        # 다른 index/address 시작이면 중단
+        next_num = re.match(r'^(\d{1,5})\s*$', ln)
+        if next_num and int(next_num.group(1)) != index:
             break
         # 섹션 헤더면 중단
         if any(re.search(p, ln, re.IGNORECASE)
@@ -312,7 +332,7 @@ def _collect_register_entry(lines, start_idx, index, section):
     if not collected:
         return None
 
-    # 주소 추출
+    # 주소 추출 (hex 우선, decimal 폴백)
     addr_hex = None
     addr_val = None
     for ci, c in enumerate(collected):
@@ -320,17 +340,31 @@ def _collect_register_entry(lines, start_idx, index, section):
         if m:
             addr_val = int(m.group(1), 16)
             addr_hex = f"0x{addr_val:04X}"
-            collected[ci] = ''  # 사용됨 표시
+            collected[ci] = ''
             break
-
+    # Decimal address fallback (e.g., Goodwe uses plain decimal addresses)
     if addr_val is None:
-        return None
+        for ci, c in enumerate(collected):
+            m = re.match(r'^(\d{3,5})$', c.strip())
+            if m:
+                addr_val = int(m.group(1))
+                addr_hex = f"0x{addr_val:04X}"
+                collected[ci] = ''
+                break
+
+    # If no address found in collected lines, use index as address (address-first format)
+    if addr_val is None:
+        if index >= 100:  # Likely a decimal register address (e.g., Goodwe 768, 550)
+            addr_val = index
+            addr_hex = f"0x{addr_val:04X}"
+        else:
+            return None
 
     reg['address'] = addr_val
     reg['address_hex'] = addr_hex
 
     # 타입 추출
-    type_patterns = ['U16', 'S16', 'U32', 'S32', 'U8', 'S8', 'string', 'float']
+    type_patterns = ['U16', 'S16', 'U32', 'S32', 'U8', 'S8', 'STR', 'string', 'float', 'Float32']
     for ci, c in enumerate(collected):
         for tp in type_patterns:
             if c.strip().upper() == tp.upper() or c.strip() == tp:
