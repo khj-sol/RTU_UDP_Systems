@@ -1276,10 +1276,14 @@ def stage1_extract_to_excel(parsed_data, pdf_path, output_path=None,
                       r'Regulation code'])
     rems_regs        = _extract_rems_registers_from_text(raw_text)
 
-    # ── AI independent extraction + union merge (v1.4.0) ──
+    # ── AI independent extraction + union merge (v1.4.0+) ──
+    # AI merge runs in BOTH modes when api_key is available:
+    # - AI mode: always runs
+    # - Offline mode: runs as supplement if api_key provided (improves definitions)
     ai_status_codes = []
     ai_error_codes  = []
-    if use_ai and api_key and pdf_path and os.path.isfile(pdf_path):
+    run_ai = (use_ai or (api_key and len(all_regs) < 10)) and pdf_path and os.path.isfile(pdf_path)
+    if run_ai and api_key:
         _p("  [AI Stage1] Running independent AI extraction (union merge mode)...")
         try:
             ai_result = _ai_stage1_extract(pdf_path, api_key, model, _p)
@@ -1554,8 +1558,14 @@ def _ai_stage1_extract(pdf_path, api_key, model, progress_cb):
         "  - unit: measurement unit string (V, A, W, kWh, Hz, %, etc.) or empty\n"
         "  - rw: access type — RO, RW, or WO\n"
         "  - comment: any description or note from the document\n\n"
-        "CRITICAL: 'definition' must be the register NAME (e.g. 'Total DC Power', "
-        "'L1 Voltage', 'Grid Frequency'), never a numeric range.\n\n"
+        "CRITICAL RULES:\n"
+        "- 'definition' must be the register NAME (e.g. 'Total DC Power', "
+        "'L1 Voltage', 'Grid Frequency'), never a numeric range.\n"
+        "- Extract ALL registers without exception — do not skip any.\n"
+        "- Must include: output power (all bytes), internal temperature, "
+        "daily/total energy, all PV channels, all AC phases, frequency, "
+        "power factor, status/error codes, control registers.\n"
+        "- For U32 registers that use two U16 high/low bytes, list BOTH addresses.\n\n"
         "## 2. Status Codes (JSON array: key \"status_codes\")\n"
         "Extract the inverter operating state/mode table entries:\n"
         "  - code: integer value\n"
