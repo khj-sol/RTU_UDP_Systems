@@ -425,6 +425,12 @@ function InverterCard({
   }) : /*#__PURE__*/React.createElement(Badge, {
     text: INVERTER_STATUS[d.status] || 'Unknown',
     color: INV_STATUS_COLOR[d.status] || 'bg-gray-600'
+  }), d.der_avm && /*#__PURE__*/React.createElement(Badge, {
+    text: 'DER',
+    color: 'bg-emerald-600'
+  }), d.iv_scan && /*#__PURE__*/React.createElement(Badge, {
+    text: 'IV',
+    color: 'bg-violet-600'
   }), d.ctrl && d.ctrl.active_power_pct > 0 && d.ctrl.active_power_pct < 1000 && /*#__PURE__*/React.createElement(Badge, {
     text: `P${fmt((d.ctrl.active_power_pct || 0) / 10, 0)}%`,
     color: 'bg-orange-600'

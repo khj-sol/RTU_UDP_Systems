@@ -1104,7 +1104,8 @@ class KstarSimulator:
     def _create_datastore(self):
         """FC04 Input Register + FC03 Holding Register 데이터스토어 생성"""
         # FC04 (ir): Block1-5 (3000~3249) + IV data (5000~7399)
-        ir_block = _KstarNightOffBlock(0, [0] * 7400)
+        # Extra margin (7500) to avoid off-by-one in pymodbus address validation
+        ir_block = _KstarNightOffBlock(0, [0] * 7500)
 
         # FC03 (hr): Block4(3200~3217) + DER Control(0x07D0~0x0834) + IV trigger(0x0FB3=4035)
         hr_block = ModbusLoggedHoldingBlock(
@@ -1370,7 +1371,7 @@ class KstarSimulator:
             self.store.setValues(4, KstarRegisters.IV_SCAN_STATUS, [(progress << 8) | 0x01])
             if elapsed >= self.IV_SCAN_DURATION:
                 self.iv_scan_status = 2  # Finished
-                self.store.setValues(4, KstarRegisters.IV_SCAN_STATUS, [0x0000])  # idle
+                self.store.setValues(4, KstarRegisters.IV_SCAN_STATUS, [0x0002])  # low=2 (finished)
                 self.logger.info("[KST] IV Scan completed")
 
         # Auto-reset after 60s
@@ -1385,9 +1386,9 @@ class KstarSimulator:
         data_points = KstarRegisters.IV_POINTS_PER_STRING  # 100
 
         for mppt in range(mppt_count):
-            voc = 45.0 + mppt * 2.0 + random.uniform(-1, 1)
-            v_min = 20.0
-            isc = 10.0 + random.uniform(-0.5, 0.5)
+            voc = 750.0 + mppt * 10.0 + random.uniform(-5, 5)
+            v_min = 200.0
+            isc = 12.0 + random.uniform(-0.5, 0.5)
 
             voltages = generate_iv_voltage_data(voc, v_min, data_points)
 

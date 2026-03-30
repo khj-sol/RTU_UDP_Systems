@@ -1681,7 +1681,8 @@ class KstarModbusHandler(ModbusHandlerHAT):
                     KstarRegisters.IV_SCAN_STATUS, 1, self.slave_id)
                 if result:
                     low_byte = result[0] & 0xFF
-                    status['iv_scan_status'] = 0 if low_byte == 0 else 1
+                    # 0=idle, 1=scanning, 2=finished
+                    status['iv_scan_status'] = low_byte if low_byte <= 2 else 0
                 else:
                     status['iv_scan_status'] = 0
             except Exception:
@@ -2959,10 +2960,15 @@ class HuaweiModbusHandlerSerial(HuaweiModbusHandler, ModbusHandlerSerial):
 class ModbusHandlerSimulation:
     """Simulation mode - no hardware"""
     
-    def __init__(self, slave_id: int = 1, reg_module=None):
+    def __init__(self, slave_id: int = 1, reg_module=None,
+                 protocol: str = 'solarize', string_count: int = 8,
+                 iv_scan_data_points: int = 64):
         self.slave_id = slave_id
         self.connected = False
         self.logger = logging.getLogger(__name__)
+        self.protocol = protocol
+        self.string_count = string_count
+        self.iv_scan_data_points = iv_scan_data_points
 
         # Dynamic register module binding
         _init_reg_attrs(self, reg_module)
@@ -2972,7 +2978,7 @@ class ModbusHandlerSimulation:
 
         # Nominal rating (50kW inverter)
         self.NOMINAL_POWER = 50000  # 50kW in W
-        
+
         # Control state (using register convention: 0=ON/Run, 1=OFF/Stop)
         self._on_off = 0              # 0=ON(Run), 1=OFF(Stop)
         self._power_limit = 1000      # 100.0% (scale 0.1%)
@@ -3165,22 +3171,34 @@ class ModbusHandlerSimulation:
         return True
     
     def _start_iv_scan(self):
-        """Start simulated IV scan"""
+        """Start simulated IV scan using protocol-specific parameters"""
         def scan_thread():
-            self._iv_scan_status = 1  # Running
-            for string_num in range(1, 9):
-                # Generate IV curve
-                iv_data = []
-                voc = 650.0 + (string_num - 1) * 2
-                isc = 12.0 + (string_num - 1) * 0.1
-                for i in range(64):
-                    v = voc * (1 - i / 64)
-                    current = isc * (1 - math.exp(-5 * (1 - i / 64)))
-                    iv_data.append((v, current))
-                self._iv_scan_data[string_num] = iv_data
-                time.sleep(0.3)
-            self._iv_scan_status = 2  # Complete
-        
+            try:
+                self._iv_scan_status = 1  # Running
+                self._iv_scan_data.clear()
+                n_strings = self.string_count
+                n_points = self.iv_scan_data_points
+                self.logger.info(f"[SIM] IV Scan thread started: {n_strings} strings, {n_points} points")
+                # Generate all data first
+                for string_num in range(1, n_strings + 1):
+                    iv_data = []
+                    voc = 750.0 + (string_num - 1) * 5
+                    v_min = 200.0
+                    isc = 12.0 + (string_num - 1) * 0.1
+                    for i in range(n_points):
+                        v = voc - (voc - v_min) * i / n_points
+                        current = isc * (1 - math.exp(-5 * (1 - i / n_points)))
+                        iv_data.append((v, current))
+                    self._iv_scan_data[string_num] = iv_data
+                self.logger.info(f"[SIM] IV Scan data generated: {len(self._iv_scan_data)} strings")
+                # Simulate scan duration
+                time.sleep(2.0)
+                self._iv_scan_status = 2  # Complete
+                self.logger.info(f"[SIM] IV Scan status -> FINISHED")
+            except Exception as e:
+                self.logger.error(f"[SIM] IV Scan thread error: {e}")
+                self._iv_scan_status = 0
+
         threading.Thread(target=scan_thread, daemon=True).start()
     
     def read_control_status(self):
@@ -3510,7 +3528,8 @@ class MultiDeviceHandler:
     def add_device(self, device_type: str, slave_id: int = 1, protocol: str = 'modbus',
                    channel: int = 1, baudrate: int = 9600,
                    mppt_count: int = 4, string_count: int = 8,
-                   simulation: bool = False, device_number: int = 1):
+                   simulation: bool = False, device_number: int = 1,
+                   iv_scan_data_points: int = 64):
         """Add device and return handler for rtu_client.py compatibility
         
         Args:
@@ -3544,7 +3563,10 @@ class MultiDeviceHandler:
             reg_mod = load_register_module(protocol)
 
         if use_simulation:
-            handler = ModbusHandlerSimulation(slave_id, reg_module=reg_mod)
+            handler = ModbusHandlerSimulation(
+                slave_id, reg_module=reg_mod,
+                protocol=protocol, string_count=string_count,
+                iv_scan_data_points=iv_scan_data_points)
         elif is_kstar:
             # Kstar 전용 핸들러: FC04 read_inverter_data / DER-AVM 오버라이드
             if self.use_cm4:

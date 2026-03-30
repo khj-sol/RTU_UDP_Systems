@@ -3636,11 +3636,14 @@ class ModbusToUdpMapper:
             self.cg_ivscan_var.set(False)
             self.cg_deravm_var.set(False)
         else:
-            # Solarize / VerterKing / Unknown
+            # Solarize / VerterKing / GoodWe / Senergy / Unknown
             self.cg_fc_var.set('FC03')
-            self.cg_manufacturer_var.set(mfr.split('(')[0].strip() if mfr else 'Solarize')
-            self.cg_ivscan_var.set(True)
-            self.cg_deravm_var.set(True)
+            clean_mfr = mfr.split('(')[0].strip() if mfr else ''
+            self.cg_manufacturer_var.set(clean_mfr or self.cg_manufacturer_var.get() or 'Solarize')
+            # Only default IV/DER for Solarize-protocol inverters
+            if not clean_mfr or 'Solarize' in clean_mfr or 'VerterKing' in clean_mfr:
+                self.cg_ivscan_var.set(True)
+                self.cg_deravm_var.set(True)
 
     # ── 자동 매핑 ────────────────────────────────────────────────────
 
@@ -4861,9 +4864,40 @@ class ModbusToUdpMapper:
                     self._sp_ref_status_var.set(f"Reference library: {rm.count()} sets")
             except Exception:
                 pass
+
+            # Save to common/*_mm_registers.py and register in file map
+            try:
+                base_dir = os.path.dirname(os.path.abspath(__file__))
+                common_dir = os.path.normpath(os.path.join(base_dir, '..', 'common'))
+                mm_fname = f'{protocol}_mm_registers.py'
+                mm_path = os.path.join(common_dir, mm_fname)
+                with open(mm_path, 'w', encoding='utf-8') as f:
+                    f.write(code + '\n')
+
+                # Add R# entry to register_file_map if not already present
+                known_fnames = {e[3] for e in _REGISTER_FILE_MAP}
+                if mm_fname not in known_fnames:
+                    used_r_nums = []
+                    for e in _REGISTER_FILE_MAP:
+                        if isinstance(e[1], str) and e[1].startswith('R'):
+                            try:
+                                used_r_nums.append(int(e[1][1:]))
+                            except ValueError:
+                                pass
+                    next_r = max(used_r_nums, default=0) + 1
+                    classname = self.cg_classname_var.get().strip() or 'RegisterMap'
+                    _REGISTER_FILE_MAP.append(
+                        ('Inverter', f'R{next_r}', f'{mfr} (Ref)', mm_fname,
+                         f'{protocol}_mm', classname))
+                    _save_register_file_map()
+            except Exception as e:
+                messagebox.showwarning("Reference", f"Reference saved but _mm file failed:\n{e}")
+
             self._sp_s3_status_var.set(f"Saved to reference: {protocol}")
+            self._refresh_register_files()
             messagebox.showinfo("Saved to Reference",
                                 f"Reference '{protocol}' saved.\n"
+                                f"common/{mm_fname} created.\n"
                                 f"Future offline mappings will benefit from this reference.")
         else:
             messagebox.showerror("Save to Reference Failed", msg)
@@ -8031,6 +8065,9 @@ class ModbusToUdpMapper:
                     comment_parts.append(mb_unit)
                 comment = ', '.join(comment_parts)
                 addr = _addr_int(addr_hex)
+                # Skip address 0 (fault code bit definitions, not real Modbus addresses)
+                if addr == 0:
+                    continue
                 if addr is not None and addr in emitted_addrs:
                     # 주소 중복 → alias로 추가
                     existing_name = None
@@ -8094,6 +8131,95 @@ class ModbusToUdpMapper:
                 lines.append('    REACTIVE_POWER_SET = DER_REACTIVE_POWER_PCT')
                 lines.append('    ACTIVE_POWER_PCT = DER_ACTIVE_POWER_PCT')
                 lines.append('')
+
+        # ── Compatibility aliases (auto-generated for validation) ──
+        compat_aliases = []
+        phase_map = [
+            ('L1_VOLTAGE', ['R_PHASE_VOLTAGE', 'R_VOLTAGE', 'PHASE_A_VOLTAGE',
+                            'GRID_R_VOLTAGE', 'U_A', 'PHASE_1_VOLTAGE',
+                            'S_PHASE_VOLTAGE', 'T_PHASE_VOLTAGE']),
+            ('L2_VOLTAGE', ['S_PHASE_VOLTAGE', 'S_VOLTAGE', 'PHASE_B_VOLTAGE',
+                            'GRID_S_VOLTAGE', 'U_B', 'PHASE_2_VOLTAGE',
+                            'T_PHASE_VOLTAGE']),
+            ('L3_VOLTAGE', ['T_PHASE_VOLTAGE', 'T_VOLTAGE', 'PHASE_C_VOLTAGE',
+                            'GRID_T_VOLTAGE', 'U_C', 'PHASE_3_VOLTAGE']),
+            ('L1_CURRENT', ['R_PHASE_CURRENT', 'R_CURRENT', 'PHASE_A_CURRENT',
+                            'INV_R_CURRENT', 'I_A', 'PHASE_1_CURRENT',
+                            'S_PHASE_CURRENT']),
+            ('L2_CURRENT', ['S_PHASE_CURRENT', 'S_CURRENT', 'PHASE_B_CURRENT',
+                            'INV_S_CURRENT', 'I_B', 'PHASE_2_CURRENT']),
+            ('L3_CURRENT', ['T_PHASE_CURRENT', 'T_CURRENT', 'PHASE_C_CURRENT',
+                            'INV_T_CURRENT', 'I_C', 'PHASE_3_CURRENT']),
+        ]
+        for alias, sources in phase_map:
+            if alias not in seen_names:
+                for src in sources:
+                    if src in seen_names:
+                        compat_aliases.append(f'    {alias} = {src}')
+                        seen_names.add(alias)
+                        break
+
+        energy_map = [
+            ('TOTAL_ENERGY_LOW', ['TOTAL_ENERGY', 'ACCUMULATED_ENERGY', 'CUMULATIVE_PRODUCTION_L',
+                                   'TOTAL_ENERGY_L', 'TOTAL_ENERGY_KWH', 'TOTAL_YIELD_L',
+                                   'TOTAL_GENERATED_ENERGY', 'CUMULATIVE_ENERGY',
+                                   'HIGH_BYTE_OF_TOTAL_FEED_POWER_TO_GRID_TOTAL_POWER_GENERATION']),
+            ('TODAY_ENERGY_LOW', ['TODAY_ENERGY', 'TODAY_ENERGY_L', 'DAILY_PRODUCTION',
+                                   'DAILY_ENERGY', 'DAY_ENERGY', 'TODAY_GENERATION',
+                                   'TODAY_GENERATED_ENERGY', 'DAILY_GENERATED_ENERGY',
+                                   'E_DAY_DAILY_POWER_GENERATION']),
+        ]
+        for alias, sources in energy_map:
+            if alias not in seen_names:
+                for src in sources:
+                    if src in seen_names:
+                        compat_aliases.append(f'    {alias} = {src}')
+                        seen_names.add(alias)
+                        break
+
+        mppt_alias_map = [
+            ('MPPT1_VOLTAGE', ['PV1_VOLTAGE', 'PV_VOLTAGE', 'MPPT_1_VOLTAGE',
+                                'VPV1_PV1_VOLTAGE', 'VPV1_MPPT1_PV1_VOLTAGE']),
+            ('MPPT1_CURRENT', ['PV1_CURRENT', 'PV_CURRENT', 'MPPT_1_CURRENT',
+                                'IPV1_PV1_CURRENT', 'IPV1_MPPT1_PV1_CURRENT']),
+        ]
+        for alias, sources in mppt_alias_map:
+            if alias not in seen_names:
+                for src in sources:
+                    if src in seen_names:
+                        compat_aliases.append(f'    {alias} = {src}')
+                        seen_names.add(alias)
+                        break
+
+        if 'INVERTER_MODE' not in seen_names:
+            for src in ['RUNNING_STATUS', 'DEVICE_STATUS', 'INVERTER_STATUS',
+                        'SYSTEM_STATUS', 'WORK_MODE', 'OPERATING_MODE_STATUS',
+                        'STATUS_1', 'WORKING_MODE']:
+                if src in seen_names:
+                    compat_aliases.append(f'    INVERTER_MODE = {src}')
+                    seen_names.add('INVERTER_MODE')
+                    break
+
+        if 'ERROR_CODE1' not in seen_names:
+            for src in ['FAULT_CODE_1', 'FAULT_CODE1', 'ERROR_MESSAGE_H',
+                        'ALARM_CODE_1', 'FAULT_CODE', 'ERROR_CODE', 'STATUS_2']:
+                if src in seen_names:
+                    compat_aliases.append(f'    ERROR_CODE1 = {src}')
+                    seen_names.add('ERROR_CODE1')
+                    break
+
+        if 'ERROR_CODE2' not in seen_names:
+            for src in ['FAULT_CODE_2', 'FAULT_CODE2', 'ERROR_MESSAGE_L',
+                        'ALARM_CODE_2', 'ERROR_2', 'STATUS_3']:
+                if src in seen_names:
+                    compat_aliases.append(f'    ERROR_CODE2 = {src}')
+                    seen_names.add('ERROR_CODE2')
+                    break
+
+        if compat_aliases:
+            lines.append('    # --- Compatibility aliases (auto-generated) ---')
+            lines.extend(compat_aliases)
+            lines.append('')
 
         lines.append('')
         lines.append('')

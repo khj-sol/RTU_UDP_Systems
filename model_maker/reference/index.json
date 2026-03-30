@@ -1,1 +1,15 @@
-{}
+{
+  "goodwe": {
+    "manufacturer": "Goodwe",
+    "protocol": "goodwe",
+    "mppt_count": "4",
+    "string_count": "8",
+    "iv_scan": false,
+    "der_avm": true,
+    "fc_code": "FC03",
+    "mapping_excel": "C:\\CM4_4rs485\\RTU_UDP_System_V1_1_0\\model_maker\\reference\\goodwe\\mapping.xlsx",
+    "py_file": "C:\\CM4_4rs485\\RTU_UDP_System_V1_1_0\\model_maker\\reference\\goodwe\\registers.py",
+    "created": "2026-03-30T18:17:54.969648",
+    "builtin": false
+  }
+}

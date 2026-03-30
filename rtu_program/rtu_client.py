@@ -598,6 +598,10 @@ class RTUClient:
                 info = target_handler.read_model_info() if hasattr(target_handler, 'read_model_info') else {}
             except Exception:
                 info = {}
+            # Add capability flags: bit0=iv_scan, bit1=der_avm
+            inv_cfg = target_inv or {}
+            cap = (1 if inv_cfg.get('iv_scan') else 0) | (2 if inv_cfg.get('control') else 0)
+            info['capabilities'] = cap
             pkt, s = self.protocol.create_h05_inverter_model(dev_num, model, info)
             self._send_udp_no_ack(pkt)
             self.logger.info(f"H05 INV{dev_num} Model Info sent (seq={s})")
@@ -982,7 +986,9 @@ class RTUClient:
             channel=channel,
             baudrate=baudrate,
             simulation=simulation or self.simulation_mode,
-            device_number=device_number
+            device_number=device_number,
+            string_count=string_count,
+            iv_scan_data_points=iv_scan_data_points
         )
         self.inverters.append({
             'device_number': device_number,

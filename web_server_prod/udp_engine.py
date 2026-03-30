@@ -140,6 +140,7 @@ class RTUState:
     avg_interval: float = 0.0  # observed avg seconds between H01 batches
     _prev_seen: float = 0.0   # previous last_seen for interval calc
     rtu_info: dict = field(default_factory=dict)  # {model, phone, serial, firmware}
+    dev_caps: dict = field(default_factory=dict)  # {dev_num: {iv_scan: bool, der_avm: bool}}
 
 
 # ============================================================================
@@ -810,6 +811,18 @@ class UDPEngine:
                         value = body[pos:pos + size].decode('utf-8', errors='ignore')
                         parts.append(f"{fname}={value}")
                         pos += size
+            # Parse capability flags: bit0=iv_scan, bit1=der_avm
+            cap_iv = False
+            cap_der = False
+            if pos < len(body):
+                cap = body[pos]
+                cap_iv = bool(cap & 0x01)
+                cap_der = bool(cap & 0x02)
+                parts.append(f"iv_scan={cap_iv}, der_avm={cap_der}")
+            with self._lock:
+                state = self.rtu_registry.get(rtu_id)
+                if state:
+                    state.dev_caps[dev_num] = {'iv_scan': cap_iv, 'der_avm': cap_der}
             detail = f"INV{dev_num}: " + (", ".join(parts) if parts else "empty")
 
         elif body_type == BODY_TYPE_CONTROL_CHECK:
@@ -1136,12 +1149,17 @@ class UDPEngine:
         for (dev_type, dev_num), data in state.devices.items():
             type_name = DEVICE_TYPE_NAMES.get(dev_type, f"Type{dev_type}")
             key = f"{type_name}_{dev_num}"
-            devices[key] = {
+            dev_entry = {
                 'device_type': dev_type,
                 'device_number': dev_num,
                 'type_name': type_name,
                 'data': data,
             }
+            # Merge device capabilities (iv_scan, der_avm) from H05(11)
+            caps = state.dev_caps.get(dev_num)
+            if caps:
+                dev_entry['data'] = {**data, **caps}
+            devices[key] = dev_entry
         return devices
 
     def get_iv_scan_data(self, rtu_id: int) -> dict | None:

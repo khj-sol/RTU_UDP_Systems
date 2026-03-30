@@ -80,14 +80,6 @@
     "RegisterMap"
   ],
   [
-    "Inverter",
-    "R6",
-    "GoodWe Grid-Tied (Ref)",
-    "goodwe_mm_registers.py",
-    "goodwe_mm",
-    "RegisterMap"
-  ],
-  [
     "Relay",
     "1",
     "KDU-300",
@@ -125,6 +117,22 @@
     "Senergy",
     "senergy_registers.py",
     "senergy",
+    "RegisterMap"
+  ],
+  [
+    "Inverter",
+    "R6",
+    "GoodWe (Ref)",
+    "goodwe_mm_registers.py",
+    "goodwe_mm",
+    "RegisterMap"
+  ],
+  [
+    "Inverter",
+    "7",
+    "GoodWe",
+    "goodwe_registers.py",
+    "goodwe",
     "RegisterMap"
   ]
 ]

@@ -2344,6 +2344,10 @@ def stage3_generate_py(mapping_excel_path, settings, output_path=None,
         if addr_int is None:
             continue
 
+        # Skip registers with address 0 (fault code bit definitions, not real Modbus addresses)
+        if addr_int == 0:
+            continue
+
         seen_names.add(const_name)
         reg_entries.append({
             'section':   r['section'],
@@ -2509,13 +2513,16 @@ def stage3_generate_py(mapping_excel_path, settings, output_path=None,
     # L1/L2/L3 phase aliases (L→R/S/T direction)
     phase_map = [
         ('L1_VOLTAGE', ['R_PHASE_VOLTAGE', 'R_VOLTAGE', 'PHASE_A_VOLTAGE',
-                        'GRID_R_VOLTAGE', 'U_A', 'PHASE_1_VOLTAGE']),
+                        'GRID_R_VOLTAGE', 'U_A', 'PHASE_1_VOLTAGE',
+                        'S_PHASE_VOLTAGE', 'T_PHASE_VOLTAGE']),
         ('L2_VOLTAGE', ['S_PHASE_VOLTAGE', 'S_VOLTAGE', 'PHASE_B_VOLTAGE',
-                        'GRID_S_VOLTAGE', 'U_B', 'PHASE_2_VOLTAGE']),
+                        'GRID_S_VOLTAGE', 'U_B', 'PHASE_2_VOLTAGE',
+                        'T_PHASE_VOLTAGE']),
         ('L3_VOLTAGE', ['T_PHASE_VOLTAGE', 'T_VOLTAGE', 'PHASE_C_VOLTAGE',
                         'GRID_T_VOLTAGE', 'U_C', 'PHASE_3_VOLTAGE']),
         ('L1_CURRENT', ['R_PHASE_CURRENT', 'R_CURRENT', 'PHASE_A_CURRENT',
-                        'INV_R_CURRENT', 'I_A', 'PHASE_1_CURRENT']),
+                        'INV_R_CURRENT', 'I_A', 'PHASE_1_CURRENT',
+                        'S_PHASE_CURRENT']),
         ('L2_CURRENT', ['S_PHASE_CURRENT', 'S_CURRENT', 'PHASE_B_CURRENT',
                         'INV_S_CURRENT', 'I_B', 'PHASE_2_CURRENT']),
         ('L3_CURRENT', ['T_PHASE_CURRENT', 'T_CURRENT', 'PHASE_C_CURRENT',
@@ -2552,14 +2559,18 @@ def stage3_generate_py(mapping_excel_path, settings, output_path=None,
                                # EKOS / generic translated names
                                'TOTAL_GENERATED_ENERGY', 'ACCUMULATED_GENERATED_ENERGY',
                                'ACCUMULATED_GENERATION_ENERGY', 'GENERATION_KWH_TOTAL',
-                               'LIFETIME_ENERGY', 'CUMULATIVE_ENERGY']),
+                               'LIFETIME_ENERGY', 'CUMULATIVE_ENERGY',
+                               # Goodwe: long translated name for total energy high word
+                               'HIGH_BYTE_OF_TOTAL_FEED_POWER_TO_GRID_TOTAL_POWER_GENERATION']),
         ('TODAY_ENERGY_LOW', ['TODAY_ENERGY', 'TODAY_ENERGY_L', 'DAILY_PRODUCTION',
                                'DAILY_ENERGY', 'DAILY_ENERGY_FEEDIN', 'DAY_ENERGY',
                                'TODAY_GENERATION', 'TODAY_YIELD', 'DAILY_YIELD',
                                # EKOS / generic translated names
                                'TODAY_GENERATED_ENERGY', 'DAILY_GENERATED_ENERGY',
                                'TODAY_GENERATION_ENERGY', 'DAILY_GENERATION_ENERGY',
-                               'GENERATED_ENERGY']),
+                               'GENERATED_ENERGY',
+                               # Goodwe: daily power generation
+                               'E_DAY_DAILY_POWER_GENERATION']),
     ]
     for alias, sources in energy_map:
         if alias not in all_names:
@@ -2585,7 +2596,8 @@ def stage3_generate_py(mapping_excel_path, settings, output_path=None,
     # INVERTER_MODE alias (from status/mode registers when not directly mapped)
     if 'INVERTER_MODE' not in all_names:
         for src in ['RUNNING_STATUS', 'DEVICE_STATUS', 'INVERTER_STATUS',
-                    'SYSTEM_STATUS', 'INV_OPERATING_MODE', 'OPERATING_MODE_STATUS']:
+                    'SYSTEM_STATUS', 'INV_OPERATING_MODE', 'OPERATING_MODE_STATUS',
+                    'STATUS_1', 'WORKING_MODE', 'WORK_MODE']:
             if src in all_names:
                 compat_aliases.append(f'    {"INVERTER_MODE":<40} = {src}')
                 break
@@ -2595,6 +2607,7 @@ def stage3_generate_py(mapping_excel_path, settings, output_path=None,
         for src in ['FAULT_CODE_1', 'FAULT_CODE1', 'DSP_ALARM_CODE_L', 'ALARM_CODE_1',
                     'ALARM_CODE1', 'FAULT_CODE', 'ALARM_CODE', 'ERROR_CODE',
                     'FAULT_CODE_L', 'DSP_ERROR_CODE_L', 'ERROR_1', 'FAULT_1',
+                    'ERROR_MESSAGE_H', 'STATUS_2',
                     # Last-resort fallbacks (Huawei uses _2 naming, some brands use ALARM_n)
                     'FAULT_CODE_2', 'REMOTESIGNAL_ALARM_1', 'ALARM_1', 'FAULT_STATUS']:
             if src in all_names:
@@ -2603,6 +2616,7 @@ def stage3_generate_py(mapping_excel_path, settings, output_path=None,
     if 'ERROR_CODE2' not in all_names:
         for src in ['FAULT_CODE_2', 'FAULT_CODE2', 'DSP_ERROR_CODE_H', 'ALARM_CODE_2',
                     'ALARM_CODE2', 'ERROR_2', 'FAULT_2', 'FAULT_CODE_H', 'ALARM_CODE_H',
+                    'ERROR_MESSAGE_L', 'STATUS_3',
                     'REMOTESIGNAL_ALARM_2', 'ALARM_2']:
             if src in all_names:
                 compat_aliases.append(f'    {"ERROR_CODE2":<40} = {src}')

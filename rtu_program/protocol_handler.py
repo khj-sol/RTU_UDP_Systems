@@ -386,6 +386,9 @@ class ProtocolHandler:
         for primary, fallback in field_keys:
             data = (model_info.get(primary) or model_info.get(fallback, '')).encode('utf-8')[:32]
             body += struct.pack('B', len(data)) + data
+        # Capability flags: bit0=iv_scan, bit1=der_avm
+        cap = model_info.get('capabilities', 0)
+        body += struct.pack('B', cap)
         return header + body, sequence
 
     # =========================================================================
