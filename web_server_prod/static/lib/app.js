@@ -355,7 +355,8 @@ function InverterCard({
 }) {
   const d = dev.data || dev || {};
   const m = d.model || dev.model || 1;
-  // Monitor 값이 있으면 AC 데이터를 Monitor로 오버라이드
+  // Monitor 값이 있으면 AC 데이터를 Monitor로 오버라이드 + PV 비례 조정
+  const monRatio = d.mon && d.ac_power > 0 ? (d.mon.active_power_kw * 1000) / d.ac_power : 1;
   const acI_r = d.mon ? fmt(d.mon.current_r, 1) : fmt((d.r_current || 0) / 10, 1);
   const acI_s = d.mon ? fmt(d.mon.current_s, 1) : fmt((d.s_current || 0) / 10, 1);
   const acI_t = d.mon ? fmt(d.mon.current_t, 1) : fmt((d.t_current || 0) / 10, 1);
@@ -365,6 +366,8 @@ function InverterCard({
   const acPower = d.mon ? fmt(d.mon.active_power_kw, 2) : fmt((d.ac_power || 0) / 1000, 2);
   const acPF = d.mon ? fmt(d.mon.power_factor, 3) : fmt(d.power_factor, 3);
   const acFreq = d.mon ? fmt(d.mon.frequency, 1) : fmt(d.frequency);
+  const pvPower = d.mon ? fmt((d.pv_power || 0) / 1000 * monRatio, 2) : fmt((d.pv_power || 0) / 1000, 2);
+  const pvCurrent = d.mon ? fmt((d.pv_current || 0) / 10 * monRatio, 1) : fmt((d.pv_current || 0) / 10, 1);
   return /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("div", {
     className: "flex justify-between items-center mb-3"
   }, /*#__PURE__*/React.createElement("span", {
@@ -395,9 +398,9 @@ function InverterCard({
     className: "text-gray-400"
   }, "PV V:"), " ", fmt(d.pv_voltage), " V"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
     className: "text-gray-400"
-  }, "PV I:"), " ", fmt((d.pv_current || 0) / 10, 1), " A"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+  }, "PV I:"), " ", pvCurrent, " A"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
     className: "text-gray-400"
-  }, "PV P:"), " ", fmt((d.pv_power || 0) / 1000, 2), " kW"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+  }, "PV P:"), " ", pvPower, " kW"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
     className: "text-gray-400"
   }, "AC R V:"), " ", acV_r, " V"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
     className: "text-gray-400"
