@@ -419,7 +419,10 @@ function InverterCard({
   }, /*#__PURE__*/React.createElement(Badge, {
     text: MODEL_NAMES[m] || 'Unknown',
     color: MODEL_COLORS[m] || 'bg-gray-600'
-  }), d.error || d.body_type < 0 ? /*#__PURE__*/React.createElement(Badge, {
+  }), d.body_type === -4 ? /*#__PURE__*/React.createElement(Badge, {
+    text: '야간대기',
+    color: 'bg-yellow-600'
+  }) : d.error || d.body_type < 0 ? /*#__PURE__*/React.createElement(Badge, {
     text: 'Comm Fail',
     color: 'bg-red-600'
   }) : /*#__PURE__*/React.createElement(Badge, {
@@ -744,6 +747,7 @@ function ControlTab({
       'control_check': 'text-cyan-400',
       'control_result': 'text-green-400',
       'comm_fail': 'text-red-400',
+      'nighttime_standby': 'text-yellow-400',
       'comm_restored': 'text-emerald-400',
       'inverter_model': 'text-blue-400',
       'H03_SENT': 'text-orange-400',

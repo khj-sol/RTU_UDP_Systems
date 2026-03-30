@@ -142,6 +142,7 @@ INV_MODEL_NAMES = {
 # H01 Body Types
 # =============================================================================
 # Negative body types: Header only, no body
+INV_BODY_NIGHTTIME = -4     # Nighttime standby (Kstar only, 20:00-05:00)
 INV_BODY_ZEE_SKIP = -3      # ZEE Control Enable Data Skip
 INV_BODY_ERROR = -2         # Communication Data Packet Error
 INV_BODY_FAIL = -1          # Communication Connection Failed

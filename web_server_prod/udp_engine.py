@@ -387,20 +387,25 @@ class UDPEngine:
         # Skip parsing if body_type is negative (comm fail, error, etc.)
         if body_type < 0:
             device_key = (dev_type, dev_num)
+            _is_nighttime = (body_type == -4)
             parsed = {
                 'device_number': dev_num,
                 'model': model,
                 'body_type': body_type,
                 'backup': backup,
                 'timestamp': timestamp,
-                'error': True,
+                'error': not _is_nighttime,
             }
             with self._lock:
                 self.rtu_registry[rtu_id].devices[device_key] = parsed
             if self.on_event:
-                body_names = {-3: "ZEE_SKIP", -2: "PACKET_ERROR", -1: "COMM_FAIL"}
-                detail = body_names.get(body_type, f"ERROR({body_type})")
-                self.on_event(rtu_id, "comm_fail", f"Device {dev_type}/{dev_num}: {detail}")
+                if _is_nighttime:
+                    self.on_event(rtu_id, "nighttime_standby",
+                                  f"Device {dev_type}/{dev_num}: NIGHTTIME_STANDBY")
+                else:
+                    body_names = {-3: "ZEE_SKIP", -2: "PACKET_ERROR", -1: "COMM_FAIL"}
+                    detail = body_names.get(body_type, f"ERROR({body_type})")
+                    self.on_event(rtu_id, "comm_fail", f"Device {dev_type}/{dev_num}: {detail}")
             return
 
         body = data[HEADER_SIZE:]

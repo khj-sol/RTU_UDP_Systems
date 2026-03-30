@@ -1,6 +1,6 @@
 """
 Protocol Handler for RTU UDP Communication
-Version: 1.0.0
+Version: 1.0.1
 
 UDP Version - Removed TCP framing, H07/H08 firmware update
 All packet formats (H01~H06) are identical to TCP version
@@ -189,6 +189,20 @@ class ProtocolHandler:
         header = self.create_header(
             VERSION_H01, device_type, device_number,
             device_model, body_type, backup_data, sequence
+        )
+
+        return header, sequence
+
+    def create_h01_nighttime_standby(self, device_type, device_number, device_model,
+                                      backup_data=0, sequence=None):
+        """Create H01 nighttime standby packet (header only, Kstar only, 20:00-05:00)"""
+        if sequence is None:
+            sequence = self._next_sequence()
+
+        from common.protocol_constants import INV_BODY_NIGHTTIME
+        header = self.create_header(
+            VERSION_H01, device_type, device_number,
+            device_model, INV_BODY_NIGHTTIME, backup_data, sequence
         )
 
         return header, sequence

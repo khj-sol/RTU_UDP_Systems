@@ -273,6 +273,16 @@ async def _handle_event_async(rtu_id: int, event_type: str, detail: str):
             del _comm_fail_state[oldest]
         _comm_fail_state[key] = True
 
+    # Deduplicate nighttime_standby: suppress periodic repeats (same as comm_fail)
+    if event_type == "nighttime_standby":
+        key = (rtu_id, detail)
+        if _comm_fail_state.get(key):
+            return
+        if len(_comm_fail_state) >= _COMM_FAIL_MAX:
+            oldest = next(iter(_comm_fail_state))
+            del _comm_fail_state[oldest]
+        _comm_fail_state[key] = True
+
     # Log RTU online event
     if event_type == "rtu_event" and "PORT OPEN" in detail:
         rtu_state = engine.rtu_registry.get(rtu_id)

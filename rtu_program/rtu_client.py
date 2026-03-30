@@ -1322,8 +1322,16 @@ class RTUClient:
                     sent_packets.append((seq, packet))
             else:
                 self.logger.warning(f"[RS485] INV{device_number}: no polled data")
-                packet, seq = self.protocol.create_h01_comm_fail(
-                    DEVICE_INVERTER, device_number, inv['model'], INV_BODY_FAIL)
+                from datetime import datetime as _dt
+                _hour = _dt.now().hour
+                _is_nighttime = _hour >= 20 or _hour < 5
+                if inv.get('protocol') == 'kstar' and _is_nighttime:
+                    self.logger.info(f"[RS485] INV{device_number}: Kstar nighttime standby")
+                    packet, seq = self.protocol.create_h01_nighttime_standby(
+                        DEVICE_INVERTER, device_number, inv['model'])
+                else:
+                    packet, seq = self.protocol.create_h01_comm_fail(
+                        DEVICE_INVERTER, device_number, inv['model'], INV_BODY_FAIL)
                 if self._send_udp_no_ack(packet):
                     sent_packets.append((seq, packet))
             time.sleep(DEVICE_SEND_INTERVAL)
