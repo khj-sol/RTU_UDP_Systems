@@ -1,0 +1,600 @@
+{
+  "manufacturer": "GoodWe",
+  "version": "Customer Version",
+  "source_pdf": "goodwe_modbus_protocol.pdf",
+  "extraction_method": "offline_manual",
+  "extraction_date": "2026-03-30",
+  "series": "MT / SMT",
+  "function_code": "FC03",
+  "body_type": 4,
+  "mppt_count": 4,
+  "string_count": 8,
+  "iv_scan": false,
+  "der_avm": false,
+  "byte_order": "BIG_ENDIAN",
+  "notes": "MT/SMT series registers start at address 768 (0x0300). MPPT3/4 at 855-858, String currents at 859-866. PV5/PV6 (804-807) are SMT50/60K only, not mapped as separate MPPTs. No DER-AVM, no IV scan.",
+  "device_info": [
+    {
+      "name": "Serial Number",
+      "address": 512,
+      "address_hex": "0x0200",
+      "regs": 8,
+      "type": "STR",
+      "description": "ASCII serial number (8 registers = 16 chars)"
+    },
+    {
+      "name": "Device Type",
+      "address": 528,
+      "address_hex": "0x0210",
+      "regs": 5,
+      "type": "STR",
+      "description": "ASCII device type (5 registers = 10 chars)"
+    }
+  ],
+  "mapping": {
+    "periodic_basic": [
+      {
+        "udp_field": "PV \uc804\uc555",
+        "mb_addr": 768,
+        "mb_addr_hex": "0x0300",
+        "mb_regs": 1,
+        "mb_type": "U16",
+        "mb_unit": "0.1V",
+        "mb_definition": "Vpv1 - PV1 voltage",
+        "mb_rw": "RO"
+      },
+      {
+        "udp_field": "PV \uc804\ub958",
+        "mb_addr": 770,
+        "mb_addr_hex": "0x0302",
+        "mb_regs": 1,
+        "mb_type": "U16",
+        "mb_unit": "0.1A",
+        "mb_definition": "Ipv1 - PV1 current",
+        "mb_rw": "RO"
+      },
+      {
+        "udp_field": "PV \ucd9c\ub825",
+        "mb_addr": null,
+        "mb_addr_hex": "-",
+        "mb_regs": 0,
+        "mb_type": "",
+        "mb_unit": "",
+        "mb_definition": "(computed from MPPT V*I pairs, no dedicated PV power register)",
+        "mb_rw": ""
+      },
+      {
+        "udp_field": "R(RS)\uc0c1 \uc804\uc555",
+        "mb_addr": 772,
+        "mb_addr_hex": "0x0304",
+        "mb_regs": 1,
+        "mb_type": "U16",
+        "mb_unit": "0.1V",
+        "mb_definition": "Vac1 - L1/R-phase AC voltage",
+        "mb_rw": "RO"
+      },
+      {
+        "udp_field": "S(ST)\uc0c1 \uc804\uc555",
+        "mb_addr": 773,
+        "mb_addr_hex": "0x0305",
+        "mb_regs": 1,
+        "mb_type": "U16",
+        "mb_unit": "0.1V",
+        "mb_definition": "Vac2 - L2/S-phase AC voltage",
+        "mb_rw": "RO"
+      },
+      {
+        "udp_field": "T(TR)\uc0c1 \uc804\uc555",
+        "mb_addr": 774,
+        "mb_addr_hex": "0x0306",
+        "mb_regs": 1,
+        "mb_type": "U16",
+        "mb_unit": "0.1V",
+        "mb_definition": "Vac3 - L3/T-phase AC voltage",
+        "mb_rw": "RO"
+      },
+      {
+        "udp_field": "R\uc0c1 \uc804\ub958",
+        "mb_addr": 775,
+        "mb_addr_hex": "0x0307",
+        "mb_regs": 1,
+        "mb_type": "U16",
+        "mb_unit": "0.1A",
+        "mb_definition": "Iac1 - L1/R-phase AC current",
+        "mb_rw": "RO"
+      },
+      {
+        "udp_field": "S\uc0c1 \uc804\ub958",
+        "mb_addr": 776,
+        "mb_addr_hex": "0x0308",
+        "mb_regs": 1,
+        "mb_type": "U16",
+        "mb_unit": "0.1A",
+        "mb_definition": "Iac2 - L2/S-phase AC current",
+        "mb_rw": "RO"
+      },
+      {
+        "udp_field": "T\uc0c1 \uc804\ub958",
+        "mb_addr": 777,
+        "mb_addr_hex": "0x0309",
+        "mb_regs": 1,
+        "mb_type": "U16",
+        "mb_unit": "0.1A",
+        "mb_definition": "Iac3 - L3/T-phase AC current",
+        "mb_rw": "RO"
+      },
+      {
+        "udp_field": "\uc778\ubc84\ud130 \ucd9c\ub825",
+        "mb_addr": 850,
+        "mb_addr_hex": "0x0352",
+        "mb_regs": 2,
+        "mb_type": "U32",
+        "mb_unit": "1W",
+        "mb_definition": "Pac - Total AC output power (U32-BE: reg 850=high, 851=low)",
+        "mb_rw": "RO"
+      },
+      {
+        "udp_field": "\uc5ed\ub960",
+        "mb_addr": 886,
+        "mb_addr_hex": "0x0376",
+        "mb_regs": 1,
+        "mb_type": "U16",
+        "mb_unit": "0.001",
+        "mb_definition": "Power Factor",
+        "mb_rw": "RO"
+      },
+      {
+        "udp_field": "\uc8fc\ud30c\uc218",
+        "mb_addr": 778,
+        "mb_addr_hex": "0x030A",
+        "mb_regs": 1,
+        "mb_type": "U16",
+        "mb_unit": "0.01Hz",
+        "mb_definition": "Fac1 - L1 grid frequency",
+        "mb_rw": "RO"
+      },
+      {
+        "udp_field": "\ub204\uc801 \ubc1c\uc804\ub7c9",
+        "mb_addr": 786,
+        "mb_addr_hex": "0x0312",
+        "mb_regs": 2,
+        "mb_type": "U32",
+        "mb_unit": "0.1kWh",
+        "mb_definition": "E_total - Total energy (U32-BE: reg 786=high, 787=low)",
+        "mb_rw": "RO"
+      },
+      {
+        "udp_field": "\uc0c1\ud0dc \uc815\ubcf4 1",
+        "mb_addr": 782,
+        "mb_addr_hex": "0x030E",
+        "mb_regs": 1,
+        "mb_type": "U16",
+        "mb_unit": "",
+        "mb_definition": "Work Mode (0=Wait/Standby, 1=Normal/On-Grid, 2=Fault)",
+        "mb_rw": "RO"
+      },
+      {
+        "udp_field": "\uc0c1\ud0dc \uc815\ubcf4 2",
+        "mb_addr": 784,
+        "mb_addr_hex": "0x0310",
+        "mb_regs": 1,
+        "mb_type": "U16",
+        "mb_unit": "",
+        "mb_definition": "Error Message H (bit-field, high word)",
+        "mb_rw": "RO"
+      },
+      {
+        "udp_field": "\uc0c1\ud0dc \uc815\ubcf4 3",
+        "mb_addr": 785,
+        "mb_addr_hex": "0x0311",
+        "mb_regs": 1,
+        "mb_type": "U16",
+        "mb_unit": "",
+        "mb_definition": "Error Message L (bit-field, low word)",
+        "mb_rw": "RO"
+      },
+      {
+        "udp_field": "\uc0c1\ud0dc \uc815\ubcf4 4",
+        "mb_addr": 783,
+        "mb_addr_hex": "0x030F",
+        "mb_regs": 1,
+        "mb_type": "U16",
+        "mb_unit": "0.1\u00b0C",
+        "mb_definition": "Internal temperature (also used as status/health indicator)",
+        "mb_rw": "RO"
+      }
+    ],
+    "periodic_mppt": [
+      {
+        "udp_field": "MPPT1 \uc804\uc555",
+        "mb_addr": 768,
+        "mb_addr_hex": "0x0300",
+        "mb_regs": 1,
+        "mb_type": "U16",
+        "mb_unit": "0.1V",
+        "mb_definition": "Vpv1 - MPPT1/PV1 voltage",
+        "mb_rw": "RO"
+      },
+      {
+        "udp_field": "MPPT1 \uc804\ub958",
+        "mb_addr": 770,
+        "mb_addr_hex": "0x0302",
+        "mb_regs": 1,
+        "mb_type": "U16",
+        "mb_unit": "0.1A",
+        "mb_definition": "Ipv1 - MPPT1/PV1 current",
+        "mb_rw": "RO"
+      },
+      {
+        "udp_field": "MPPT2 \uc804\uc555",
+        "mb_addr": 769,
+        "mb_addr_hex": "0x0301",
+        "mb_regs": 1,
+        "mb_type": "U16",
+        "mb_unit": "0.1V",
+        "mb_definition": "Vpv2 - MPPT2/PV2 voltage",
+        "mb_rw": "RO"
+      },
+      {
+        "udp_field": "MPPT2 \uc804\ub958",
+        "mb_addr": 771,
+        "mb_addr_hex": "0x0303",
+        "mb_regs": 1,
+        "mb_type": "U16",
+        "mb_unit": "0.1A",
+        "mb_definition": "Ipv2 - MPPT2/PV2 current",
+        "mb_rw": "RO"
+      },
+      {
+        "udp_field": "MPPT3 \uc804\uc555",
+        "mb_addr": 855,
+        "mb_addr_hex": "0x0357",
+        "mb_regs": 1,
+        "mb_type": "U16",
+        "mb_unit": "0.1V",
+        "mb_definition": "Vpv3 - MPPT3/PV3 voltage (MT extended)",
+        "mb_rw": "RO"
+      },
+      {
+        "udp_field": "MPPT3 \uc804\ub958",
+        "mb_addr": 857,
+        "mb_addr_hex": "0x0359",
+        "mb_regs": 1,
+        "mb_type": "U16",
+        "mb_unit": "0.1A",
+        "mb_definition": "Ipv3 - MPPT3/PV3 current (MT extended)",
+        "mb_rw": "RO"
+      },
+      {
+        "udp_field": "MPPT4 \uc804\uc555",
+        "mb_addr": 856,
+        "mb_addr_hex": "0x0358",
+        "mb_regs": 1,
+        "mb_type": "U16",
+        "mb_unit": "0.1V",
+        "mb_definition": "Vpv4 - MPPT4/PV4 voltage (MT extended)",
+        "mb_rw": "RO"
+      },
+      {
+        "udp_field": "MPPT4 \uc804\ub958",
+        "mb_addr": 858,
+        "mb_addr_hex": "0x035A",
+        "mb_regs": 1,
+        "mb_type": "U16",
+        "mb_unit": "0.1A",
+        "mb_definition": "Ipv4 - MPPT4/PV4 current (MT extended)",
+        "mb_rw": "RO"
+      }
+    ],
+    "periodic_string": [
+      {
+        "udp_field": "STRING1 \uc804\ub958",
+        "mb_addr": 859,
+        "mb_addr_hex": "0x035B",
+        "mb_regs": 1,
+        "mb_type": "U16",
+        "mb_unit": "0.1A",
+        "mb_definition": "String 1 current",
+        "mb_rw": "RO"
+      },
+      {
+        "udp_field": "STRING2 \uc804\ub958",
+        "mb_addr": 860,
+        "mb_addr_hex": "0x035C",
+        "mb_regs": 1,
+        "mb_type": "U16",
+        "mb_unit": "0.1A",
+        "mb_definition": "String 2 current",
+        "mb_rw": "RO"
+      },
+      {
+        "udp_field": "STRING3 \uc804\ub958",
+        "mb_addr": 861,
+        "mb_addr_hex": "0x035D",
+        "mb_regs": 1,
+        "mb_type": "U16",
+        "mb_unit": "0.1A",
+        "mb_definition": "String 3 current",
+        "mb_rw": "RO"
+      },
+      {
+        "udp_field": "STRING4 \uc804\ub958",
+        "mb_addr": 862,
+        "mb_addr_hex": "0x035E",
+        "mb_regs": 1,
+        "mb_type": "U16",
+        "mb_unit": "0.1A",
+        "mb_definition": "String 4 current",
+        "mb_rw": "RO"
+      },
+      {
+        "udp_field": "STRING5 \uc804\ub958",
+        "mb_addr": 863,
+        "mb_addr_hex": "0x035F",
+        "mb_regs": 1,
+        "mb_type": "U16",
+        "mb_unit": "0.1A",
+        "mb_definition": "String 5 current",
+        "mb_rw": "RO"
+      },
+      {
+        "udp_field": "STRING6 \uc804\ub958",
+        "mb_addr": 864,
+        "mb_addr_hex": "0x0360",
+        "mb_regs": 1,
+        "mb_type": "U16",
+        "mb_unit": "0.1A",
+        "mb_definition": "String 6 current",
+        "mb_rw": "RO"
+      },
+      {
+        "udp_field": "STRING7 \uc804\ub958",
+        "mb_addr": 865,
+        "mb_addr_hex": "0x0361",
+        "mb_regs": 1,
+        "mb_type": "U16",
+        "mb_unit": "0.1A",
+        "mb_definition": "String 7 current",
+        "mb_rw": "RO"
+      },
+      {
+        "udp_field": "STRING8 \uc804\ub958",
+        "mb_addr": 866,
+        "mb_addr_hex": "0x0362",
+        "mb_regs": 1,
+        "mb_type": "U16",
+        "mb_unit": "0.1A",
+        "mb_definition": "String 8 current",
+        "mb_rw": "RO"
+      }
+    ],
+    "control_values": [
+      {
+        "udp_field": "\uc778\ubc84\ud130 \uae30\ub3d9/\uc815\uc9c0",
+        "mb_addr": 288,
+        "mb_addr_hex": "0x0120",
+        "mb_regs": 1,
+        "mb_type": "U16",
+        "mb_unit": "",
+        "mb_definition": "Power On (write 0x0000 to reg 288), Power Off (write 0x0000 to reg 289)",
+        "mb_rw": "WO"
+      },
+      {
+        "udp_field": "\uc5ed\ub960 \uc124\uc815 \uac12",
+        "mb_addr": 257,
+        "mb_addr_hex": "0x0101",
+        "mb_regs": 1,
+        "mb_type": "U16",
+        "mb_unit": "1%",
+        "mb_definition": "PF adjust percentage",
+        "mb_rw": "WO"
+      },
+      {
+        "udp_field": "\ub3d9\uc791 \ubaa8\ub4dc",
+        "mb_addr": null,
+        "mb_addr_hex": "-",
+        "mb_regs": 0,
+        "mb_type": "",
+        "mb_unit": "",
+        "mb_definition": "(no dedicated operation mode control register in non-DER section)",
+        "mb_rw": ""
+      },
+      {
+        "udp_field": "\ubb34\ud6a8\uc804\ub825 \uc124\uc815 \uac12",
+        "mb_addr": 258,
+        "mb_addr_hex": "0x0102",
+        "mb_regs": 2,
+        "mb_type": "S32",
+        "mb_unit": "1Var",
+        "mb_definition": "Reactive power adjust (S32, 2 registers)",
+        "mb_rw": "WO"
+      },
+      {
+        "udp_field": "\uc720\ud6a8\uc804\ub825 \uc124\uc815 \uac12",
+        "mb_addr": 256,
+        "mb_addr_hex": "0x0100",
+        "mb_regs": 1,
+        "mb_type": "U16",
+        "mb_unit": "1%",
+        "mb_definition": "Active power adjust percentage",
+        "mb_rw": "WO"
+      }
+    ],
+    "control_monitor": [],
+    "iv_scan": []
+  },
+  "status_map": {
+    "0": {
+      "mode_name": "Wait/Standby",
+      "solarize_code": "0x00",
+      "description": "Inverter waiting for conditions (no grid connection)"
+    },
+    "1": {
+      "mode_name": "Normal/On-Grid",
+      "solarize_code": "0x01",
+      "description": "Normal grid-tied operation, generating power"
+    },
+    "2": {
+      "mode_name": "Fault",
+      "solarize_code": "0x02",
+      "description": "Fault detected, inverter stopped"
+    }
+  },
+  "error_codes": [
+    {
+      "register": "Error Message H (reg 784)",
+      "bit": 0,
+      "code": "0x0001",
+      "description": "Over Temperature (bit-field in Error Message H)"
+    },
+    {
+      "register": "Error Message H (reg 784)",
+      "bit": 1,
+      "code": "0x0002",
+      "description": "Over Voltage on DC side"
+    },
+    {
+      "register": "Error Message H (reg 784)",
+      "bit": 2,
+      "code": "0x0004",
+      "description": "Under Voltage on DC side"
+    },
+    {
+      "register": "Error Message H (reg 784)",
+      "bit": 3,
+      "code": "0x0008",
+      "description": "Over Current on DC side"
+    },
+    {
+      "register": "Error Message H (reg 784)",
+      "bit": 4,
+      "code": "0x0010",
+      "description": "Grid Over Voltage"
+    },
+    {
+      "register": "Error Message H (reg 784)",
+      "bit": 5,
+      "code": "0x0020",
+      "description": "Grid Under Voltage"
+    },
+    {
+      "register": "Error Message H (reg 784)",
+      "bit": 6,
+      "code": "0x0040",
+      "description": "Grid Over Frequency"
+    },
+    {
+      "register": "Error Message H (reg 784)",
+      "bit": 7,
+      "code": "0x0080",
+      "description": "Grid Under Frequency"
+    },
+    {
+      "register": "Error Message L (reg 785)",
+      "bit": 0,
+      "code": "0x0001",
+      "description": "Islanding Detection"
+    },
+    {
+      "register": "Error Message L (reg 785)",
+      "bit": 1,
+      "code": "0x0002",
+      "description": "GFCI Fault (Ground Fault)"
+    },
+    {
+      "register": "Error Message L (reg 785)",
+      "bit": 2,
+      "code": "0x0004",
+      "description": "DCI Over Current"
+    },
+    {
+      "register": "Error Message L (reg 785)",
+      "bit": 3,
+      "code": "0x0008",
+      "description": "PV Over Voltage"
+    }
+  ],
+  "additional_registers": {
+    "daily_energy": {
+      "address": 800,
+      "address_hex": "0x0320",
+      "type": "U16",
+      "unit": "0.1kWh",
+      "description": "Daily energy yield"
+    },
+    "pac_l": {
+      "address": 781,
+      "address_hex": "0x030D",
+      "type": "U16",
+      "unit": "1W",
+      "description": "Pac L - output power low word (legacy single-reg power, MT section)"
+    },
+    "l2_frequency": {
+      "address": 779,
+      "address_hex": "0x030B",
+      "type": "U16",
+      "unit": "0.01Hz",
+      "description": "Fac2 - L2 grid frequency"
+    },
+    "l3_frequency": {
+      "address": 780,
+      "address_hex": "0x030C",
+      "type": "U16",
+      "unit": "0.01Hz",
+      "description": "Fac3 - L3 grid frequency"
+    },
+    "pv5_voltage_smt": {
+      "address": 804,
+      "address_hex": "0x0324",
+      "type": "U16",
+      "unit": "0.1V",
+      "description": "PV5 voltage (SMT50/60K only)"
+    },
+    "pv5_current_smt": {
+      "address": 805,
+      "address_hex": "0x0325",
+      "type": "U16",
+      "unit": "0.1A",
+      "description": "PV5 current (SMT50/60K only)"
+    },
+    "pv6_voltage_smt": {
+      "address": 806,
+      "address_hex": "0x0326",
+      "type": "U16",
+      "unit": "0.1V",
+      "description": "PV6 voltage (SMT50/60K only)"
+    },
+    "pv6_current_smt": {
+      "address": 807,
+      "address_hex": "0x0327",
+      "type": "U16",
+      "unit": "0.1A",
+      "description": "PV6 current (SMT50/60K only)"
+    },
+    "power_on_register": {
+      "address": 288,
+      "address_hex": "0x0120",
+      "type": "U16",
+      "unit": "",
+      "description": "Power On (write 0x0000)"
+    },
+    "power_off_register": {
+      "address": 289,
+      "address_hex": "0x0121",
+      "type": "U16",
+      "unit": "",
+      "description": "Power Off (write 0x0000)"
+    }
+  },
+  "scale_factors": {
+    "voltage": 0.1,
+    "current": 0.1,
+    "power": 1.0,
+    "frequency": 0.01,
+    "power_factor": 0.001,
+    "temperature": 0.1,
+    "energy": 0.1,
+    "pv_voltage": 0.1,
+    "pv_current": 0.1
+  }
+}

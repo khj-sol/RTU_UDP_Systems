@@ -741,6 +741,7 @@ function ControlTab({
       'comm_restored': 'text-emerald-400',
       'inverter_model': 'text-blue-400',
       'H03_SENT': 'text-orange-400',
+      'rtu_event': 'text-red-400',
     };
     const CTRL_NAMES = {1:'Reboot',2:'RTU Info',11:'INV Model',12:'IV Scan',13:'Status Check',14:'Init Reset',15:'On/Off',16:'Active Power',17:'Power Factor',18:'Reactive Power'};
     const RESP_NAMES = {0:'SUCCESS',1:'FAIL',2:'BUSY',3:'UNSUPPORTED'};
@@ -767,6 +768,7 @@ function ControlTab({
     'h04_response', 'H03_SENT', 'inverter_model', 'rtu_info',
     'control_check', 'control_result',
     'iv_scan_success', 'iv_scan_data', 'iv_scan_complete',
+    'rtu_event',
   ]);
   // Deduplicate: track last logged event per type to suppress repeats
   const lastLoggedRef = useRef({});
