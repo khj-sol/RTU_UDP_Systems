@@ -301,7 +301,7 @@ function OverviewTab({
       className: "text-gray-400 hover:text-white text-xl",
       onClick: () => setInfoRtu(null)
     }, "\u2715")), /*#__PURE__*/React.createElement("div", {className: "space-y-2 text-sm"},
-      [['Status', infoRtu.status === 'online' ? '\uD83D\uDFE2 Online' : '\uD534 Offline'],
+      [['Status', infoRtu.status === 'online' ? 'Online' : 'Offline'],
        ['IP', `${infoRtu.ip || '--'}:${infoRtu.port || '--'}`],
        ['Model', infoRtu.rtu_info?.model || '--'],
        ['Serial', infoRtu.rtu_info?.serial || '--'],
