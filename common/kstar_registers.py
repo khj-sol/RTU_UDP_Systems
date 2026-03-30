@@ -131,6 +131,21 @@ class RegisterMap:
     DER_ACTIVE_POWER_PCT = 0x07D3   # U16, scale 0.1% — 유효전력 제한 설정
     INVERTER_ON_OFF = 0x0834   # U16: 0=운전(ON), 1=정지(OFF)
 
+    # =========================================================================
+    # IV Scan Registers — FC06 Write (trigger), FC04 Read (status/data)
+    # =========================================================================
+
+    IV_SCAN_COMMAND = 0x0FC3   # 4035, FC06 write any value to start scan
+    IV_SCAN_STATUS = 0x0C36    # 3126, FC04 read (low=0/1 scanning, high=progress%)
+    IV_DATA_BASE = 0x1388      # 5000, FC04 read — IV curve data start
+    IV_POINTS_PER_STRING = 100 # 100 V/I data points per string
+    IV_REGS_PER_STRING = 200   # 100 pairs × 2 regs (V+I alternating)
+    IV_TOTAL_STRINGS = 12      # 3 MPPT × 4 strings = 12
+    IV_TOTAL_REGS = 2400       # 12 strings × 200 regs = registers 5000-7399
+
+    # Alias for Solarize compatibility
+    IV_CURVE_SCAN = IV_SCAN_COMMAND
+
     # Alias (Solarize compatible)
     POWER_FACTOR_SET    = DER_POWER_FACTOR_SET
     ACTION_MODE         = DER_ACTION_MODE
@@ -641,6 +656,77 @@ DATA_TYPES = {
 }
 
 FLOAT32_FIELDS = set()
+
+
+# =============================================================================
+# IV Scan Helper Functions (Solarize-compatible API)
+# =============================================================================
+
+class IVScanCommand:
+    ACTIVE = 0x0001
+
+class IVScanStatus:
+    IDLE = 0x0000
+    RUNNING = 0x0001
+    FINISHED = 0x0002
+
+
+def get_iv_string_mapping(total_strings=12, strings_per_mppt=4):
+    """Return IV scan register mapping for each string.
+
+    Kstar layout: V/I alternating pairs, 100 points per string, 200 regs per string.
+    PV1: 5000-5199, PV2: 5200-5399, ... PV12: 7200-7399
+    """
+    mapping = []
+    for s in range(total_strings):
+        mppt_num = s // strings_per_mppt + 1
+        string_in_mppt = s % strings_per_mppt + 1
+        base = RegisterMap.IV_DATA_BASE + s * RegisterMap.IV_REGS_PER_STRING
+        mapping.append({
+            'string_num': s + 1,
+            'mppt_num': mppt_num,
+            'string_in_mppt': string_in_mppt,
+            'voltage_base': base,      # V/I interleaved — voltage at even offsets
+            'current_base': base + 1,  # current at odd offsets
+            'data_points': RegisterMap.IV_POINTS_PER_STRING,
+            'interleaved': True,       # Kstar: V,I,V,I... (not separate blocks)
+        })
+    return mapping
+
+
+def get_iv_tracker_voltage_registers(tracker_num, data_points=100):
+    """Get voltage register range for a tracker (MPPT). Kstar: interleaved."""
+    strings_per_mppt = 4
+    base = RegisterMap.IV_DATA_BASE + (tracker_num - 1) * strings_per_mppt * RegisterMap.IV_REGS_PER_STRING
+    return {'base': base, 'count': data_points * 2, 'end': base + data_points * 2 - 1}
+
+
+def get_iv_string_current_registers(mppt_num, string_num, data_points=100):
+    """Get current register range for a specific string. Kstar: interleaved."""
+    strings_per_mppt = 4
+    string_idx = (mppt_num - 1) * strings_per_mppt + (string_num - 1)
+    base = RegisterMap.IV_DATA_BASE + string_idx * RegisterMap.IV_REGS_PER_STRING + 1
+    return {'base': base, 'count': data_points * 2, 'end': base + data_points * 2 - 1}
+
+
+import math
+
+def generate_iv_voltage_data(voc, v_min, data_points=100):
+    """Generate IV curve voltage sweep (0.1V units)."""
+    step = (voc - v_min) / max(data_points - 1, 1)
+    return [int((v_min + step * i) * 10) for i in range(data_points)]
+
+
+def generate_iv_current_data(isc, voc, v_min, data_points=100):
+    """Generate IV curve current data using exponential model (0.01A units)."""
+    step = (voc - v_min) / max(data_points - 1, 1)
+    result = []
+    for i in range(data_points):
+        v = v_min + step * i
+        ratio = v / voc if voc > 0 else 0
+        current = isc * max(0, 1.0 - ratio ** 20)
+        result.append(int(current * 100))
+    return result
 
 
 # Dynamic-loader alias

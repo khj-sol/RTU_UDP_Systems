@@ -1092,19 +1092,23 @@ class KstarSimulator:
         self.control_mode = 'PF'       # 'PF' or 'RP'
         self.operation_mode = 0
 
+        # IV Scan state
+        self.iv_scan_status = 0  # 0=Idle, 1=Scanning
+        self.iv_scan_start_time = 0
+        self.IV_SCAN_DURATION = 5.0
+
         self.store = self._create_datastore()
         self._current = {}
+        self._init_iv_scan_data()
 
     def _create_datastore(self):
         """FC04 Input Register + FC03 Holding Register 데이터스토어 생성"""
-        # FC04 (ir): Block1(3000~3059) + Block2(3060~3124) + Block3(3125~3149) + Block5(3228~3249)
-        ir_block = _KstarNightOffBlock(0, [0] * 3260)
+        # FC04 (ir): Block1-5 (3000~3249) + IV data (5000~7399)
+        ir_block = _KstarNightOffBlock(0, [0] * 7400)
 
-        # FC03 (hr): Block4(3200~3217) + DER Control(0x07D0~0x0834)
-        #   → 0x0834 = 2100, store.setValues(3, 2100, x) → hr.setValues(2101, x)
-        #   → Block4 최대 3217 → 블록 크기 3230 유지
+        # FC03 (hr): Block4(3200~3217) + DER Control(0x07D0~0x0834) + IV trigger(0x0FB3=4035)
         hr_block = ModbusLoggedHoldingBlock(
-            0, [0] * 3230,
+            0, [0] * 4040,
             self.logger, simulator=self, name="KST"
         )
 
@@ -1344,6 +1348,61 @@ class KstarSimulator:
         new_mode = self.store.getValues(3, KstarRegisters.DER_ACTION_MODE, count=1)[0]
         if new_mode != self.operation_mode:
             self.operation_mode = new_mode
+
+        # IV Scan trigger: register 4035 (FC06 write → FC03 holding)
+        iv_cmd = self.store.getValues(3, KstarRegisters.IV_SCAN_COMMAND, count=1)[0]
+        if iv_cmd != 0 and self.iv_scan_status == 0:
+            self.iv_scan_status = 1  # Scanning
+            self.iv_scan_start_time = time.time()
+            # Reset trigger
+            self.store.setValues(3, KstarRegisters.IV_SCAN_COMMAND, [0])
+            # Regenerate IV data
+            self._init_iv_scan_data()
+            # Update status register (FC04 input register 3126)
+            self.store.setValues(4, KstarRegisters.IV_SCAN_STATUS, [0x0001])  # low=1 (scanning)
+            self.logger.info("[KST] IV Scan started")
+
+        # Auto-complete after duration
+        if self.iv_scan_status == 1:
+            elapsed = time.time() - self.iv_scan_start_time
+            progress = min(int(elapsed / self.IV_SCAN_DURATION * 100), 100)
+            # Update progress in status register (high byte = progress%)
+            self.store.setValues(4, KstarRegisters.IV_SCAN_STATUS, [(progress << 8) | 0x01])
+            if elapsed >= self.IV_SCAN_DURATION:
+                self.iv_scan_status = 2  # Finished
+                self.store.setValues(4, KstarRegisters.IV_SCAN_STATUS, [0x0000])  # idle
+                self.logger.info("[KST] IV Scan completed")
+
+        # Auto-reset after 60s
+        if self.iv_scan_status == 2 and time.time() - self.iv_scan_start_time > self.IV_SCAN_DURATION + 60:
+            self.iv_scan_status = 0
+
+    def _init_iv_scan_data(self):
+        """Pre-populate IV curve data in FC04 registers 5000-7399."""
+        from common.kstar_registers import generate_iv_voltage_data, generate_iv_current_data
+        mppt_count = 3
+        strings_per_mppt = 4
+        data_points = KstarRegisters.IV_POINTS_PER_STRING  # 100
+
+        for mppt in range(mppt_count):
+            voc = 45.0 + mppt * 2.0 + random.uniform(-1, 1)
+            v_min = 20.0
+            isc = 10.0 + random.uniform(-0.5, 0.5)
+
+            voltages = generate_iv_voltage_data(voc, v_min, data_points)
+
+            for s in range(strings_per_mppt):
+                string_idx = mppt * strings_per_mppt + s
+                base = KstarRegisters.IV_DATA_BASE + string_idx * KstarRegisters.IV_REGS_PER_STRING
+                isc_str = isc + random.uniform(-0.3, 0.3)
+                currents = generate_iv_current_data(isc_str, voc, v_min, data_points)
+
+                # Write interleaved V/I pairs to FC04 input registers
+                iv_regs = []
+                for p in range(data_points):
+                    iv_regs.append(voltages[p])   # voltage U16
+                    iv_regs.append(currents[p])   # current S16 (as U16)
+                self.store.setValues(4, base, iv_regs)
 
 
 # =============================================================================

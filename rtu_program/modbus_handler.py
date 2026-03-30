@@ -1674,8 +1674,18 @@ class KstarModbusHandler(ModbusHandlerHAT):
                 KstarRegisters.DER_ACTIVE_POWER_PCT, 1, self.slave_id)
             status['active_power_pct'] = result[0] if result else 1000
 
-            # Kstar: IV Scan 없음 → 항상 0 (Idle)
-            status['iv_scan_status'] = 0
+            # Kstar IV Scan status: register 3126 (FC04)
+            # Low byte: 0=idle, 1=scanning; High byte: 0-100 progress%
+            try:
+                result = self.master.read_input_registers(
+                    KstarRegisters.IV_SCAN_STATUS, 1, self.slave_id)
+                if result:
+                    low_byte = result[0] & 0xFF
+                    status['iv_scan_status'] = 0 if low_byte == 0 else 1
+                else:
+                    status['iv_scan_status'] = 0
+            except Exception:
+                status['iv_scan_status'] = 0
 
             return status
 
@@ -1697,6 +1707,11 @@ class KstarModbusHandler(ModbusHandlerHAT):
             return False
 
         try:
+            # IV Scan trigger: write any value to register 4035 (FC06)
+            if control_type == CTRL_INV_IV_SCAN:
+                return self.master.write_single_register(
+                    KstarRegisters.IV_SCAN_COMMAND, value if value else 1, self.slave_id)
+
             reg_map = {
                 CTRL_INV_ON_OFF:        KstarRegisters.INVERTER_ON_OFF,
                 CTRL_INV_ACTIVE_POWER:  KstarRegisters.DER_ACTIVE_POWER_PCT,
@@ -1728,6 +1743,53 @@ class KstarModbusHandler(ModbusHandlerHAT):
         except Exception as e:
             self.logger.error(f"Kstar write_control error: {e}")
             return False
+
+    def get_iv_scan_data(self, string_num):
+        """Kstar IV Scan 데이터 읽기 — V/I interleaved pairs from FC04.
+
+        Kstar layout: register 5000 + (string_num-1)*200, 200 regs per string
+        Even offset = voltage (U16, 0.1V), Odd offset = current (S16, 0.01A)
+        Returns list of (voltage_raw, current_raw) tuples.
+        """
+        if not self.connected or not self.master:
+            self.logger.warning("Kstar get_iv_scan_data: not connected")
+            return []
+        try:
+            base = KstarRegisters.IV_DATA_BASE + (string_num - 1) * KstarRegisters.IV_REGS_PER_STRING
+            count = KstarRegisters.IV_REGS_PER_STRING  # 200 regs
+
+            # Read in chunks of 125 (Modbus limit)
+            all_regs = []
+            remaining = count
+            addr = base
+            while remaining > 0:
+                chunk = min(remaining, 125)
+                result = self.master.read_input_registers(addr, chunk, self.slave_id)
+                if not result:
+                    break
+                all_regs.extend(result)
+                addr += chunk
+                remaining -= chunk
+
+            if len(all_regs) < count:
+                self.logger.warning(f"Kstar IV data incomplete: got {len(all_regs)}/{count}")
+                return []
+
+            # Parse V/I interleaved pairs
+            points = []
+            for i in range(0, count, 2):
+                v_raw = all_regs[i]
+                i_raw = all_regs[i + 1]
+                if v_raw == 0xFFFF:  # Invalid data marker
+                    break
+                points.append((v_raw, i_raw))
+
+            self.logger.info(f"Kstar IV string {string_num}: {len(points)} points from 0x{base:04X}")
+            return points
+
+        except Exception as e:
+            self.logger.error(f"Kstar get_iv_scan_data error: {e}")
+            return []
 
     def read_model_info(self):
         """Kstar 장비 정보 읽기 (FC03 Block4 + FC04 Block5)"""
