@@ -10,3 +10,7 @@ pc_programs/firmware/*.tar.gz
 *.db-wal
 *.bak_orig
 manuals/*.img.xz
+*.bak
+*.log
+.claude/
+model_maker/comparison_output_all/
