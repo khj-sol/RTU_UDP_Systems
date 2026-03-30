@@ -277,7 +277,45 @@ function OverviewTab({
   const gridDisplay = hasGrid ? totalGrid : totalSolar;
   const gridLabel = hasGrid ? "Total Grid Power" : "Total Grid Power (=Solar)";
   const gridColor = hasGrid ? "text-blue-400" : "text-yellow-400";
-  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  const [infoRtu, setInfoRtu] = useState(null);
+  const [infoData, setInfoData] = useState(null);
+  const showRtuInfo = async (r) => {
+    setInfoRtu(r);
+    try {
+      const d = await fetcher(`/rtus/${r.rtu_id}`);
+      setInfoData(d);
+    } catch(e) { setInfoData(null); }
+  };
+  return /*#__PURE__*/React.createElement("div", null,
+    infoRtu && /*#__PURE__*/React.createElement("div", {
+      className: "fixed inset-0 bg-black/60 z-50 flex items-center justify-center",
+      onClick: () => setInfoRtu(null)
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4 border border-gray-600",
+      onClick: e => e.stopPropagation()
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "flex justify-between items-center mb-4"
+    }, /*#__PURE__*/React.createElement("h3", {className: "text-lg font-bold"}, "RTU ", infoRtu.rtu_id, " ", infoRtu.rtu_type && /*#__PURE__*/React.createElement("span", {
+      className: `ml-1 text-xs px-1.5 py-0.5 rounded ${infoRtu.rtu_type === 'RIP' ? 'bg-purple-600' : 'bg-teal-600'}`
+    }, infoRtu.rtu_type)), /*#__PURE__*/React.createElement("button", {
+      className: "text-gray-400 hover:text-white text-xl",
+      onClick: () => setInfoRtu(null)
+    }, "\u2715")), /*#__PURE__*/React.createElement("div", {className: "space-y-2 text-sm"},
+      [['Status', infoRtu.status === 'online' ? '\uD83D\uDFE2 Online' : '\uD534 Offline'],
+       ['IP', `${infoRtu.ip || '--'}:${infoRtu.port || '--'}`],
+       ['Model', infoRtu.rtu_info?.model || '--'],
+       ['Serial', infoRtu.rtu_info?.serial || '--'],
+       ['Phone', infoRtu.rtu_info?.phone || '--'],
+       ['Firmware', infoRtu.rtu_info?.firmware || '--'],
+       ['Devices', infoRtu.device_count || 0],
+       ['Period', infoRtu.avg_interval > 0 ? Math.round(infoRtu.avg_interval / 60) + '\uBD84' : '--'],
+       ['Last Seen', fmtTime(infoRtu.last_seen)],
+       ['Power', fmt((infoRtu.total_solar_power || 0) / 1000, 2) + ' kW'],
+      ].map(([k, v]) => /*#__PURE__*/React.createElement("div", {key: k, className: "flex justify-between border-b border-gray-700/50 pb-1"},
+        /*#__PURE__*/React.createElement("span", {className: "text-gray-400"}, k),
+        /*#__PURE__*/React.createElement("span", {className: "text-white"}, v)
+      ))
+    ))), /*#__PURE__*/React.createElement("div", {
     className: "grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6"
   }, /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("div", {
     className: "text-gray-400 text-sm"
@@ -319,18 +357,22 @@ function OverviewTab({
     style: {width: '50px'}
   }))), /*#__PURE__*/React.createElement("tbody", null, rtus.map(r => /*#__PURE__*/React.createElement("tr", {
     key: r.rtu_id,
-    className: "border-b border-gray-700/50 hover:bg-gray-700/30 cursor-pointer",
-    onClick: () => onSelectRtu(r.rtu_id)
+    className: "border-b border-gray-700/50 hover:bg-gray-700/30"
   }, /*#__PURE__*/React.createElement("td", {
-    className: "py-2 text-center"
+    className: "py-2 text-center cursor-pointer",
+    onClick: () => showRtuInfo(r)
   }, /*#__PURE__*/React.createElement("span", {
     className: `inline-block w-2.5 h-2.5 rounded-full ${statusColor(r.status)}`,
-    title: r.status
+    title: "Click for RTU info"
   })), /*#__PURE__*/React.createElement("td", {
-    className: "font-mono"
+    className: "font-mono cursor-pointer hover:text-blue-400",
+    onClick: () => onSelectRtu(r.rtu_id)
   }, r.rtu_id, " ", r.rtu_type && /*#__PURE__*/React.createElement("span", {
     className: `ml-1 text-xs px-1.5 py-0.5 rounded ${r.rtu_type === 'RIP' ? 'bg-purple-600' : 'bg-teal-600'}`
-  }, r.rtu_type)), /*#__PURE__*/React.createElement("td", null, r.ip || '--', ":", r.port || '--'), /*#__PURE__*/React.createElement("td", {
+  }, r.rtu_type)), /*#__PURE__*/React.createElement("td", {
+    className: "cursor-pointer hover:text-blue-400",
+    onClick: () => onSelectRtu(r.rtu_id)
+  }, r.ip || '--', ":", r.port || '--'), /*#__PURE__*/React.createElement("td", {
     className: "text-center text-gray-400"
   }, r.avg_interval > 0 ? Math.round(r.avg_interval / 60) + '\uBD84' : '-'), /*#__PURE__*/React.createElement("td", null, fmtTime(r.last_seen)), /*#__PURE__*/React.createElement("td", null, r.device_count || 0), /*#__PURE__*/React.createElement("td", null, fmt((r.total_solar_power || 0) / 1000, 2), " kW"), /*#__PURE__*/React.createElement("td", {
     className: "text-center"
