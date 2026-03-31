@@ -285,17 +285,23 @@ def _translate_korean_to_english(text):
 
 
 def _addr_to_int(addr_hex, addr_dec):
-    """Convert hex string or decimal to int address."""
+    """Convert hex string or decimal to int address.
+    Handles range formats like '30059~30060' by extracting the first address.
+    """
     if addr_hex:
         try:
             return int(str(addr_hex).strip(), 16)
         except ValueError:
             pass
     if addr_dec is not None:
+        s = str(addr_dec).strip()
         try:
-            return int(addr_dec)
+            return int(s)
         except (ValueError, TypeError):
-            pass
+            # Handle range format: "30059~30060", "30001~30008"
+            m = re.match(r'(\d+)', s)
+            if m:
+                return int(m.group(1))
     return None
 
 
@@ -1361,19 +1367,22 @@ def stage1_extract_to_excel(parsed_data, pdf_path, output_path=None,
         rw     = reg.get('rw', 'RO')
         comment = reg.get('comment', '')
 
-        # FC code guess
-        if rw == 'WO':
-            fc = 'FC06'
-        elif rw == 'RW':
-            fc = 'FC03/FC06'
-        else:
-            fc = 'FC03'
+        # FC code: use explicit field if available, else guess from R/W
+        fc = reg.get('fc_code', '')
+        if not fc:
+            if rw == 'WO':
+                fc = 'FC06'
+            elif rw == 'RW':
+                fc = 'FC03/FC06'
+            else:
+                fc = 'FC03'
 
-        # Scale from unit string
-        scale = ''
-        m = re.match(r'^([0-9]*\.?[0-9]+)\s*[vawkhz%]', unit.lower())
-        if m:
-            scale = m.group(1)
+        # Scale factor: use explicit field if available, else parse from unit
+        scale = reg.get('scale_factor', '')
+        if not scale:
+            m = re.match(r'^([0-9]*\.?[0-9]+)\s*[vawkhz%]', unit.lower())
+            if m:
+                scale = m.group(1)
 
         # Section divider row
         if sec and sec != current_section:
@@ -2073,6 +2082,113 @@ def stage2_create_mapping_excel(stage1_excel_path, output_path=None,
     ws4.cell(row=len(_DEA_AVM_MONITOR_REGS) + 3, column=1,
              value='NOTE: DEA-AVM monitoring registers (always included). Do not modify addresses.')
 
+    # ── Post-processing: auto-fix Unmapped essential aliases ──
+    # For non-English PDFs (Korean EKOS, etc.), name-based matching often fails.
+    # Apply keyword-based heuristic mapping for essential aliases.
+    _KEYWORD_ALIAS_MAP = [
+        # (keywords_in_src_name, solarize_name, priority)
+        # Voltage (Korean)
+        (['L1', '\uc804\uc555'], 'L1_VOLTAGE', 1),      # L1전압
+        (['R\uc0c1', '\uc804\uc555'], 'L1_VOLTAGE', 2),  # R상 전압
+        (['L2', '\uc804\uc555'], 'L2_VOLTAGE', 1),
+        (['S\uc0c1', '\uc804\uc555'], 'L2_VOLTAGE', 2),
+        (['L3', '\uc804\uc555'], 'L3_VOLTAGE', 1),
+        (['T\uc0c1', '\uc804\uc555'], 'L3_VOLTAGE', 2),
+        # Voltage (English): Vac1, phase R voltage, grid output voltage
+        (['vac1'], 'L1_VOLTAGE', 3),
+        (['phase r', 'voltage'], 'L1_VOLTAGE', 4),
+        (['vac2'], 'L2_VOLTAGE', 3),
+        (['phase s', 'voltage'], 'L2_VOLTAGE', 4),
+        (['vac3'], 'L3_VOLTAGE', 3),
+        (['phase t', 'voltage'], 'L3_VOLTAGE', 4),
+        # Current (Korean)
+        (['L1', '\uc804\ub958'], 'L1_CURRENT', 1),
+        (['L2', '\uc804\ub958'], 'L2_CURRENT', 1),
+        (['L3', '\uc804\ub958'], 'L3_CURRENT', 1),
+        # Current (English): Iac1, phase R current, grid output current
+        (['iac1', 'grid', 'current'], 'L1_CURRENT', 3),
+        (['iac1', 'output', 'current'], 'L1_CURRENT', 4),
+        (['iac2', 'grid', 'current'], 'L2_CURRENT', 3),
+        (['iac2', 'output', 'current'], 'L2_CURRENT', 4),
+        (['iac3', 'grid', 'current'], 'L3_CURRENT', 3),
+        (['iac3', 'output', 'current'], 'L3_CURRENT', 4),
+        # Energy (Korean)
+        (['\ub204\uc801', '\ubc1c\uc804'], 'TOTAL_ENERGY_LOW', 1),    # 누적발전
+        (['\ucd1d', '\ubc1c\uc804\ub7c9'], 'TOTAL_ENERGY_LOW', 2),    # 총 발전량
+        (['\uae08\uc77c', '\ubc1c\uc804'], 'TODAY_ENERGY_LOW', 1),    # 금일발전
+        (['\uc77c\uc77c', '\ubc1c\uc804'], 'TODAY_ENERGY_LOW', 2),    # 일일발전
+        # Energy (English): total energy, today energy, daily energy
+        (['total', 'energy'], 'TOTAL_ENERGY_LOW', 3),
+        (['e-total', 'generation'], 'TOTAL_ENERGY_LOW', 4),
+        (['today', 'energy'], 'TODAY_ENERGY_LOW', 3),
+        (['e-today', 'generation'], 'TODAY_ENERGY_LOW', 4),
+        (['daily', 'energy'], 'TODAY_ENERGY_LOW', 4),
+        # MPPT / PV
+        (['\ud0dc\uc591\uc804\uc9c01', '\uc804\uc555'], 'MPPT1_VOLTAGE', 1),  # 태양전지1 전압
+        (['\uc194\ub77c\uc1401', '\uc804\uc555'], 'MPPT1_VOLTAGE', 1),  # 솔라셀1 전압
+        (['PV1', '\uc804\uc555'], 'MPPT1_VOLTAGE', 2),
+        (['\ud0dc\uc591\uc804\uc9c01', '\uc804\ub958'], 'MPPT1_CURRENT', 1),  # 태양전지1 전류
+        (['\uc194\ub77c\uc1401', '\uc804\ub958'], 'MPPT1_CURRENT', 1),  # 솔라셀1 전류
+        (['PV1', '\uc804\ub958'], 'MPPT1_CURRENT', 2),
+        (['\ud0dc\uc591\uc804\uc9c02', '\uc804\uc555'], 'MPPT2_VOLTAGE', 1),  # 태양전지2 전압
+        (['\uc194\ub77c\uc1402', '\uc804\uc555'], 'MPPT2_VOLTAGE', 1),
+        (['PV2', '\uc804\uc555'], 'MPPT2_VOLTAGE', 2),
+        (['\ud0dc\uc591\uc804\uc9c02', '\uc804\ub958'], 'MPPT2_CURRENT', 1),  # 태양전지2 전류
+        (['\uc194\ub77c\uc1402', '\uc804\ub958'], 'MPPT2_CURRENT', 1),
+        (['PV2', '\uc804\ub958'], 'MPPT2_CURRENT', 2),
+        # Frequency
+        (['\uc8fc\ud30c\uc218'], 'GRID_FREQUENCY', 1),   # 주파수
+        (['frequency'], 'GRID_FREQUENCY', 2),
+        # Power
+        (['\uc720\ud6a8\uc804\ub825'], 'ACTIVE_POWER', 1),    # 유효전력
+        (['\ubb34\ud6a8\uc804\ub825'], 'REACTIVE_POWER', 1),  # 무효전력
+        # Inverter mode
+        (['inverter', 'status'], 'INVERTER_MODE', 3),
+        (['\ub3d9\uc791', '\uc0c1\ud0dc'], 'INVERTER_MODE', 2),  # 동작상태
+    ]
+
+    ws1 = wb['Register_Mapping']
+    _s1_hdr = {str(c.value): i for i, c in enumerate(ws1[1])}
+    _sol_col = _s1_hdr.get('Solarize_Name')
+    _mt_col = _s1_hdr.get('Match_Type')
+    _src_col = _s1_hdr.get('Source_Name')
+
+    if _sol_col is not None and _mt_col is not None and _src_col is not None:
+        _assigned = set()
+        _fix_count = 0
+        # Collect already-assigned Solarize names
+        for row_obj in ws1.iter_rows(min_row=2):
+            sol_val = row_obj[_sol_col].value
+            if sol_val:
+                _assigned.add(str(sol_val).strip())
+
+        for row_obj in ws1.iter_rows(min_row=2):
+            mt_val = str(row_obj[_mt_col].value or '')
+            if mt_val not in ('Unmapped', ''):
+                continue
+            src_val = str(row_obj[_src_col].value or '')
+            if not src_val:
+                continue
+
+            best_match = None
+            best_prio = 999
+            for keywords, sol_name, prio in _KEYWORD_ALIAS_MAP:
+                if sol_name in _assigned:
+                    continue
+                if all(kw.lower() in src_val.lower() for kw in keywords):
+                    if prio < best_prio:
+                        best_match = sol_name
+                        best_prio = prio
+
+            if best_match:
+                row_obj[_sol_col].value = best_match
+                row_obj[_mt_col].value = 'Keyword'
+                _assigned.add(best_match)
+                _fix_count += 1
+
+        if _fix_count:
+            _p(f"  Keyword auto-mapped {_fix_count} essential aliases")
+
     wb.save(output_path)
     _p(f"  Stage 2 complete -> {output_path}")
     return output_path
@@ -2113,60 +2229,96 @@ def _ai_stage2_map(ws1, src_regs, solarize_addr_map, ref_mgr,
     if not unmapped_rows:
         return {'mapped': 0}
 
-    # Few-shot examples from reference manager
-    few_shot = ref_mgr.get_few_shot_mapping_examples(n=2) if ref_mgr else ''
+    # Few-shot examples from reference manager (ASCII-safe)
+    try:
+        few_shot = ref_mgr.get_few_shot_mapping_examples(n=2) if ref_mgr else ''
+        # Ensure ASCII-safe by replacing non-ASCII chars
+        few_shot = few_shot.encode('ascii', 'replace').decode('ascii')
+    except Exception:
+        few_shot = ''
 
-    # Build source register list for prompt
-    src_list = '\n'.join(
-        f'  [{i+1}] name="{r[1]}", addr={r[2]}, section="{r[3]}", type={r[4]}, unit={r[5]}'
-        for i, r in enumerate(unmapped_rows)
-    )
+    # Build source register list for prompt (ASCII-safe)
+    src_lines = []
+    for i, r in enumerate(unmapped_rows):
+        name = str(r[1]).encode('ascii', 'replace').decode('ascii')
+        addr = str(r[2])
+        sect = str(r[3]).encode('ascii', 'replace').decode('ascii')
+        dtype = str(r[4])
+        unit = str(r[5]).encode('ascii', 'replace').decode('ascii')
+        src_lines.append(f'  [{i+1}] name="{name}", addr={addr}, section="{sect}", type={dtype}, unit={unit}')
+    src_list = '\n'.join(src_lines)
 
     # Known Solarize standard names for reference
-    sol_names_sample = ', '.join(list({v[0] for v in solarize_addr_map.values()})[:60])
+    sol_names_sample = ', '.join(sorted({v[0] for v in solarize_addr_map.values()})[:80])
 
-    prompt = (
-        "You are an expert at mapping solar inverter Modbus register names to the\n"
-        "Solarize standard register naming convention used in RTU firmware.\n\n"
-        "Known Solarize standard names (sample):\n"
-        f"{sol_names_sample}\n\n"
-        "Reference mappings from known inverters:\n"
-        f"{few_shot}\n\n"
-        "Map these registers to the best matching Solarize standard name.\n"
-        "If no good match exists, use null.\n\n"
-        "Registers to map:\n"
-        f"{src_list}\n\n"
-        "Return a JSON array in this exact format (one entry per register, same order):\n"
-        '[{"index":1,"solarize_name":"L1_VOLTAGE","confidence":0.9,"notes":"AC output L1"},'
-        ' {"index":2,"solarize_name":null,"confidence":0.0,"notes":"unknown"}]\n'
-        "Return ONLY the JSON array, no other text."
-    )
+    # Batch in chunks of 50 to avoid token limits
+    BATCH_SIZE = 50
+    all_items = []
 
-    if progress_cb:
-        progress_cb(f"  Calling Claude API for {len(unmapped_rows)} unmapped registers...")
+    for batch_start in range(0, len(unmapped_rows), BATCH_SIZE):
+        batch_end = min(batch_start + BATCH_SIZE, len(unmapped_rows))
+        batch_src = '\n'.join(src_lines[batch_start:batch_end])
+        batch_indices = f"{batch_start+1}~{batch_end}"
 
-    try:
-        client = anthropic.Anthropic(api_key=api_key)
-        mdl = model or 'claude-opus-4-6'
-        resp = client.messages.create(
-            model=mdl, max_tokens=4096,
-            messages=[{'role': 'user', 'content': prompt}]
+        few_shot_section = f"Reference mappings:\n{few_shot}\n\n" if few_shot else ""
+        prompt = (
+            "You are an expert at mapping solar inverter Modbus register names to the\n"
+            "Solarize standard register naming convention used in RTU firmware.\n\n"
+            "Known Solarize standard names:\n"
+            f"{sol_names_sample}\n\n"
+            f"{few_shot_section}"
+            "Map these registers to the best matching Solarize standard name.\n"
+            "Rules:\n"
+            "- AC output voltage phase A/R/L1 -> L1_VOLTAGE\n"
+            "- AC output current phase A/R/L1 -> L1_CURRENT (Iac1)\n"
+            "- PV1/MPPT1 input voltage -> MPPT1_VOLTAGE or PV1_VOLTAGE\n"
+            "- Total/cumulative energy -> TOTAL_ENERGY_LOW\n"
+            "- Daily/today energy -> TODAY_ENERGY_LOW\n"
+            "- Grid frequency -> GRID_FREQUENCY\n"
+            "- Active power -> ACTIVE_POWER\n"
+            "- Reactive power -> REACTIVE_POWER\n"
+            "- Power factor -> POWER_FACTOR\n"
+            "- Inverter status/mode/state -> INVERTER_MODE\n"
+            "- Internal/module temperature -> INTERNAL_TEMP\n"
+            "- Error/fault code -> ERROR_CODE1 or FAULT_CODE_1\n"
+            "- If no good match, use null\n\n"
+            f"Registers [{batch_indices}]:\n"
+            f"{batch_src}\n\n"
+            "Return a JSON array (one entry per register, same order):\n"
+            '[{"index":N,"solarize_name":"NAME","confidence":0.9,"notes":"reason"}]\n'
+            "Return ONLY the JSON array."
         )
-        text = resp.content[0].text.strip()
-    except Exception as e:
+
         if progress_cb:
-            progress_cb(f"  AI API error: {e}")
-        return {'mapped': 0}
+            progress_cb(f"  AI batch {batch_indices} ({batch_end - batch_start} regs)...")
 
-    # Parse JSON response
-    import json as _json
-    m = re.search(r'\[.*\]', text, re.DOTALL)
-    if not m:
-        return {'mapped': 0}
+        try:
+            client = anthropic.Anthropic(api_key=api_key)
+            mdl = model or 'claude-sonnet-4-6'
+            resp = client.messages.create(
+                model=mdl, max_tokens=8192,
+                messages=[{'role': 'user', 'content': prompt}]
+            )
+            text = resp.content[0].text.strip()
 
-    try:
-        items = _json.loads(m.group(0))
-    except _json.JSONDecodeError:
+            # Parse JSON — strip markdown code fences if present
+            clean = re.sub(r'```(?:json)?\s*', '', text).strip()
+            clean = re.sub(r'```\s*$', '', clean).strip()
+            m_json = re.search(r'\[.*\]', clean, re.DOTALL)
+            if m_json:
+                import json as _json
+                batch_items = _json.loads(m_json.group())
+                # Adjust index to global
+                for item in batch_items:
+                    item['index'] = item.get('index', 0) + batch_start
+                all_items.extend(batch_items)
+        except Exception as e:
+            if progress_cb:
+                progress_cb(f"  AI batch error: {e}")
+
+    items = all_items
+
+    if not items:
         return {'mapped': 0}
 
     # Apply results to ws1
@@ -2269,6 +2421,10 @@ def stage3_generate_py(mapping_excel_path, settings, output_path=None,
             if not isinstance(row[0], (int, float)):
                 if not (isinstance(row[0], str) and row[0].startswith('S')):
                     continue
+            # Skip rows marked as Deleted (garbage/artifact rows)
+            match_type_val = str(row[13] or '') if len(row) > 13 else ''
+            if match_type_val == 'Deleted':
+                continue
             reg_rows.append({
                 'section':      row[1] or '',
                 'src_addr_hex': str(row[2] or ''),
@@ -2298,6 +2454,72 @@ def stage3_generate_py(mapping_excel_path, settings, output_path=None,
                 status_map[raw_code] = (mode_name, sol_code)
             except (ValueError, TypeError):
                 pass
+
+    # ── Auto-filter garbage rows from Stage 1 parsing artifacts ──
+    # Some PDFs (e.g. GoodWe) have Scale Factor values (100, 1000) mis-parsed
+    # as register addresses, and fault-code bit descriptions parsed as rows.
+    _COMMON_SF_ADDRS = {100, 1000, 10000}
+    _UNIT_PREFIXES = ('Hz', '%', 'kVar', 'NA ', '0.001', '0.01', '0.1')
+    _garbage_count = 0
+    _filtered_rows = []
+
+    # Phase 1: Basic pattern-based filtering
+    for r in reg_rows:
+        addr_int = _addr_to_int(r['src_addr_hex'], r['src_addr_dec'])
+        sname = r['src_name'].strip()
+        skip = False
+        # Skip: addr is common SF value AND src_name starts with unit/description
+        if addr_int in _COMMON_SF_ADDRS and sname and any(sname.startswith(p) for p in _UNIT_PREFIXES):
+            skip = True
+        # Skip: addr=0xFFFF (mis-parsed from "returns to 0xffff" text)
+        elif addr_int == 0xFFFF:
+            skip = True
+        # Skip: very low addr (0-2) with fault-code bit descriptions
+        elif addr_int is not None and addr_int <= 2 and ('Bit' in sname or 'Fail' in sname):
+            skip = True
+        if skip:
+            _garbage_count += 1
+        else:
+            _filtered_rows.append(r)
+
+    # Phase 2: Remove SF-address duplicates.
+    # If the same Solarize name appears at both a common SF address and a
+    # non-SF address, the SF-address version is a parsing artifact.
+    _sol_name_addrs = {}  # sol_name -> list of (addr, index)
+    for i, r in enumerate(_filtered_rows):
+        addr_int = _addr_to_int(r['src_addr_hex'], r['src_addr_dec'])
+        sol = r.get('sol_name', '').strip()
+        if sol and addr_int is not None:
+            _sol_name_addrs.setdefault(sol, []).append((addr_int, i))
+
+    _sf_dup_indices = set()
+    for sol, entries in _sol_name_addrs.items():
+        if len(entries) < 2:
+            continue
+        addrs = [a for a, _ in entries]
+        has_sf = any(a in _COMMON_SF_ADDRS for a in addrs)
+        has_real = any(a not in _COMMON_SF_ADDRS for a in addrs)
+        if has_sf and has_real:
+            for a, idx in entries:
+                if a in _COMMON_SF_ADDRS:
+                    _sf_dup_indices.add(idx)
+                    _garbage_count += 1
+
+    _filtered_rows = [r for i, r in enumerate(_filtered_rows) if i not in _sf_dup_indices]
+
+    # Phase 3: Remove rows that collide with DER-AVM standard addresses.
+    # DER-AVM registers (0x07D0-0x07D3 etc.) are authoritative; source PDF
+    # rows at the same addresses are coincidental and cause alias collisions.
+    if der_avm:
+        _der_addrs = {reg[1] for reg in _DER_AVM_CONTROL_REGS}
+        _before = len(_filtered_rows)
+        _filtered_rows = [r for r in _filtered_rows
+                          if _addr_to_int(r['src_addr_hex'], r['src_addr_dec']) not in _der_addrs]
+        _garbage_count += _before - len(_filtered_rows)
+
+    if _garbage_count:
+        _p(f"  Auto-filtered {_garbage_count} garbage rows (SF/fault/DER-AVM artifacts)")
+    reg_rows = _filtered_rows
 
     _p(f"  Registers: {len(reg_rows)}, Status mappings: {len(status_map)}")
 

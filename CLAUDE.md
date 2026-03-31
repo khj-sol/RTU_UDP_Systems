@@ -126,7 +126,7 @@ RTU 관련 코드(`rtu_program/`, `common/`, `config/`)를 수정한 후 반드�
 python -c "
 import tarfile, os
 from datetime import datetime
-project_dir = 'C:/CM4_4rs485/RTU_UDP_System_V1_1_0'
+project_dir = os.getcwd()  # run from project root
 firmware_dir = os.path.join(project_dir, 'pc_programs', 'firmware')
 os.makedirs(firmware_dir, exist_ok=True)
 ts = datetime.now().strftime('%Y%m%d_%H%M%S')

@@ -38,57 +38,87 @@ _COMMON_DIR = os.path.normpath(os.path.join(_THIS_DIR, '..', 'common'))
 
 _BUILTIN = {
     'solarize': {
-        'manufacturer': 'Solarize / VerterKing',
+        'manufacturer': 'Solarize',
         'protocol':     'solarize',
-        'description':  'Solarize Modbus Protocol V2.0.10 (Solarize/VerterKing)',
+        'description':  'Solarize Modbus Protocol V2.0.11',
+        'capacity':     '3~100kW',
         'mppt_count':   9,
         'string_count': 24,
         'fc_code':      'FC03',
+        'iv_scan':      True,
+        'der_avm':      True,
         'builtin':      True,
     },
     'huawei': {
         'manufacturer': 'Huawei',
         'protocol':     'huawei',
         'description':  'Huawei SUN2000 series',
+        'capacity':     '2~330kW',
         'mppt_count':   6,
         'string_count': 12,
         'fc_code':      'FC03',
+        'iv_scan':      False,
+        'der_avm':      False,
         'builtin':      True,
     },
     'kstar': {
         'manufacturer': 'Kstar',
         'protocol':     'kstar',
         'description':  'Kstar KSG / KTL series',
-        'mppt_count':   4,
-        'string_count': 8,
-        'fc_code':      'FC03',
+        'capacity':     '3~250kW',
+        'mppt_count':   12,
+        'string_count': 48,
+        'fc_code':      'FC04',
+        'iv_scan':      True,
+        'der_avm':      True,
         'builtin':      True,
     },
     'sungrow': {
         'manufacturer': 'Sungrow',
         'protocol':     'sungrow',
         'description':  'Sungrow SG series',
-        'mppt_count':   4,
-        'string_count': 8,
+        'capacity':     '2~350kW',
+        'mppt_count':   12,
+        'string_count': 24,
         'fc_code':      'FC03',
+        'iv_scan':      False,
+        'der_avm':      True,
         'builtin':      True,
     },
     'ekos': {
         'manufacturer': 'EKOS',
         'protocol':     'ekos',
         'description':  'EKOS inverter',
+        'capacity':     '3~50kW',
         'mppt_count':   2,
         'string_count': 4,
         'fc_code':      'FC03',
+        'iv_scan':      False,
+        'der_avm':      True,
+        'builtin':      True,
+    },
+    'senergy': {
+        'manufacturer': 'Senergy',
+        'protocol':     'senergy',
+        'description':  'Senergy Modbus Protocol V1.2.4',
+        'capacity':     '3~100kW',
+        'mppt_count':   4,
+        'string_count': 8,
+        'fc_code':      'FC03',
+        'iv_scan':      True,
+        'der_avm':      True,
         'builtin':      True,
     },
     'goodwe': {
         'manufacturer': 'GoodWe',
         'protocol':     'goodwe',
-        'description':  'GoodWe inverter',
-        'mppt_count':   4,
-        'string_count': 8,
+        'description':  'GoodWe Grid-tied series',
+        'capacity':     '2~100kW',
+        'mppt_count':   6,
+        'string_count': 20,
         'fc_code':      'FC03',
+        'iv_scan':      False,
+        'der_avm':      True,
         'builtin':      True,
     },
 }
@@ -418,6 +448,58 @@ class ReferenceManager:
         self._name_cache.pop(name, None)   # Invalidate cache
         self._std_names = None             # Invalidate aggregate cache
         self._save_index()
+
+    def promote_to_builtin(self, name):
+        """Promote a user-created reference to builtin status.
+
+        Copies the .py file to common/{name}_mm_registers.py and marks
+        the reference as builtin so it persists across restarts.
+        """
+        import shutil
+
+        meta = self._all_index.get(name, {})
+        if meta.get('builtin'):
+            return False, f"'{name}' is already a builtin reference."
+
+        # Find the user reference .py file
+        ref_subdir = os.path.join(self.ref_dir, name)
+        py_file = meta.get('py_file') or os.path.join(ref_subdir, 'registers.py')
+        if not os.path.isfile(py_file):
+            return False, f"Reference .py file not found: {py_file}"
+
+        # Copy to common/{name}_mm_registers.py
+        dest = os.path.join(_COMMON_DIR, f'{name}_mm_registers.py')
+        shutil.copy2(py_file, dest)
+
+        # Also copy to common/{name}_registers.py (for RTU runtime)
+        dest_rt = os.path.join(_COMMON_DIR, f'{name}_registers.py')
+        if not os.path.isfile(dest_rt):
+            shutil.copy2(py_file, dest_rt)
+
+        # Update meta to builtin
+        meta['builtin'] = True
+        self._all_index[name] = meta
+
+        # Update meta.json in reference subdir
+        meta_path = os.path.join(ref_subdir, 'meta.json')
+        if os.path.isfile(meta_path):
+            try:
+                import json as _json
+                with open(meta_path, 'r', encoding='utf-8') as f:
+                    m = _json.load(f)
+                m['builtin'] = True
+                with open(meta_path, 'w', encoding='utf-8') as f:
+                    _json.dump(m, f, indent=2, ensure_ascii=False)
+            except Exception:
+                pass
+
+        # Remove from user index (it's now builtin)
+        self._user_index.pop(name, None)
+        self._name_cache.pop(name, None)
+        self._std_names = None
+        self._save_index()
+
+        return True, f"'{name}' promoted to builtin. Files: {dest}"
 
     def delete_reference(self, name):
         """Delete a user-created reference (builtin refs cannot be deleted)."""
