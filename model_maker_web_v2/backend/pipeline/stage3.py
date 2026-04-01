@@ -174,6 +174,13 @@ def _gen_register_map(regs_by_cat: dict, mppt: int, total_strings: int,
         lines.append(f'    # =========================================================================')
         for reg in sorted(regs, key=lambda r: r.address if isinstance(r.address, int) else 0):
             name = to_upper_snake(reg.definition)
+            # 이름 정규화: STRING1_INPUT_VOLTAGE → STRING1_VOLTAGE 등
+            name = re.sub(r'(STRING\d+)_INPUT_(VOLTAGE|CURRENT)', r'\1_\2', name)
+            name = re.sub(r'(MPPT\d+)_INPUT_(VOLTAGE|CURRENT)', r'\1_\2', name)
+            # PV1_POWER → MPPT1_POWER_LOW (L1_POWER는 AC 출력이므로 제외)
+            m = re.match(r'PV(\d+)_POWER$', name)
+            if m:
+                name = f'MPPT{m.group(1)}_POWER_LOW'
             if not name or name in emitted_names:
                 continue
             addr = reg.address if isinstance(reg.address, int) else parse_address(reg.address)

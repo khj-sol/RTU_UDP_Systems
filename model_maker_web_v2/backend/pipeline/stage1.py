@@ -261,10 +261,17 @@ def extract_registers_from_tables(tables: List[List[list]]) -> List[RegisterRow]
     registers = []
     seen_addrs = set()
     for table in tables:
-        if not table or len(table) < 2:
+        if not table or len(table) < 1:
             continue
-        data_rows = table[1:]
-        col_map = _detect_table_columns(table[0], data_rows)
+        # 첫 행에 0x 주소가 있으면 헤더 없는 테이블 → 전체를 데이터로
+        first_has_addr = any(str(c).strip().startswith('0x') or str(c).strip().startswith('0X')
+                             for c in table[0] if c)
+        if first_has_addr:
+            data_rows = table
+            col_map = _detect_table_columns([], data_rows)
+        else:
+            data_rows = table[1:]
+            col_map = _detect_table_columns(table[0], data_rows)
         for row in data_rows:
             reg = _parse_register_row(row, col_map)
             if reg and reg.address not in seen_addrs:
@@ -543,8 +550,13 @@ def run_stage1(
             log(f'  레퍼런스 enrichment: {enriched}/{len(registers)}개')
 
     # synonym_db 기반 이름 정규화 (레퍼런스 없어도 동작)
+    # 단, 채널 번호가 있는 레지스터(MPPT1, STRING2 등)는 정규화하지 않음
+    # (synonym_db가 MPPT1 Voltage → MPPT_VOLTAGE로 채널 번호를 제거하면 중복 발생)
     normalized = 0
     for reg in registers:
+        # 채널 번호 있으면 스킵
+        if detect_channel_number(reg.definition):
+            continue
         syn = match_synonym(reg.definition, synonym_db)
         if syn and syn['field'] != to_upper_snake(reg.definition):
             original = reg.definition
