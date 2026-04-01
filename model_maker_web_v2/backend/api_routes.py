@@ -148,7 +148,9 @@ async def stage2_run(body: dict):
     mppt = int(body.get('mppt', 4))
     strings_per_mppt = int(body.get('strings_per_mppt', 2))
     capacity = body.get('capacity', '')
+    iv_data_points = int(body.get('iv_data_points', 64))
     work_dir = SessionStore.get_work_dir(sid)
+    SessionStore.update(sid, iv_data_points=iv_data_points)
 
     async def _run():
         try:
@@ -202,13 +204,14 @@ async def stage3_run(body: dict):
         raise HTTPException(400, 'Stage 2 not completed')
 
     work_dir = SessionStore.get_work_dir(sid)
+    iv_data_points = s.get('iv_data_points', 64)
 
     async def _run():
         try:
             from .pipeline.stage3 import run_stage3
             progress = _make_progress_callback(sid, 's3', asyncio.get_running_loop())
             result = await _run_in_thread(
-                run_stage3, stage2_excel, work_dir, progress)
+                run_stage3, stage2_excel, work_dir, progress, iv_data_points)
 
             SessionStore.update(sid,
                                 stage=3,

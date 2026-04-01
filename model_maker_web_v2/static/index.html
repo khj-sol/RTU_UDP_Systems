@@ -193,6 +193,8 @@
       <input type="number" id="s2-str" min="1" max="8" value="2" />
       <label>용량 (파일명용, 예: 50kW)</label>
       <input type="text" id="s2-cap" placeholder="50kW" />
+      <label>IV 데이터 포인트 수 (0=미지원)</label>
+      <input type="number" id="s2-iv-points" min="0" max="256" value="64" />
       <button class="run-btn" id="btn-s2" disabled onclick="runStage2()">Stage 2 실행</button>
       <div class="log-box" id="log-s2"><span style="color:#4b5563">-- Stage 1 완료 후 활성화 --</span></div>
       <div id="review-area" style="display:none">
@@ -303,6 +305,7 @@
         mppt: parseInt(document.getElementById('s2-mppt').value),
         strings_per_mppt: parseInt(document.getElementById('s2-str').value),
         capacity: document.getElementById('s2-cap').value,
+        iv_data_points: parseInt(document.getElementById('s2-iv-points').value),
       }),
     });
   }
