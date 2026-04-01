@@ -17,6 +17,10 @@ echo.
 echo [INFO] Checking dependencies...
 "%PYTHON%" -c "import subprocess,sys;[subprocess.check_call([sys.executable,'-m','pip','install',p,'--quiet']) for m,p in [('fastapi','fastapi'),('uvicorn','uvicorn[standard]'),('multipart','python-multipart'),('openpyxl','openpyxl'),('fitz','PyMuPDF'),('anthropic','anthropic')] if not __import__('importlib').util.find_spec(m)]" 2>nul
 
+:: Kill any existing process on port 8181
+echo [INFO] Checking port 8181...
+"%PYTHON%" -c "import subprocess,sys; r=subprocess.run('netstat -ano',capture_output=True,text=True,shell=True); lines=[l for l in r.stdout.splitlines() if ':8181' in l and 'LISTENING' in l]; [subprocess.run(f'taskkill /PID {l.split()[-1]} /F',shell=True,capture_output=True) or print(f'[INFO] Killed PID {l.split()[-1]}') for l in lines]" 2>nul
+
 echo [INFO] Starting Model Maker Web...
 echo.
 
