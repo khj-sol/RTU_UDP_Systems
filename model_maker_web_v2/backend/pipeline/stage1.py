@@ -127,7 +127,7 @@ def _parse_register_row(row: list, col_map: dict) -> Optional[RegisterRow]:
     if not row:
         return None
 
-    # 주소 추출 — 0x 패턴 또는 5자리 숫자(30000~49999)
+    # 주소 추출 — 0x 패턴 (0x0~0xFFFF) 또는 decimal (0~65535)
     addr = None
     addr_raw = ''
 
@@ -137,8 +137,7 @@ def _parse_register_row(row: list, col_map: dict) -> Optional[RegisterRow]:
         addr_raw = str(row[addr_idx]).strip() if row[addr_idx] else ''
         if addr_raw.startswith('0x') or addr_raw.startswith('0X'):
             addr = parse_address(addr_raw)
-        elif re.match(r'^\d{4,5}$', addr_raw) and 1000 <= int(addr_raw) <= 65535:
-            # 화웨이 decimal 주소 (30000~49999)
+        elif re.match(r'^\d{1,5}$', addr_raw) and 0 <= int(addr_raw) <= 65535:
             addr = int(addr_raw)
 
     # 2) 실패하면 0x 패턴이 있는 아무 셀에서 찾기
@@ -152,8 +151,7 @@ def _parse_register_row(row: list, col_map: dict) -> Optional[RegisterRow]:
                     if 'addr' not in col_map:
                         col_map['addr'] = i
                     break
-            # 5자리 decimal (화웨이)
-            elif re.match(r'^\d{4,5}$', c) and 1000 <= int(c) <= 65535:
+            elif re.match(r'^\d{4,5}$', c) and 0 <= int(c) <= 65535:
                 addr = int(c)
                 addr_raw = c
                 if 'addr' not in col_map:
@@ -296,7 +294,7 @@ def extract_registers_from_tables(tables: List[List[list]]) -> List[RegisterRow]
         # 첫 행에 0x 주소 또는 5자리 숫자가 있으면 헤더 없는 테이블
         first_has_addr = any(
             str(c).strip().startswith('0x') or str(c).strip().startswith('0X') or
-            (re.match(r'^\d{4,5}$', str(c).strip()) and 1000 <= int(str(c).strip()) <= 65535)
+            (re.match(r'^\d{4,5}$', str(c).strip()) and 0 <= int(str(c).strip()) <= 65535)
             for c in table[0] if c)
         if first_has_addr:
             data_rows = table
