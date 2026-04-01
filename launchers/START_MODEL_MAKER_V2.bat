@@ -9,10 +9,14 @@ echo   Stage 1→2→3 파이프라인 웹 UI
 echo ============================================
 echo.
 
-echo [1/2] 의존성 확인 중...
+echo [1/3] 캐시 정리 중...
+for /d /r "model_maker_web_v2" %%d in (__pycache__) do @if exist "%%d" rd /s /q "%%d"
+echo   __pycache__ 삭제 완료
+
+echo [2/3] 의존성 확인 중...
 pip install fastapi uvicorn python-multipart openpyxl PyMuPDF -q 2>nul
 
-echo [2/2] 서버 시작 중...
+echo [3/3] 서버 시작 중...
 echo.
 echo   http://localhost:8082
 echo.
