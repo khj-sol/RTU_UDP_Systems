@@ -31,6 +31,9 @@ from .rules import (
 def extract_pdf_text_and_tables(pdf_path: str) -> List[dict]:
     """PyMuPDF로 PDF 페이지별 텍스트+테이블 추출"""
     import fitz
+    import logging
+    logging.getLogger('fitz').setLevel(logging.ERROR)
+    fitz.TOOLS.mupdf_display_errors(False)
     doc = fitz.open(pdf_path)
     pages = []
     try:
