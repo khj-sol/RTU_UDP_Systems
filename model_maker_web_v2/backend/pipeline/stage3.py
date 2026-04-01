@@ -811,10 +811,9 @@ def run_stage3(
 
     # common/ 레퍼런스 등록
     common_path = os.path.join(COMMON_DIR, output_name)
-    if not os.path.exists(common_path):
-        import shutil
-        shutil.copy2(output_path, common_path)
-        log(f'  레퍼런스 등록: common/{output_name}')
+    import shutil
+    shutil.copy2(output_path, common_path)
+    log(f'  레퍼런스 등록: common/{output_name}')
 
     log('Stage 3 완료', 'ok')
 
