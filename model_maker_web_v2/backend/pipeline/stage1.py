@@ -71,7 +71,7 @@ def extract_excel_sheets(excel_path: str) -> Dict[str, List[List[str]]]:
 
 # 주소+이름+타입 패턴
 _ADDR_RE = re.compile(r'(?:0x|0X)?([0-9A-Fa-f]{4})[Hh]?')
-_TYPE_RE = re.compile(r'\b(U16|S16|U32|S32|INT16|UINT16|INT32|UINT32|FLOAT32|ASCII|STRING)\b', re.I)
+_TYPE_RE = re.compile(r'\b(U16|S16|U32|S32|I16|I32|INT16|UINT16|INT32|UINT32|FLOAT32|ASCII|STRING|STR|Bitfield16|Bitfield32)\b', re.I)
 _RW_RE   = re.compile(r'\b(R/?W|RO|WO|Read|Write|R/W)\b', re.I)
 _SCALE_RE = re.compile(r'(?:scale|factor|×|x)\s*[=:]?\s*([\d.]+)', re.I)
 _UNIT_RE = re.compile(r'\b(V|A|W|kW|VA|kVA|VAr|kVAr|Hz|°C|℃|Wh|kWh|MWh|%)\b')
@@ -88,8 +88,8 @@ def _detect_table_columns(header_row: list, data_rows: list = None) -> dict:
         if cl in ('address', 'addr', '주소', 'offset') or \
            ('addr' in cl and 'register' not in cl):
             col_map.setdefault('addr', i)
-        elif any(k in cl for k in ['name', 'definition', '이름', '항목', 'parameter', 'description']):
-            # 'field'는 너무 범용이라 단독으로만 매칭
+        elif any(k in cl for k in ['name', 'definition', '이름', '항목', 'parameter', 'description',
+                                    'signal name', 'signalname']):
             col_map.setdefault('name', i)
         elif cl == 'field' or cl == '필드':
             col_map.setdefault('name', i)
@@ -99,13 +99,14 @@ def _detect_table_columns(header_row: list, data_rows: list = None) -> dict:
             col_map.setdefault('type', i)
         elif any(k in cl for k in ['unit', '단위']):
             col_map.setdefault('unit', i)
-        elif any(k in cl for k in ['scale', '배율', 'factor']):
+        elif any(k in cl for k in ['scale', '배율', 'factor', 'gain']):
             col_map.setdefault('scale', i)
         elif any(k in cl for k in ['r/w', 'access', '읽기', 'permission']):
             col_map.setdefault('rw', i)
         elif any(k in cl for k in ['remark', 'comment', '비고', 'note', '설명']):
             col_map.setdefault('comment', i)
-        elif 'register' in cl and ('number' in cl or 'num' in cl or 'count' in cl):
+        elif ('register' in cl and ('number' in cl or 'num' in cl or 'count' in cl)) or \
+             cl in ('numberofregister', 'numberofreg', 'regs', 'reg count'):
             col_map.setdefault('regs', i)
 
     # data_rows에서 0x 패턴으로 주소 컬럼 보정
@@ -126,7 +127,7 @@ def _parse_register_row(row: list, col_map: dict) -> Optional[RegisterRow]:
     if not row:
         return None
 
-    # 주소 추출 — 0x 패턴이 있는 셀 우선
+    # 주소 추출 — 0x 패턴 또는 5자리 숫자(30000~49999)
     addr = None
     addr_raw = ''
 
@@ -136,6 +137,9 @@ def _parse_register_row(row: list, col_map: dict) -> Optional[RegisterRow]:
         addr_raw = str(row[addr_idx]).strip() if row[addr_idx] else ''
         if addr_raw.startswith('0x') or addr_raw.startswith('0X'):
             addr = parse_address(addr_raw)
+        elif re.match(r'^[34]\d{4}$', addr_raw):
+            # 화웨이 decimal 주소 (30000~49999)
+            addr = int(addr_raw)
 
     # 2) 실패하면 0x 패턴이 있는 아무 셀에서 찾기
     if addr is None:
@@ -145,10 +149,16 @@ def _parse_register_row(row: list, col_map: dict) -> Optional[RegisterRow]:
                 addr = parse_address(c)
                 if addr is not None:
                     addr_raw = c
-                    # 이 셀을 주소로 사용하면, name은 주소 앞의 셀
                     if 'addr' not in col_map:
                         col_map['addr'] = i
                     break
+            # 5자리 decimal (화웨이)
+            elif re.match(r'^[34]\d{4}$', c):
+                addr = int(c)
+                addr_raw = c
+                if 'addr' not in col_map:
+                    col_map['addr'] = i
+                break
 
     if addr is None:
         return None
@@ -185,8 +195,11 @@ def _parse_register_row(row: list, col_map: dict) -> Optional[RegisterRow]:
                 dtype = m.group(1).upper()
                 break
     # 타입 정규화
-    dtype = dtype.replace('INT16', 'S16').replace('UINT16', 'U16') \
-                 .replace('INT32', 'S32').replace('UINT32', 'U32')
+    dtype = dtype.upper()
+    for old, new in [('INT16', 'S16'), ('UINT16', 'U16'), ('INT32', 'S32'), ('UINT32', 'U32'),
+                     ('I16', 'S16'), ('I32', 'S32'), ('STR', 'STRING'),
+                     ('BITFIELD16', 'U16'), ('BITFIELD32', 'U32')]:
+        dtype = dtype.replace(old, new)
 
     # 단위
     unit = ''
@@ -259,6 +272,18 @@ def _parse_register_row(row: list, col_map: dict) -> Optional[RegisterRow]:
     )
 
 
+def _clean_cell(cell) -> str:
+    """셀 내용에서 줄바꿈 제거 + 정리"""
+    if cell is None:
+        return ''
+    return re.sub(r'\s*\n\s*', '', str(cell)).strip()
+
+
+def _clean_table(table: List[list]) -> List[list]:
+    """테이블 전체 셀에서 줄바꿈 제거"""
+    return [[_clean_cell(c) for c in row] for row in table]
+
+
 def extract_registers_from_tables(tables: List[List[list]]) -> List[RegisterRow]:
     """모든 테이블에서 레지스터 행 추출"""
     registers = []
@@ -266,9 +291,13 @@ def extract_registers_from_tables(tables: List[List[list]]) -> List[RegisterRow]
     for table in tables:
         if not table or len(table) < 1:
             continue
-        # 첫 행에 0x 주소가 있으면 헤더 없는 테이블 → 전체를 데이터로
-        first_has_addr = any(str(c).strip().startswith('0x') or str(c).strip().startswith('0X')
-                             for c in table[0] if c)
+        # 셀 줄바꿈 제거 (화웨이 PDF 등)
+        table = _clean_table(table)
+        # 첫 행에 0x 주소 또는 5자리 숫자가 있으면 헤더 없는 테이블
+        first_has_addr = any(
+            str(c).strip().startswith('0x') or str(c).strip().startswith('0X') or
+            re.match(r'^[34]\d{4}$', str(c).strip())  # 30000~49999 (화웨이 주소)
+            for c in table[0] if c)
         if first_has_addr:
             data_rows = table
             col_map = _detect_table_columns([], data_rows)
