@@ -507,71 +507,69 @@ def run_stage1(
     if not registers:
         raise ValueError('레지스터를 찾지 못했습니다. PDF/Excel 형식을 확인해주세요.')
 
-    # ── Step 2.5: 레퍼런스 기반 enrichment ──
-    # PDF 이름 대신 레퍼런스 속성명 사용 (원본은 comment에 보존)
-    enriched = 0
-    for reg in registers:
-        addr = reg.address if isinstance(reg.address, int) else parse_address(reg.address)
-        if addr is None:
-            continue
-        ref_name = get_ref_name_by_addr(addr, ref_patterns)
-        if ref_name:
-            original = reg.definition
-            reg.definition = ref_name
-            if reg.comment and original != ref_name:
-                reg.comment = f'{original} | {reg.comment}'
-            elif original != ref_name:
-                reg.comment = original
-            enriched += 1
-    log(f'  레퍼런스 enrichment: {enriched}/{len(registers)}개')
+    # ── Step 2.5: DER 고정 주소 제외 + synonym_db 이름 정규화 ──
+    # DER-AVM 레지스터는 고정 주소맵으로 삽입하므로 PDF 파싱 결과에서 제거
+    DER_FIXED_ADDRS = set()
+    for dr in DER_CONTROL_REGS:
+        DER_FIXED_ADDRS.add(dr['addr'])
+    for dr in DER_MONITOR_REGS:
+        DER_FIXED_ADDRS.add(dr['addr'])
 
-    # 중복 이름 제거 — 레퍼런스 주소와 일치하는 것 우선
-    seen_names = {}  # name → (index, is_ref_match)
+    before_der_filter = len(registers)
+    registers = [r for r in registers
+                 if (r.address if isinstance(r.address, int) else parse_address(r.address))
+                 not in DER_FIXED_ADDRS]
+    der_removed = before_der_filter - len(registers)
+    if der_removed:
+        log(f'  DER 고정 주소 제외: {der_removed}개 (고정 주소맵으로 대체)')
+
+    # 레퍼런스 기반 enrichment (레퍼런스가 있을 때만)
+    if ref_patterns:
+        enriched = 0
+        for reg in registers:
+            addr = reg.address if isinstance(reg.address, int) else parse_address(reg.address)
+            if addr is None:
+                continue
+            ref_name = get_ref_name_by_addr(addr, ref_patterns)
+            if ref_name:
+                original = reg.definition
+                reg.definition = ref_name
+                if reg.comment and original != ref_name:
+                    reg.comment = f'{original} | {reg.comment}'
+                elif original != ref_name:
+                    reg.comment = original
+                enriched += 1
+        if enriched:
+            log(f'  레퍼런스 enrichment: {enriched}/{len(registers)}개')
+
+    # synonym_db 기반 이름 정규화 (레퍼런스 없어도 동작)
+    normalized = 0
+    for reg in registers:
+        syn = match_synonym(reg.definition, synonym_db)
+        if syn and syn['field'] != to_upper_snake(reg.definition):
+            original = reg.definition
+            reg.definition = syn['field']
+            if reg.comment and original != syn['field']:
+                reg.comment = f'{original} | {reg.comment}'
+            elif original != syn['field']:
+                reg.comment = original
+            normalized += 1
+    if normalized:
+        log(f'  synonym_db 정규화: {normalized}개')
+
+    # 중복 이름 제거
+    seen_names = {}
     for i, reg in enumerate(registers):
         name = to_upper_snake(reg.definition)
-        addr = reg.address if isinstance(reg.address, int) else parse_address(reg.address)
-        is_ref = addr is not None and get_ref_name_by_addr(addr, ref_patterns) is not None
         if name in seen_names:
-            prev_idx, prev_is_ref = seen_names[name]
-            if is_ref and not prev_is_ref:
-                # 새 것이 레퍼런스 매칭 → 이전 것 제거
-                registers[prev_idx] = None
-                seen_names[name] = (i, is_ref)
-            else:
-                # 이전 것 유지 → 새 것 제거
-                registers[i] = None
+            registers[i] = None
         else:
-            seen_names[name] = (i, is_ref)
+            seen_names[name] = i
     registers = [r for r in registers if r is not None]
     log(f'  중복 제거 후: {len(registers)}개')
 
     # ── Step 3: 제조사 정보 ──
     manufacturer = basename.split('_')[0].split(' ')[0]
-
-    # 레퍼런스에 있지만 PDF에서 추출되지 않은 주소 보완
-    extracted_addrs = set()
-    for reg in registers:
-        a = reg.address if isinstance(reg.address, int) else parse_address(reg.address)
-        if a is not None:
-            extracted_addrs.add(a)
-    补完 = 0
-    # 모든 프로토콜에서 알려진 주소 수집, get_ref_name_by_addr로 표준 이름 결정
-    all_known_addrs = set()
-    for addr_map in ref_patterns.values():
-        all_known_addrs.update(addr_map.keys())
-    for addr in sorted(all_known_addrs):
-        if addr not in extracted_addrs and 0x0100 <= addr <= 0xFFFF:
-            ref_name = get_ref_name_by_addr(addr, ref_patterns)
-            if ref_name:
-                registers.append(RegisterRow(
-                    definition=ref_name, address=addr,
-                    address_hex=f'0x{addr:04X}',
-                    data_type='U16', rw='RO',
-                    comment='(보완: 레퍼런스)'))
-                extracted_addrs.add(addr)
-                补完 += 1
-    if 补完 > 0:
-        log(f'  레퍼런스 보완: +{补完}개')
     protocol_version = ''
 
     # PDF 전문에서 제조사/버전 탐색
@@ -649,29 +647,23 @@ def run_stage1(
         if cat in categorized:
             categorized[cat].append(reg)
 
-    # 인버터: DER 표준 레지스터가 없으면 추가
+    # 인버터: DER 표준 레지스터 — 고정 주소맵에서 항상 주입 (PDF 파싱 무관)
     if device_type == 'inverter':
-        existing_addrs = set()
-        for cat_regs in categorized.values():
-            for r in cat_regs:
-                a = r.address if isinstance(r.address, int) else parse_address(r.address)
-                if a is not None:
-                    existing_addrs.add(a)
+        categorized['DER_CONTROL'] = []  # PDF 파싱 결과 제거, 고정맵만 사용
+        categorized['DER_MONITOR'] = []
 
         for dr in DER_CONTROL_REGS:
-            if dr['addr'] not in existing_addrs:
-                categorized['DER_CONTROL'].append(RegisterRow(
-                    definition=dr['name'], address=dr['addr'],
-                    data_type=dr['type'], scale=dr.get('scale', ''),
-                    rw=dr['rw'], comment=dr['desc'], category='DER_CONTROL'))
+            categorized['DER_CONTROL'].append(RegisterRow(
+                definition=dr['name'], address=dr['addr'],
+                data_type=dr['type'], scale=dr.get('scale', ''),
+                rw=dr['rw'], comment=dr['desc'], category='DER_CONTROL'))
 
         for dr in DER_MONITOR_REGS:
-            if dr['addr'] not in existing_addrs:
-                categorized['DER_MONITOR'].append(RegisterRow(
-                    definition=dr['name'], address=dr['addr'],
-                    data_type=dr['type'], scale=dr.get('scale', ''),
-                    unit=dr.get('unit', ''), rw='RO',
-                    comment=dr.get('desc', ''), category='DER_MONITOR'))
+            categorized['DER_MONITOR'].append(RegisterRow(
+                definition=dr['name'], address=dr['addr'],
+                data_type=dr['type'], scale=dr.get('scale', ''),
+                unit=dr.get('unit', ''), rw='RO',
+                comment=dr.get('desc', ''), category='DER_MONITOR'))
 
     # 비인버터: DER/IV 카테고리 제거
     if device_type != 'inverter':
