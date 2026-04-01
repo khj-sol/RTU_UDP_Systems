@@ -610,19 +610,24 @@ def validate_code(code: str, mppt: int, total_strings: int) -> dict:
     checks['DATA_TYPES'] = 'DATA_TYPES' in code
     checks['StatusConverter'] = 'StatusConverter' in code
 
-    # MPPT 채널 수
+    # MPPT 채널 수 (MPPT{n}_VOLTAGE 또는 PV{n}_VOLTAGE/PV{n}VOLTAGE)
     mppt_count = 0
     for n in range(1, 20):
-        if f'MPPT{n}_VOLTAGE' in code:
+        if f'MPPT{n}_VOLTAGE' in code or f'PV{n}_VOLTAGE' in code or f'PV{n}VOLTAGE' in code:
             mppt_count = n
     checks[f'MPPT_channels_{mppt}'] = mppt_count >= mppt
 
-    # String 채널 수
+    # String 채널 수 (STRING{n} 또는 PV_STRING{n})
     string_count = 0
     for n in range(1, 50):
-        if f'STRING{n}_VOLTAGE' in code or f'STRING{n}_CURRENT' in code:
+        if f'STRING{n}_VOLTAGE' in code or f'STRING{n}_CURRENT' in code or \
+           f'PV_STRING{n}' in code or f'PVSTRING{n}' in code:
             string_count = n
-    checks[f'String_channels_{total_strings}'] = string_count >= total_strings
+    # String이 없는 인버터(화웨이 등)는 0이면 통과
+    if total_strings == 0:
+        checks[f'String_channels_{total_strings}'] = True
+    else:
+        checks[f'String_channels_{total_strings}'] = string_count >= total_strings
 
     return checks
 
