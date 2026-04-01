@@ -328,9 +328,9 @@ def classify_register_with_rules(
                     return ('DER_CONTROL' if device_type == 'inverter' else 'EXCLUDE', '')
                 if 'IV_' in ref_name:
                     return ('IV_SCAN' if device_type == 'inverter' else 'EXCLUDE', '')
-                if 'ERROR_CODE' in ref_name:
+                if any(k in ref_name for k in ['ERROR_CODE', 'ALARM', 'FAULT', 'WARNING']):
                     return ('ALARM', '')
-                if 'INVERTER_MODE' in ref_name:
+                if any(k in ref_name for k in ['INVERTER_MODE', 'RUNNING_STATUS', 'STATUS']):
                     return ('STATUS', '')
                 if any(k in ref_name for k in ['MODEL', 'SERIAL', 'FIRMWARE', 'NOMINAL',
                                                 'MPPT_COUNT', 'PHASE', 'EMS_', 'LCD_']):
