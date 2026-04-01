@@ -13,13 +13,9 @@
         "Vac_R",
         "Ua",
         "Grid R Voltage",
-        "R상 전압",
-        "계통전압R",
         "A Phase Voltage",
         "Line Voltage L1",
-        "Output Voltage R",
-        "R_PHASE_VOLTAGE",
-        "GRID_R_VOLTAGE"
+        "Output Voltage R"
       ]
     },
     "L2_VOLTAGE": {
@@ -33,13 +29,9 @@
         "Vac_S",
         "Ub",
         "Grid S Voltage",
-        "S상 전압",
-        "계통전압S",
         "B Phase Voltage",
         "Line Voltage L2",
-        "Output Voltage S",
-        "S_PHASE_VOLTAGE",
-        "GRID_S_VOLTAGE"
+        "Output Voltage S"
       ]
     },
     "L3_VOLTAGE": {
@@ -53,13 +45,9 @@
         "Vac_T",
         "Uc",
         "Grid T Voltage",
-        "T상 전압",
-        "계통전압T",
         "C Phase Voltage",
         "Line Voltage L3",
-        "Output Voltage T",
-        "T_PHASE_VOLTAGE",
-        "GRID_T_VOLTAGE"
+        "Output Voltage T"
       ]
     },
     "L1_CURRENT": {
@@ -73,11 +61,8 @@
         "Iac_R",
         "Ia",
         "Grid R Current",
-        "R상 전류",
-        "계통전류R",
         "A Phase Current",
-        "Output Current R",
-        "R_PHASE_CURRENT"
+        "Output Current R"
       ]
     },
     "L2_CURRENT": {
@@ -91,11 +76,8 @@
         "Iac_S",
         "Ib",
         "Grid S Current",
-        "S상 전류",
-        "계통전류S",
         "B Phase Current",
-        "Output Current S",
-        "S_PHASE_CURRENT"
+        "Output Current S"
       ]
     },
     "L3_CURRENT": {
@@ -109,11 +91,8 @@
         "Iac_T",
         "Ic",
         "Grid T Current",
-        "T상 전류",
-        "계통전류T",
         "C Phase Current",
-        "Output Current T",
-        "T_PHASE_CURRENT"
+        "Output Current T"
       ]
     },
     "GRID_TOTAL_ACTIVE_POWER": {
@@ -125,23 +104,10 @@
         "Grid Power",
         "Total Active Power",
         "AC Output Power",
-        "Grid Total Active Power",
-        "유효전력",
-        "출력전력",
         "AC Power",
         "Total Output Power",
         "Pac",
-        "AC Active Power",
-        "Grid total Reactive Power",
-        "AC_POWER",
-        "GRID_TOTAL_ACTIVE_POWER_LOW",
-        "GRID_TOTAL_REACTIVE_POWER_LOW",
-        "DEA_TOTAL_ACTIVE_POWER_LOW",
-        "DEA_TOTAL_REACTIVE_POWER_LOW",
-        "DEA_TOTAL_ACTIVE_POWER_HIGH",
-        "DEA_TOTAL_REACTIVE_POWER_HIGH",
-        "GRID_TOTAL_ACTIVE_POWER_HIGH",
-        "GRID_TOTAL_REACTIVE_POWER_HIGH"
+        "Grid total Active Power"
       ]
     },
     "POWER_FACTOR": {
@@ -152,8 +118,6 @@
         "PF",
         "Cos Phi",
         "Grid Power Factor",
-        "역률",
-        "Cosφ",
         "Output Power Factor"
       ]
     },
@@ -165,16 +129,8 @@
         "Frequency",
         "L1 Frequency",
         "AC Frequency",
-        "주파수",
-        "계통주파수",
         "Fac",
-        "Output Frequency",
-        "L2 Frequency",
-        "L3 Frequency",
-        "FREQUENCY",
-        "L2_FREQUENCY",
-        "L3_FREQUENCY",
-        "GRID_FREQUENCY"
+        "Output Frequency"
       ]
     },
     "REACTIVE_POWER": {
@@ -185,7 +141,6 @@
         "Q Power",
         "VAr",
         "Grid Reactive Power",
-        "무효전력",
         "Total Reactive Power",
         "Qac"
       ]
@@ -198,7 +153,6 @@
         "VA Power",
         "S Power",
         "Grid Apparent Power",
-        "피상전력",
         "Total Apparent Power"
       ]
     },
@@ -211,12 +165,9 @@
         "Daily Generation",
         "Daily Yield",
         "Daily Production",
-        "일일발전량",
-        "금일발전량",
         "Today Yield",
         "Day Energy",
-        "E-Today",
-        "TODAY_ENERGY"
+        "E-Today"
       ]
     },
     "TOTAL_ENERGY": {
@@ -228,11 +179,8 @@
         "Lifetime Energy",
         "Total Generation",
         "Total Yield",
-        "누적발전량",
-        "총발전량",
         "Accumulated Energy",
-        "E-Total",
-        "ACCUMULATED_ENERGY"
+        "E-Total"
       ]
     },
     "INVERTER_MODE": {
@@ -246,11 +194,7 @@
         "Work Mode",
         "System State",
         "Device Status",
-        "인버터상태",
-        "운전상태",
-        "동작모드",
-        "Run State",
-        "Machine State"
+        "Run State"
       ]
     },
     "INNER_TEMP": {
@@ -262,12 +206,8 @@
         "Cabinet Temperature",
         "Heatsink Temperature",
         "Internal Temperature",
-        "인버터온도",
-        "내부온도",
-        "방열판온도",
         "Module Temperature",
-        "IGBT Temperature",
-        "Device Temperature"
+        "IGBT Temperature"
       ]
     },
     "ERROR_CODE1": {
@@ -277,12 +217,9 @@
         "Error Code 1",
         "Fault Code 1",
         "Alarm Code 1",
-        "Warning Code 1",
+        "Error Code1",
         "Alarm1",
         "Fault1",
-        "오류코드1",
-        "고장코드1",
-        "알람1",
         "Protection Flag 1"
       ]
     },
@@ -293,12 +230,9 @@
         "Error Code 2",
         "Fault Code 2",
         "Alarm Code 2",
-        "Warning Code 2",
+        "Error Code2",
         "Alarm2",
         "Fault2",
-        "오류코드2",
-        "고장코드2",
-        "알람2",
         "Protection Flag 2"
       ]
     },
@@ -309,12 +243,9 @@
         "Error Code 3",
         "Fault Code 3",
         "Alarm Code 3",
-        "Warning Code 3",
+        "Error Code3",
         "Alarm3",
         "Fault3",
-        "오류코드3",
-        "고장코드3",
-        "알람3",
         "Protection Flag 3"
       ]
     },
@@ -327,16 +258,9 @@
         "PV Power",
         "Total PV Power",
         "DC Power",
-        "PV입력전력",
-        "직류입력전력",
         "Total DC Power",
         "Ppv",
-        "PV_POWER",
-        "PV_TOTAL_INPUT_POWER_LOW",
-        "PV1_POWER",
-        "PV2_POWER",
-        "PV3_POWER",
-        "PV_TOTAL_INPUT_POWER_HIGH"
+        "PV total input power"
       ]
     },
     "MPPT_VOLTAGE": {
@@ -347,18 +271,12 @@
         "MPPT Voltage",
         "PV Voltage",
         "DC Input Voltage",
-        "PV{n} Voltage",
-        "MPPT{n} Voltage",
         "DC Voltage",
         "Vpv",
-        "PV입력전압",
-        "직류입력전압",
-        "MPPT1 Voltage",
-        "MPPT2 Voltage",
-        "MPPT3 Voltage",
+        "MPPT1_VOLTAGE",
         "MPPT2_VOLTAGE",
         "MPPT3_VOLTAGE",
-        "MPPT1_VOLTAGE"
+        "MPPT4_VOLTAGE"
       ]
     },
     "MPPT_CURRENT": {
@@ -369,21 +287,12 @@
         "MPPT Current",
         "PV Current",
         "DC Input Current",
-        "PV{n} Current",
-        "MPPT{n} Current",
         "DC Current",
         "Ipv",
-        "PV입력전류",
-        "직류입력전류",
-        "MPPT4 Current",
-        "MPPT8 Current",
-        "MPPT1 Current",
-        "MPPT2 Current",
-        "MPPT3 Current",
+        "MPPT1_CURRENT",
         "MPPT2_CURRENT",
         "MPPT3_CURRENT",
-        "MPPT4_CURRENT",
-        "MPPT1_CURRENT"
+        "MPPT4_CURRENT"
       ]
     },
     "MPPT_POWER": {
@@ -392,15 +301,15 @@
       "pattern": "MPPT{n}_POWER",
       "synonyms": [
         "MPPT Power",
-        "PV{n} Power",
-        "MPPT{n} Power",
-        "DC Input{n} Power",
-        "MPPT4 Power",
-        "MPPT7 Power",
-        "MPPT8 Power",
-        "MPPT1 Power",
-        "MPPT2 Power",
-        "MPPT3 Power"
+        "DC Input Power",
+        "MPPT1_POWER",
+        "MPPT1_POWER_HIGH",
+        "MPPT2_POWER",
+        "MPPT2_POWER_HIGH",
+        "MPPT3_POWER",
+        "MPPT3_POWER_HIGH",
+        "MPPT4_POWER",
+        "MPPT4_POWER_HIGH"
       ]
     },
     "STRING_CURRENT": {
@@ -410,43 +319,15 @@
       "synonyms": [
         "String Current",
         "PV String Current",
-        "String{n} Current",
-        "PV String{n} Current",
-        "스트링전류",
-        "String 1-1 current",
-        "String 1-3 current",
-        "String 1-4 current",
-        "String 2-1 current",
-        "String 2-2 current",
-        "String 2-3 current",
-        "String 2-4 current",
-        "String 3-1 current",
-        "String 3-2 current",
-        "String 3-3 current",
-        "String 3-4 current",
-        "String 4-1 current",
-        "String 4-2 current",
-        "String 4-3 current",
-        "String 4-4 current",
-        "String 5-1 current",
-        "String 5-2 current",
-        "String 5-3 current",
-        "String 5-4 current",
-        "String 6-1 current",
-        "String 6-2 current",
-        "String 6-3 current",
-        "String 6-4 current",
-        "String 7-1 current",
-        "String 7-2 current",
-        "String 7-3 current",
-        "String 7-4 current",
-        "String 8-1 current",
-        "String 8-2 current",
-        "String 8-3 current",
-        "String 8-4 current",
-        "String 9-2 current",
-        "String 9-3 current",
-        "String 9-4 current"
+        "String input current",
+        "STRING1_CURRENT",
+        "STRING2_CURRENT",
+        "STRING3_CURRENT",
+        "STRING4_CURRENT",
+        "STRING5_CURRENT",
+        "STRING6_CURRENT",
+        "STRING7_CURRENT",
+        "STRING8_CURRENT"
       ]
     },
     "STRING_VOLTAGE": {
@@ -456,9 +337,15 @@
       "synonyms": [
         "String Voltage",
         "PV String Voltage",
-        "String{n} Voltage",
-        "PV String{n} Voltage",
-        "스트링전압"
+        "String input voltage",
+        "STRING1_VOLTAGE",
+        "STRING2_VOLTAGE",
+        "STRING3_VOLTAGE",
+        "STRING4_VOLTAGE",
+        "STRING5_VOLTAGE",
+        "STRING6_VOLTAGE",
+        "STRING7_VOLTAGE",
+        "STRING8_VOLTAGE"
       ]
     },
     "DEVICE_MODEL": {
@@ -467,9 +354,7 @@
         "Device Model",
         "Model Name",
         "Product Model",
-        "모델명",
-        "Inverter Model",
-        "Device Type"
+        "Inverter Model"
       ]
     },
     "SERIAL_NUMBER": {
@@ -477,8 +362,6 @@
       "synonyms": [
         "Serial Number",
         "SN",
-        "시리얼번호",
-        "제품번호",
         "Device SN",
         "Product SN"
       ]
@@ -489,7 +372,6 @@
         "Firmware Version",
         "FW Version",
         "Software Version",
-        "펌웨어버전",
         "Master FW",
         "DSP Version"
       ]
@@ -500,7 +382,7 @@
         "MPPT Count",
         "Number of MPPTs",
         "MPPT Trackers",
-        "MPPT수",
+        "MPPT Number",
         "MPPT Channels"
       ]
     },
@@ -510,9 +392,7 @@
         "Nominal Power",
         "Rated Power",
         "Nominal Active Power",
-        "정격출력",
-        "Max Output Power",
-        "Rated Output Power"
+        "Max Output Power"
       ]
     },
     "NOMINAL_VOLTAGE": {
@@ -520,7 +400,6 @@
       "synonyms": [
         "Nominal Voltage",
         "Rated Voltage",
-        "정격전압",
         "Grid Nominal Voltage"
       ]
     },
@@ -529,7 +408,6 @@
       "synonyms": [
         "Nominal Frequency",
         "Rated Frequency",
-        "정격주파수",
         "Grid Nominal Frequency"
       ]
     },
@@ -538,7 +416,6 @@
       "synonyms": [
         "Grid Phase Number",
         "Phase Count",
-        "상수",
         "Number of Phases",
         "Phase Type"
       ]
@@ -551,10 +428,7 @@
         "Output Regulation",
         "Curtailment",
         "Derate",
-        "유효전력제한",
-        "출력제한",
-        "Power Limiting",
-        "Active Power Curtailment"
+        "Power Limiting"
       ]
     },
     "POWER_FACTOR_SET": {
@@ -563,9 +437,7 @@
         "Power Factor Set",
         "PF Set",
         "Cos Phi Set",
-        "역률설정",
         "PF Control",
-        "Cosφ Setting",
         "Target Power Factor"
       ]
     },
@@ -575,10 +447,8 @@
         "Reactive Power Set",
         "Q Set",
         "VAr Set",
-        "무효전력설정",
         "Q Control",
-        "VAr Control",
-        "Reactive Power Command"
+        "VAr Control"
       ]
     },
     "ON_OFF": {
@@ -587,11 +457,8 @@
         "ON/OFF",
         "Start/Stop",
         "Remote ON/OFF",
-        "운전정지",
-        "기동정지",
         "Remote Start Stop",
-        "Inverter ON OFF",
-        "Device Switch"
+        "Inverter ON OFF"
       ]
     },
     "OPERATION_MODE": {
@@ -599,7 +466,6 @@
       "synonyms": [
         "Operation Mode",
         "Running Mode Set",
-        "운전모드설정",
         "Control Mode",
         "Work Mode Set",
         "Power Control Mode"
