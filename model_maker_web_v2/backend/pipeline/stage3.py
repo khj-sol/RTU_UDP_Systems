@@ -590,6 +590,21 @@ def _gen_data_types(all_regs: List[RegisterRow]) -> str:
     return '\n'.join(lines)
 
 
+def _gen_string_current_monitor(all_regs: List[RegisterRow]) -> str:
+    """STRING_CURRENT_MONITOR 플래그 생성 — String 전류 레지스터 존재 여부"""
+    has_string = any(
+        detect_channel_number(r.definition) and detect_channel_number(r.definition)[0] == 'STRING'
+        and 'current' in r.definition.lower()
+        for r in all_regs
+    )
+    return f'''
+# String 전류 모니터링 지원 여부
+# True: String별 전류 레지스터 있음 (Solarize, Senergy, Kstar 등)
+# False: String 전류 레지스터 없음 (Huawei 등 — PV 전류만 제공)
+STRING_CURRENT_MONITOR = {has_string}
+'''
+
+
 # ─── 코드 검증 ───────────────────────────────────────────────────────────────
 
 def validate_code(code: str, mppt: int, total_strings: int) -> dict:
@@ -782,6 +797,7 @@ def run_stage3(
         _gen_scale_dict(),
         _gen_helpers(mppt_count, total_strings, strings_per_mppt),
         _gen_data_types(all_regs),
+        _gen_string_current_monitor(all_regs),
     ]
     code = '\n'.join(p for p in code_parts if p)
 
