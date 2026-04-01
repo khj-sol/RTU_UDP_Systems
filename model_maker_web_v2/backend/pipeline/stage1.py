@@ -443,6 +443,24 @@ def classify_register(reg: RegisterRow, synonym_db: dict,
 def assign_h01_field(reg: RegisterRow, synonym_db: dict,
                      ref_patterns: dict = None) -> str:
     """레지스터에 대응하는 H01 필드명 추정"""
+    # 0) 채널 번호가 있으면 최우선 — PV{n}/MPPT{n}/STRING{n} → mppt{n}/string{n}
+    ch = detect_channel_number(reg.definition)
+    if ch:
+        prefix, n = ch
+        defn_lower = reg.definition.lower()
+        if prefix == 'MPPT':
+            if 'voltage' in defn_lower:
+                return f'mppt{n}_voltage'
+            if 'current' in defn_lower:
+                return f'mppt{n}_current'
+            if 'power' in defn_lower:
+                return f'mppt{n}_power'
+        elif prefix == 'STRING':
+            if 'voltage' in defn_lower:
+                return f'string{n}_voltage'
+            if 'current' in defn_lower:
+                return f'string{n}_current'
+
     # 1) synonym_db 정확 매칭
     syn_match = match_synonym(reg.definition, synonym_db)
     if syn_match and syn_match.get('h01_field'):
@@ -461,7 +479,7 @@ def assign_h01_field(reg: RegisterRow, synonym_db: dict,
     if fuzzy and fuzzy.get('h01_field'):
         return fuzzy['h01_field']
 
-    # 4) MPPT/String 패턴
+    # 4) MPPT/String 패턴 (Step 0에서 못 잡힌 경우 — 한글 키워드 포함)
     ch = detect_channel_number(reg.definition)
     if ch:
         prefix, n = ch
