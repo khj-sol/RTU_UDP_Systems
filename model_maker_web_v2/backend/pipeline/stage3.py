@@ -814,11 +814,16 @@ def run_stage3(
         save_review_history(review_history)
         log(f'  review_history: +{rv_recorded}개 판정')
 
-    # common/ 레퍼런스 등록
+    # common/ 레퍼런스 등록 — 모든 검증 통과 시에만 (오염 방지)
+    all_passed = all(validation.values())
     common_path = os.path.join(COMMON_DIR, output_name)
-    import shutil
-    shutil.copy2(output_path, common_path)
-    log(f'  레퍼런스 등록: common/{output_name}')
+    if all_passed:
+        import shutil
+        shutil.copy2(output_path, common_path)
+        log(f'  레퍼런스 등록: common/{output_name}')
+    else:
+        failed = [k for k, v in validation.items() if not v]
+        log(f'  레퍼런스 미등록 (검증 실패: {failed})', 'warn')
 
     log('Stage 3 완료', 'ok')
 
