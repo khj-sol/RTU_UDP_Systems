@@ -555,22 +555,23 @@ def run_stage1(
         if a is not None:
             extracted_addrs.add(a)
     补完 = 0
-    mfr_lower = manufacturer.lower()
-    sorted_protos = sorted(ref_patterns.keys(),
-                           key=lambda p: (0 if mfr_lower in p.lower() else 1, p))
-    for proto in sorted_protos[:1]:
-        addr_map = ref_patterns[proto]
-        for addr, ref_name in addr_map.items():
-            if addr not in extracted_addrs and 0x0100 <= addr <= 0xFFFF:
+    # 모든 프로토콜에서 알려진 주소 수집, get_ref_name_by_addr로 표준 이름 결정
+    all_known_addrs = set()
+    for addr_map in ref_patterns.values():
+        all_known_addrs.update(addr_map.keys())
+    for addr in sorted(all_known_addrs):
+        if addr not in extracted_addrs and 0x0100 <= addr <= 0xFFFF:
+            ref_name = get_ref_name_by_addr(addr, ref_patterns)
+            if ref_name:
                 registers.append(RegisterRow(
                     definition=ref_name, address=addr,
                     address_hex=f'0x{addr:04X}',
                     data_type='U16', rw='RO',
-                    comment=f'(보완: {proto} 레퍼런스)'))
+                    comment='(보완: 레퍼런스)'))
                 extracted_addrs.add(addr)
                 补完 += 1
     if 补完 > 0:
-        log(f'  레퍼런스 보완: +{补完}개 ({sorted_protos[0]})')
+        log(f'  레퍼런스 보완: +{补完}개')
     protocol_version = ''
 
     # PDF 전문에서 제조사/버전 탐색

@@ -23,14 +23,14 @@ COMMON_DIR = os.path.join(PROJECT_ROOT, 'common')
 
 async def _run_in_thread(func, *args, **kwargs):
     """동기 함수를 스레드 풀에서 실행"""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, lambda: func(*args, **kwargs))
 
 
-def _make_progress_callback(sid: str, stage: str):
-    """WebSocket 로그 전송 콜백 생성"""
+def _make_progress_callback(sid: str, stage: str, loop: asyncio.AbstractEventLoop):
+    """WebSocket 로그 전송 콜백 생성 — loop을 캡처하여 스레드 안전"""
     def callback(msg: str, level: str = 'info'):
-        asyncio.get_event_loop().call_soon_threadsafe(
+        loop.call_soon_threadsafe(
             asyncio.ensure_future,
             ws_manager.send_json(sid, {
                 'stage': stage,
@@ -100,7 +100,7 @@ async def stage1_run(body: dict):
     async def _run():
         try:
             from .pipeline.stage1 import run_stage1
-            progress = _make_progress_callback(sid, 's1')
+            progress = _make_progress_callback(sid, 's1', asyncio.get_running_loop())
             result = await _run_in_thread(
                 run_stage1, uploaded, work_dir, device_type, progress)
 
@@ -153,7 +153,7 @@ async def stage2_run(body: dict):
     async def _run():
         try:
             from .pipeline.stage2 import run_stage2
-            progress = _make_progress_callback(sid, 's2')
+            progress = _make_progress_callback(sid, 's2', asyncio.get_running_loop())
             result = await _run_in_thread(
                 run_stage2, stage1_excel, work_dir,
                 mppt, strings_per_mppt, capacity, progress)
@@ -206,7 +206,7 @@ async def stage3_run(body: dict):
     async def _run():
         try:
             from .pipeline.stage3 import run_stage3
-            progress = _make_progress_callback(sid, 's3')
+            progress = _make_progress_callback(sid, 's3', asyncio.get_running_loop())
             result = await _run_in_thread(
                 run_stage3, stage2_excel, work_dir, progress)
 

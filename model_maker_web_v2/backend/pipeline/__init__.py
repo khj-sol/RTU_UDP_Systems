@@ -298,14 +298,72 @@ def detect_channel_number(definition: str) -> Optional[tuple]:
 
 # ─── 주소 기반 레퍼런스 조회 ──────────────────────────────────────────────────
 
+def _is_clean_name(name: str) -> bool:
+    """오염된 이름 필터링 — 60자 초과, 설명문 포함 등"""
+    if len(name) > 60:
+        return False
+    if name.startswith('REG_') and not name.startswith('REG_0'):
+        return False  # REG_15_AC_MOVING... 같은 패턴
+    if 'BIT_NO_DESCRIPTION' in name:
+        return False
+    if 'NA_PROJECT' in name:
+        return False
+    return True
+
+
+# synonym_db 표준 이름 캐시 (모듈 레벨)
+_SYNONYM_STANDARD_NAMES: Optional[set] = None
+
+
+def _get_synonym_standard_names() -> set:
+    """synonym_db의 표준 필드명 집합 로드 (한 번만)"""
+    global _SYNONYM_STANDARD_NAMES
+    if _SYNONYM_STANDARD_NAMES is None:
+        db = load_synonym_db()
+        _SYNONYM_STANDARD_NAMES = set(db.get('fields', {}).keys())
+    return _SYNONYM_STANDARD_NAMES
+
+
 def get_ref_name_by_addr(addr: int, ref_patterns: Dict[str, Dict[int, str]]) -> Optional[str]:
-    """주소로 레퍼런스 속성명 조회 (모든 프로토콜에서 탐색)"""
+    """
+    주소로 레퍼런스 속성명 조회 — 결정론적 선택:
+    1순위: synonym_db 표준 이름
+    2순위: 깨끗한 이름 중 다수결
+    3순위: 첫 번째 깨끗한 이름
+    """
     if addr is None:
         return None
+
+    candidates = []
     for proto, addr_map in ref_patterns.items():
         if addr in addr_map:
-            return addr_map[addr]
-    return None
+            candidates.append(addr_map[addr])
+
+    if not candidates:
+        return None
+    if len(candidates) == 1:
+        return candidates[0] if _is_clean_name(candidates[0]) else None
+
+    # 오염 필터
+    clean = [n for n in candidates if _is_clean_name(n)]
+    if not clean:
+        return None
+
+    # 1순위: synonym_db 표준 이름
+    std_names = _get_synonym_standard_names()
+    for name in clean:
+        if name in std_names:
+            return name
+
+    # 2순위: 다수결 (가장 많이 등장하는 이름)
+    from collections import Counter
+    counts = Counter(clean)
+    most_common = counts.most_common(1)[0]
+    if most_common[1] > 1:
+        return most_common[0]
+
+    # 3순위: 알파벳순 첫 번째 (결정론적)
+    return sorted(clean)[0]
 
 
 def get_h01_field_from_ref(addr: int, ref_patterns: Dict[str, Dict[int, str]],
