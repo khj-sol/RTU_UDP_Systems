@@ -5,179 +5,605 @@
     "L1_VOLTAGE": {
       "category": "MONITORING",
       "h01_field": "r_voltage",
-      "synonyms": ["R Phase Voltage", "Grid Voltage R", "L1 Voltage", "Phase A Voltage", "Vac_R", "Ua", "Grid R Voltage", "R상 전압", "계통전압R", "A Phase Voltage", "Line Voltage L1", "Output Voltage R"]
+      "synonyms": [
+        "R Phase Voltage",
+        "Grid Voltage R",
+        "L1 Voltage",
+        "Phase A Voltage",
+        "Vac_R",
+        "Ua",
+        "Grid R Voltage",
+        "R상 전압",
+        "계통전압R",
+        "A Phase Voltage",
+        "Line Voltage L1",
+        "Output Voltage R",
+        "R_PHASE_VOLTAGE",
+        "GRID_R_VOLTAGE"
+      ]
     },
     "L2_VOLTAGE": {
       "category": "MONITORING",
       "h01_field": "s_voltage",
-      "synonyms": ["S Phase Voltage", "Grid Voltage S", "L2 Voltage", "Phase B Voltage", "Vac_S", "Ub", "Grid S Voltage", "S상 전압", "계통전압S", "B Phase Voltage", "Line Voltage L2", "Output Voltage S"]
+      "synonyms": [
+        "S Phase Voltage",
+        "Grid Voltage S",
+        "L2 Voltage",
+        "Phase B Voltage",
+        "Vac_S",
+        "Ub",
+        "Grid S Voltage",
+        "S상 전압",
+        "계통전압S",
+        "B Phase Voltage",
+        "Line Voltage L2",
+        "Output Voltage S",
+        "S_PHASE_VOLTAGE",
+        "GRID_S_VOLTAGE"
+      ]
     },
     "L3_VOLTAGE": {
       "category": "MONITORING",
       "h01_field": "t_voltage",
-      "synonyms": ["T Phase Voltage", "Grid Voltage T", "L3 Voltage", "Phase C Voltage", "Vac_T", "Uc", "Grid T Voltage", "T상 전압", "계통전압T", "C Phase Voltage", "Line Voltage L3", "Output Voltage T"]
+      "synonyms": [
+        "T Phase Voltage",
+        "Grid Voltage T",
+        "L3 Voltage",
+        "Phase C Voltage",
+        "Vac_T",
+        "Uc",
+        "Grid T Voltage",
+        "T상 전압",
+        "계통전압T",
+        "C Phase Voltage",
+        "Line Voltage L3",
+        "Output Voltage T",
+        "T_PHASE_VOLTAGE",
+        "GRID_T_VOLTAGE"
+      ]
     },
     "L1_CURRENT": {
       "category": "MONITORING",
       "h01_field": "r_current",
-      "synonyms": ["R Phase Current", "Grid Current R", "L1 Current", "Phase A Current", "Iac_R", "Ia", "Grid R Current", "R상 전류", "계통전류R", "A Phase Current", "Output Current R"]
+      "synonyms": [
+        "R Phase Current",
+        "Grid Current R",
+        "L1 Current",
+        "Phase A Current",
+        "Iac_R",
+        "Ia",
+        "Grid R Current",
+        "R상 전류",
+        "계통전류R",
+        "A Phase Current",
+        "Output Current R",
+        "R_PHASE_CURRENT"
+      ]
     },
     "L2_CURRENT": {
       "category": "MONITORING",
       "h01_field": "s_current",
-      "synonyms": ["S Phase Current", "Grid Current S", "L2 Current", "Phase B Current", "Iac_S", "Ib", "Grid S Current", "S상 전류", "계통전류S", "B Phase Current", "Output Current S"]
+      "synonyms": [
+        "S Phase Current",
+        "Grid Current S",
+        "L2 Current",
+        "Phase B Current",
+        "Iac_S",
+        "Ib",
+        "Grid S Current",
+        "S상 전류",
+        "계통전류S",
+        "B Phase Current",
+        "Output Current S",
+        "S_PHASE_CURRENT"
+      ]
     },
     "L3_CURRENT": {
       "category": "MONITORING",
       "h01_field": "t_current",
-      "synonyms": ["T Phase Current", "Grid Current T", "L3 Current", "Phase C Current", "Iac_T", "Ic", "Grid T Current", "T상 전류", "계통전류T", "C Phase Current", "Output Current T"]
+      "synonyms": [
+        "T Phase Current",
+        "Grid Current T",
+        "L3 Current",
+        "Phase C Current",
+        "Iac_T",
+        "Ic",
+        "Grid T Current",
+        "T상 전류",
+        "계통전류T",
+        "C Phase Current",
+        "Output Current T",
+        "T_PHASE_CURRENT"
+      ]
     },
     "GRID_TOTAL_ACTIVE_POWER": {
       "category": "MONITORING",
       "h01_field": "ac_power",
-      "synonyms": ["Active Power", "Output Power", "Grid Power", "Total Active Power", "AC Output Power", "Grid Total Active Power", "유효전력", "출력전력", "AC Power", "Total Output Power", "Pac", "AC Active Power"]
+      "synonyms": [
+        "Active Power",
+        "Output Power",
+        "Grid Power",
+        "Total Active Power",
+        "AC Output Power",
+        "Grid Total Active Power",
+        "유효전력",
+        "출력전력",
+        "AC Power",
+        "Total Output Power",
+        "Pac",
+        "AC Active Power",
+        "Grid total Reactive Power",
+        "AC_POWER",
+        "GRID_TOTAL_ACTIVE_POWER_LOW",
+        "GRID_TOTAL_REACTIVE_POWER_LOW",
+        "DEA_TOTAL_ACTIVE_POWER_LOW",
+        "DEA_TOTAL_REACTIVE_POWER_LOW",
+        "DEA_TOTAL_ACTIVE_POWER_HIGH",
+        "DEA_TOTAL_REACTIVE_POWER_HIGH",
+        "GRID_TOTAL_ACTIVE_POWER_HIGH",
+        "GRID_TOTAL_REACTIVE_POWER_HIGH"
+      ]
     },
     "POWER_FACTOR": {
       "category": "MONITORING",
       "h01_field": "power_factor",
-      "synonyms": ["Power Factor", "PF", "Cos Phi", "Grid Power Factor", "역률", "Cosφ", "Output Power Factor"]
+      "synonyms": [
+        "Power Factor",
+        "PF",
+        "Cos Phi",
+        "Grid Power Factor",
+        "역률",
+        "Cosφ",
+        "Output Power Factor"
+      ]
     },
     "L1_FREQUENCY": {
       "category": "MONITORING",
       "h01_field": "frequency",
-      "synonyms": ["Grid Frequency", "Frequency", "L1 Frequency", "AC Frequency", "주파수", "계통주파수", "Fac", "Output Frequency"]
+      "synonyms": [
+        "Grid Frequency",
+        "Frequency",
+        "L1 Frequency",
+        "AC Frequency",
+        "주파수",
+        "계통주파수",
+        "Fac",
+        "Output Frequency",
+        "L2 Frequency",
+        "L3 Frequency",
+        "FREQUENCY",
+        "L2_FREQUENCY",
+        "L3_FREQUENCY",
+        "GRID_FREQUENCY"
+      ]
     },
     "REACTIVE_POWER": {
       "category": "MONITORING",
       "h01_field": "reactive_power",
-      "synonyms": ["Reactive Power", "Q Power", "VAr", "Grid Reactive Power", "무효전력", "Total Reactive Power", "Qac"]
+      "synonyms": [
+        "Reactive Power",
+        "Q Power",
+        "VAr",
+        "Grid Reactive Power",
+        "무효전력",
+        "Total Reactive Power",
+        "Qac"
+      ]
     },
     "APPARENT_POWER": {
       "category": "MONITORING",
       "h01_field": "apparent_power",
-      "synonyms": ["Apparent Power", "VA Power", "S Power", "Grid Apparent Power", "피상전력", "Total Apparent Power"]
+      "synonyms": [
+        "Apparent Power",
+        "VA Power",
+        "S Power",
+        "Grid Apparent Power",
+        "피상전력",
+        "Total Apparent Power"
+      ]
     },
     "DAILY_ENERGY": {
       "category": "MONITORING",
       "h01_field": "daily_energy",
-      "synonyms": ["Daily Energy", "Today Energy", "Daily Generation", "Daily Yield", "Daily Production", "일일발전량", "금일발전량", "Today Yield", "Day Energy", "E-Today"]
+      "synonyms": [
+        "Daily Energy",
+        "Today Energy",
+        "Daily Generation",
+        "Daily Yield",
+        "Daily Production",
+        "일일발전량",
+        "금일발전량",
+        "Today Yield",
+        "Day Energy",
+        "E-Today",
+        "TODAY_ENERGY"
+      ]
     },
     "TOTAL_ENERGY": {
       "category": "MONITORING",
       "h01_field": "cumulative_energy",
-      "synonyms": ["Total Energy", "Cumulative Energy", "Lifetime Energy", "Total Generation", "Total Yield", "누적발전량", "총발전량", "Accumulated Energy", "E-Total"]
+      "synonyms": [
+        "Total Energy",
+        "Cumulative Energy",
+        "Lifetime Energy",
+        "Total Generation",
+        "Total Yield",
+        "누적발전량",
+        "총발전량",
+        "Accumulated Energy",
+        "E-Total",
+        "ACCUMULATED_ENERGY"
+      ]
     },
     "INVERTER_MODE": {
       "category": "STATUS",
       "h01_field": "status",
-      "synonyms": ["Inverter Mode", "Running Status", "Operating State", "Inverter State", "Work Mode", "System State", "Device Status", "인버터상태", "운전상태", "동작모드", "Run State", "Machine State"]
+      "synonyms": [
+        "Inverter Mode",
+        "Running Status",
+        "Operating State",
+        "Inverter State",
+        "Work Mode",
+        "System State",
+        "Device Status",
+        "인버터상태",
+        "운전상태",
+        "동작모드",
+        "Run State",
+        "Machine State"
+      ]
     },
     "INNER_TEMP": {
       "category": "MONITORING",
       "h01_field": "temperature",
-      "synonyms": ["Inner Temperature", "Inverter Temperature", "Cabinet Temperature", "Heatsink Temperature", "Internal Temperature", "인버터온도", "내부온도", "방열판온도", "Module Temperature", "IGBT Temperature", "Device Temperature"]
+      "synonyms": [
+        "Inner Temperature",
+        "Inverter Temperature",
+        "Cabinet Temperature",
+        "Heatsink Temperature",
+        "Internal Temperature",
+        "인버터온도",
+        "내부온도",
+        "방열판온도",
+        "Module Temperature",
+        "IGBT Temperature",
+        "Device Temperature"
+      ]
     },
     "ERROR_CODE1": {
       "category": "ALARM",
       "h01_field": "alarm1",
-      "synonyms": ["Error Code 1", "Fault Code 1", "Alarm Code 1", "Warning Code 1", "Alarm1", "Fault1", "오류코드1", "고장코드1", "알람1", "Protection Flag 1"]
+      "synonyms": [
+        "Error Code 1",
+        "Fault Code 1",
+        "Alarm Code 1",
+        "Warning Code 1",
+        "Alarm1",
+        "Fault1",
+        "오류코드1",
+        "고장코드1",
+        "알람1",
+        "Protection Flag 1"
+      ]
     },
     "ERROR_CODE2": {
       "category": "ALARM",
       "h01_field": "alarm2",
-      "synonyms": ["Error Code 2", "Fault Code 2", "Alarm Code 2", "Warning Code 2", "Alarm2", "Fault2", "오류코드2", "고장코드2", "알람2", "Protection Flag 2"]
+      "synonyms": [
+        "Error Code 2",
+        "Fault Code 2",
+        "Alarm Code 2",
+        "Warning Code 2",
+        "Alarm2",
+        "Fault2",
+        "오류코드2",
+        "고장코드2",
+        "알람2",
+        "Protection Flag 2"
+      ]
     },
     "ERROR_CODE3": {
       "category": "ALARM",
       "h01_field": "alarm3",
-      "synonyms": ["Error Code 3", "Fault Code 3", "Alarm Code 3", "Warning Code 3", "Alarm3", "Fault3", "오류코드3", "고장코드3", "알람3", "Protection Flag 3"]
+      "synonyms": [
+        "Error Code 3",
+        "Fault Code 3",
+        "Alarm Code 3",
+        "Warning Code 3",
+        "Alarm3",
+        "Fault3",
+        "오류코드3",
+        "고장코드3",
+        "알람3",
+        "Protection Flag 3"
+      ]
     },
     "PV_TOTAL_INPUT_POWER": {
       "category": "MONITORING",
       "h01_field": "pv_power",
-      "synonyms": ["PV Total Input Power", "DC Input Power", "PV Power", "Total PV Power", "DC Power", "PV입력전력", "직류입력전력", "Total DC Power", "Ppv"]
+      "synonyms": [
+        "PV Total Input Power",
+        "DC Input Power",
+        "PV Power",
+        "Total PV Power",
+        "DC Power",
+        "PV입력전력",
+        "직류입력전력",
+        "Total DC Power",
+        "Ppv",
+        "PV_POWER",
+        "PV_TOTAL_INPUT_POWER_LOW",
+        "PV1_POWER",
+        "PV2_POWER",
+        "PV3_POWER",
+        "PV_TOTAL_INPUT_POWER_HIGH"
+      ]
     },
     "MPPT_VOLTAGE": {
       "category": "MONITORING",
       "h01_field": "mppt_voltage",
       "pattern": "MPPT{n}_VOLTAGE",
-      "synonyms": ["MPPT Voltage", "PV Voltage", "DC Input Voltage", "PV{n} Voltage", "MPPT{n} Voltage", "DC Voltage", "Vpv", "PV입력전압", "직류입력전압"]
+      "synonyms": [
+        "MPPT Voltage",
+        "PV Voltage",
+        "DC Input Voltage",
+        "PV{n} Voltage",
+        "MPPT{n} Voltage",
+        "DC Voltage",
+        "Vpv",
+        "PV입력전압",
+        "직류입력전압",
+        "MPPT1 Voltage",
+        "MPPT2 Voltage",
+        "MPPT3 Voltage",
+        "MPPT2_VOLTAGE",
+        "MPPT3_VOLTAGE",
+        "MPPT1_VOLTAGE"
+      ]
     },
     "MPPT_CURRENT": {
       "category": "MONITORING",
       "h01_field": "mppt_current",
       "pattern": "MPPT{n}_CURRENT",
-      "synonyms": ["MPPT Current", "PV Current", "DC Input Current", "PV{n} Current", "MPPT{n} Current", "DC Current", "Ipv", "PV입력전류", "직류입력전류"]
+      "synonyms": [
+        "MPPT Current",
+        "PV Current",
+        "DC Input Current",
+        "PV{n} Current",
+        "MPPT{n} Current",
+        "DC Current",
+        "Ipv",
+        "PV입력전류",
+        "직류입력전류",
+        "MPPT4 Current",
+        "MPPT8 Current",
+        "MPPT1 Current",
+        "MPPT2 Current",
+        "MPPT3 Current",
+        "MPPT2_CURRENT",
+        "MPPT3_CURRENT",
+        "MPPT4_CURRENT",
+        "MPPT1_CURRENT"
+      ]
     },
     "MPPT_POWER": {
       "category": "MONITORING",
       "h01_field": "mppt_power",
       "pattern": "MPPT{n}_POWER",
-      "synonyms": ["MPPT Power", "PV{n} Power", "MPPT{n} Power", "DC Input{n} Power"]
+      "synonyms": [
+        "MPPT Power",
+        "PV{n} Power",
+        "MPPT{n} Power",
+        "DC Input{n} Power",
+        "MPPT4 Power",
+        "MPPT7 Power",
+        "MPPT8 Power",
+        "MPPT1 Power",
+        "MPPT2 Power",
+        "MPPT3 Power"
+      ]
     },
     "STRING_CURRENT": {
       "category": "MONITORING",
       "h01_field": "string_current",
       "pattern": "STRING{n}_CURRENT",
-      "synonyms": ["String Current", "PV String Current", "String{n} Current", "PV String{n} Current", "스트링전류"]
+      "synonyms": [
+        "String Current",
+        "PV String Current",
+        "String{n} Current",
+        "PV String{n} Current",
+        "스트링전류",
+        "String 1-1 current",
+        "String 1-3 current",
+        "String 1-4 current",
+        "String 2-1 current",
+        "String 2-2 current",
+        "String 2-3 current",
+        "String 2-4 current",
+        "String 3-1 current",
+        "String 3-2 current",
+        "String 3-3 current",
+        "String 3-4 current",
+        "String 4-1 current",
+        "String 4-2 current",
+        "String 4-3 current",
+        "String 4-4 current",
+        "String 5-1 current",
+        "String 5-2 current",
+        "String 5-3 current",
+        "String 5-4 current",
+        "String 6-1 current",
+        "String 6-2 current",
+        "String 6-3 current",
+        "String 6-4 current",
+        "String 7-1 current",
+        "String 7-2 current",
+        "String 7-3 current",
+        "String 7-4 current",
+        "String 8-1 current",
+        "String 8-2 current",
+        "String 8-3 current",
+        "String 8-4 current",
+        "String 9-2 current",
+        "String 9-3 current",
+        "String 9-4 current"
+      ]
     },
     "STRING_VOLTAGE": {
       "category": "MONITORING",
       "h01_field": "string_voltage",
       "pattern": "STRING{n}_VOLTAGE",
-      "synonyms": ["String Voltage", "PV String Voltage", "String{n} Voltage", "PV String{n} Voltage", "스트링전압"]
+      "synonyms": [
+        "String Voltage",
+        "PV String Voltage",
+        "String{n} Voltage",
+        "PV String{n} Voltage",
+        "스트링전압"
+      ]
     },
     "DEVICE_MODEL": {
       "category": "INFO",
-      "synonyms": ["Device Model", "Model Name", "Product Model", "모델명", "Inverter Model", "Device Type"]
+      "synonyms": [
+        "Device Model",
+        "Model Name",
+        "Product Model",
+        "모델명",
+        "Inverter Model",
+        "Device Type"
+      ]
     },
     "SERIAL_NUMBER": {
       "category": "INFO",
-      "synonyms": ["Serial Number", "SN", "시리얼번호", "제품번호", "Device SN", "Product SN"]
+      "synonyms": [
+        "Serial Number",
+        "SN",
+        "시리얼번호",
+        "제품번호",
+        "Device SN",
+        "Product SN"
+      ]
     },
     "FIRMWARE_VERSION": {
       "category": "INFO",
-      "synonyms": ["Firmware Version", "FW Version", "Software Version", "펌웨어버전", "Master FW", "DSP Version"]
+      "synonyms": [
+        "Firmware Version",
+        "FW Version",
+        "Software Version",
+        "펌웨어버전",
+        "Master FW",
+        "DSP Version"
+      ]
     },
     "MPPT_COUNT": {
       "category": "INFO",
-      "synonyms": ["MPPT Count", "Number of MPPTs", "MPPT Trackers", "MPPT수", "MPPT Channels"]
+      "synonyms": [
+        "MPPT Count",
+        "Number of MPPTs",
+        "MPPT Trackers",
+        "MPPT수",
+        "MPPT Channels"
+      ]
     },
     "NOMINAL_POWER": {
       "category": "INFO",
-      "synonyms": ["Nominal Power", "Rated Power", "Nominal Active Power", "정격출력", "Max Output Power", "Rated Output Power"]
+      "synonyms": [
+        "Nominal Power",
+        "Rated Power",
+        "Nominal Active Power",
+        "정격출력",
+        "Max Output Power",
+        "Rated Output Power"
+      ]
     },
     "NOMINAL_VOLTAGE": {
       "category": "INFO",
-      "synonyms": ["Nominal Voltage", "Rated Voltage", "정격전압", "Grid Nominal Voltage"]
+      "synonyms": [
+        "Nominal Voltage",
+        "Rated Voltage",
+        "정격전압",
+        "Grid Nominal Voltage"
+      ]
     },
     "NOMINAL_FREQUENCY": {
       "category": "INFO",
-      "synonyms": ["Nominal Frequency", "Rated Frequency", "정격주파수", "Grid Nominal Frequency"]
+      "synonyms": [
+        "Nominal Frequency",
+        "Rated Frequency",
+        "정격주파수",
+        "Grid Nominal Frequency"
+      ]
     },
     "GRID_PHASE_NUMBER": {
       "category": "INFO",
-      "synonyms": ["Grid Phase Number", "Phase Count", "상수", "Number of Phases", "Phase Type"]
+      "synonyms": [
+        "Grid Phase Number",
+        "Phase Count",
+        "상수",
+        "Number of Phases",
+        "Phase Type"
+      ]
     },
     "ACTIVE_POWER_LIMIT": {
       "category": "DER_CONTROL",
-      "synonyms": ["Active Power Limit", "Power Limit", "Output Regulation", "Curtailment", "Derate", "유효전력제한", "출력제한", "Power Limiting", "Active Power Curtailment"]
+      "synonyms": [
+        "Active Power Limit",
+        "Power Limit",
+        "Output Regulation",
+        "Curtailment",
+        "Derate",
+        "유효전력제한",
+        "출력제한",
+        "Power Limiting",
+        "Active Power Curtailment"
+      ]
     },
     "POWER_FACTOR_SET": {
       "category": "DER_CONTROL",
-      "synonyms": ["Power Factor Set", "PF Set", "Cos Phi Set", "역률설정", "PF Control", "Cosφ Setting", "Target Power Factor"]
+      "synonyms": [
+        "Power Factor Set",
+        "PF Set",
+        "Cos Phi Set",
+        "역률설정",
+        "PF Control",
+        "Cosφ Setting",
+        "Target Power Factor"
+      ]
     },
     "REACTIVE_POWER_SET": {
       "category": "DER_CONTROL",
-      "synonyms": ["Reactive Power Set", "Q Set", "VAr Set", "무효전력설정", "Q Control", "VAr Control", "Reactive Power Command"]
+      "synonyms": [
+        "Reactive Power Set",
+        "Q Set",
+        "VAr Set",
+        "무효전력설정",
+        "Q Control",
+        "VAr Control",
+        "Reactive Power Command"
+      ]
     },
     "ON_OFF": {
       "category": "DER_CONTROL",
-      "synonyms": ["ON/OFF", "Start/Stop", "Remote ON/OFF", "운전정지", "기동정지", "Remote Start Stop", "Inverter ON OFF", "Device Switch"]
+      "synonyms": [
+        "ON/OFF",
+        "Start/Stop",
+        "Remote ON/OFF",
+        "운전정지",
+        "기동정지",
+        "Remote Start Stop",
+        "Inverter ON OFF",
+        "Device Switch"
+      ]
     },
     "OPERATION_MODE": {
       "category": "DER_CONTROL",
-      "synonyms": ["Operation Mode", "Running Mode Set", "운전모드설정", "Control Mode", "Work Mode Set", "Power Control Mode"]
+      "synonyms": [
+        "Operation Mode",
+        "Running Mode Set",
+        "운전모드설정",
+        "Control Mode",
+        "Work Mode Set",
+        "Power Control Mode"
+      ]
     }
   }
 }

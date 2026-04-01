@@ -1,0 +1,795 @@
+# -*- coding: utf-8 -*-
+"""
+Stage 1 — PDF/Excel → Stage 1 Excel 레지스터맵 추출
+
+PDF(PyMuPDF)나 Excel(openpyxl)에서 Modbus 레지스터 테이블을 추출하고,
+synonym_db / review_history / 레퍼런스 패턴을 이용하여 카테고리 분류 및 H01 매칭을 수행한다.
+"""
+import os
+import re
+import json
+from datetime import datetime
+from typing import List, Dict, Optional
+
+from . import (
+    PROJECT_ROOT, COMMON_DIR, MODEL_MAKER_DIR, UDP_PROTOCOL_DIR,
+    RegisterRow, INVERTER_MODES, DER_CONTROL_REGS, DER_MONITOR_REGS,
+    CATEGORY_COLORS, MATCH_COLORS,
+    to_upper_snake, parse_address, match_synonym, match_synonym_fuzzy,
+    detect_channel_number, detect_channel_from_ref,
+    get_ref_name_by_addr, get_h01_field_from_ref,
+    load_synonym_db, load_review_history, load_reference_patterns,
+    get_openpyxl, ProgressCallback,
+)
+from .rules import (
+    classify_register_with_rules, detect_iv_scan_support,
+    get_valid_categories, distribute_alarms,
+)
+
+# ─── PDF 추출 ─────────────────────────────────────────────────────────────────
+
+def extract_pdf_text_and_tables(pdf_path: str) -> List[dict]:
+    """PyMuPDF로 PDF 페이지별 텍스트+테이블 추출"""
+    import fitz
+    doc = fitz.open(pdf_path)
+    pages = []
+    try:
+        for i, page in enumerate(doc):
+            text = page.get_text()
+            tables = []
+            for tab in page.find_tables():
+                try:
+                    tables.append(tab.extract())
+                except Exception:
+                    pass
+            pages.append({'page': i + 1, 'text': text, 'tables': tables})
+    finally:
+        doc.close()
+    return pages
+
+
+def extract_excel_sheets(excel_path: str) -> Dict[str, List[List[str]]]:
+    """openpyxl로 Excel 시트별 행 추출"""
+    openpyxl = get_openpyxl()
+    wb = openpyxl.load_workbook(excel_path, data_only=True)
+    result = {}
+    for name in wb.sheetnames:
+        ws = wb[name]
+        rows = []
+        for row in ws.iter_rows(values_only=True):
+            if any(c is not None for c in row):
+                rows.append([str(c) if c is not None else '' for c in row])
+        result[name] = rows
+    wb.close()
+    return result
+
+
+# ─── 레지스터 테이블 행 파싱 ──────────────────────────────────────────────────
+
+# 주소+이름+타입 패턴
+_ADDR_RE = re.compile(r'(?:0x|0X)?([0-9A-Fa-f]{4})[Hh]?')
+_TYPE_RE = re.compile(r'\b(U16|S16|U32|S32|INT16|UINT16|INT32|UINT32|FLOAT32|ASCII|STRING)\b', re.I)
+_RW_RE   = re.compile(r'\b(R/?W|RO|WO|Read|Write|R/W)\b', re.I)
+_SCALE_RE = re.compile(r'(?:scale|factor|×|x)\s*[=:]?\s*([\d.]+)', re.I)
+_UNIT_RE = re.compile(r'\b(V|A|W|kW|VA|kVA|VAr|kVAr|Hz|°C|℃|Wh|kWh|MWh|%)\b')
+
+
+def _detect_table_columns(header_row: list, data_rows: list = None) -> dict:
+    """테이블 헤더에서 컬럼 인덱스 추측. data_rows로 보정."""
+    col_map = {}
+    for i, cell in enumerate(header_row):
+        if not cell:
+            continue
+        cl = str(cell).lower().strip()
+        # 'address'는 매칭하되 'register number'는 제외
+        if cl in ('address', 'addr', '주소', 'offset') or \
+           ('addr' in cl and 'register' not in cl):
+            col_map.setdefault('addr', i)
+        elif any(k in cl for k in ['name', 'definition', '이름', '항목', 'parameter', 'description']):
+            # 'field'는 너무 범용이라 단독으로만 매칭
+            col_map.setdefault('name', i)
+        elif cl == 'field' or cl == '필드':
+            col_map.setdefault('name', i)
+        elif any(k in cl for k in ['data type', 'datatype', '데이터', '타입']):
+            col_map.setdefault('type', i)
+        elif cl == 'type' or cl == 'format':
+            col_map.setdefault('type', i)
+        elif any(k in cl for k in ['unit', '단위']):
+            col_map.setdefault('unit', i)
+        elif any(k in cl for k in ['scale', '배율', 'factor']):
+            col_map.setdefault('scale', i)
+        elif any(k in cl for k in ['r/w', 'access', '읽기', 'permission']):
+            col_map.setdefault('rw', i)
+        elif any(k in cl for k in ['remark', 'comment', '비고', 'note', '설명']):
+            col_map.setdefault('comment', i)
+        elif 'register' in cl and ('number' in cl or 'num' in cl or 'count' in cl):
+            col_map.setdefault('regs', i)
+
+    # data_rows에서 0x 패턴으로 주소 컬럼 보정
+    if data_rows and 'addr' not in col_map:
+        for row in data_rows[:5]:
+            for i, cell in enumerate(row):
+                if cell and re.match(r'0x[0-9A-Fa-f]{4}', str(cell).strip()):
+                    col_map['addr'] = i
+                    break
+            if 'addr' in col_map:
+                break
+
+    return col_map
+
+
+def _parse_register_row(row: list, col_map: dict) -> Optional[RegisterRow]:
+    """테이블 행 → RegisterRow"""
+    if not row:
+        return None
+
+    # 주소 추출 — 0x 패턴이 있는 셀 우선
+    addr = None
+    addr_raw = ''
+
+    # 1) col_map['addr'] 위치에서 시도
+    addr_idx = col_map.get('addr')
+    if addr_idx is not None and addr_idx < len(row):
+        addr_raw = str(row[addr_idx]).strip() if row[addr_idx] else ''
+        if addr_raw.startswith('0x') or addr_raw.startswith('0X'):
+            addr = parse_address(addr_raw)
+
+    # 2) 실패하면 0x 패턴이 있는 아무 셀에서 찾기
+    if addr is None:
+        for i, cell in enumerate(row):
+            c = str(cell).strip() if cell else ''
+            if c.startswith('0x') or c.startswith('0X'):
+                addr = parse_address(c)
+                if addr is not None:
+                    addr_raw = c
+                    # 이 셀을 주소로 사용하면, name은 주소 앞의 셀
+                    if 'addr' not in col_map:
+                        col_map['addr'] = i
+                    break
+
+    if addr is None:
+        return None
+
+    # 이름 추출
+    name_idx = col_map.get('name')
+    if name_idx is not None and name_idx < len(row):
+        name = str(row[name_idx]).strip()
+    else:
+        # 이름 컬럼이 없으면 주소 옆 셀에서 찾기
+        name = ''
+        for i, cell in enumerate(row):
+            if i == addr_idx:
+                continue
+            c = str(cell).strip()
+            if c and not _ADDR_RE.fullmatch(c) and len(c) > 2:
+                name = c
+                break
+    if not name:
+        return None
+
+    # 데이터 타입
+    dtype = ''
+    type_idx = col_map.get('type')
+    if type_idx is not None and type_idx < len(row):
+        m = _TYPE_RE.search(str(row[type_idx]))
+        if m:
+            dtype = m.group(1).upper()
+    if not dtype:
+        # 전체 행에서 탐색
+        for cell in row:
+            m = _TYPE_RE.search(str(cell))
+            if m:
+                dtype = m.group(1).upper()
+                break
+    # 타입 정규화
+    dtype = dtype.replace('INT16', 'S16').replace('UINT16', 'U16') \
+                 .replace('INT32', 'S32').replace('UINT32', 'U32')
+
+    # 단위
+    unit = ''
+    unit_idx = col_map.get('unit')
+    if unit_idx is not None and unit_idx < len(row):
+        m = _UNIT_RE.search(str(row[unit_idx]))
+        if m:
+            unit = m.group(1)
+    if not unit:
+        m = _UNIT_RE.search(name)
+        if m:
+            unit = m.group(1)
+
+    # 스케일
+    scale = ''
+    scale_idx = col_map.get('scale')
+    if scale_idx is not None and scale_idx < len(row):
+        s = str(row[scale_idx]).strip()
+        if s and s not in ('', 'None', '-'):
+            scale = s
+    if not scale:
+        m = _SCALE_RE.search(' '.join(str(c) for c in row))
+        if m:
+            scale = m.group(1)
+
+    # R/W
+    rw = ''
+    rw_idx = col_map.get('rw')
+    if rw_idx is not None and rw_idx < len(row):
+        m = _RW_RE.search(str(row[rw_idx]))
+        if m:
+            rw = m.group(1).upper().replace('READ', 'RO').replace('WRITE', 'WO')
+    if not rw:
+        for cell in row:
+            m = _RW_RE.search(str(cell))
+            if m:
+                rw = m.group(1).upper().replace('READ', 'RO').replace('WRITE', 'WO')
+                break
+
+    # 코멘트
+    comment = ''
+    comment_idx = col_map.get('comment')
+    if comment_idx is not None and comment_idx < len(row):
+        comment = str(row[comment_idx]).strip()
+        if comment in ('None', '-'):
+            comment = ''
+
+    # 레지스터 수
+    regs_val = '1'
+    regs_idx = col_map.get('regs')
+    if regs_idx is not None and regs_idx < len(row):
+        r = str(row[regs_idx]).strip()
+        if r.isdigit():
+            regs_val = r
+    if dtype in ('U32', 'S32', 'FLOAT32'):
+        regs_val = '2'
+    if dtype == 'ASCII':
+        regs_val = str(max(1, int(regs_val)))
+
+    return RegisterRow(
+        definition=name,
+        address=addr,
+        address_hex=f'0x{addr:04X}',
+        data_type=dtype or 'U16',
+        regs=regs_val,
+        unit=unit,
+        scale=scale,
+        rw=rw or 'RO',
+        comment=comment,
+    )
+
+
+def extract_registers_from_tables(tables: List[List[list]]) -> List[RegisterRow]:
+    """모든 테이블에서 레지스터 행 추출"""
+    registers = []
+    seen_addrs = set()
+    for table in tables:
+        if not table or len(table) < 2:
+            continue
+        data_rows = table[1:]
+        col_map = _detect_table_columns(table[0], data_rows)
+        for row in data_rows:
+            reg = _parse_register_row(row, col_map)
+            if reg and reg.address not in seen_addrs:
+                seen_addrs.add(reg.address)
+                registers.append(reg)
+    return registers
+
+
+# ─── 카테고리 분류 ───────────────────────────────────────────────────────────
+
+# 제외 키워드 (STAGE1_RULES §6)
+_EXCLUDE_KEYWORDS = [
+    'baud', 'baudrate', 'slave id', 'slave address', 'communication',
+    'comm setting', 'rs485', 'modbus addr', 'protocol version',
+]
+
+# REMS 제외 키워드
+_REMS_KEYWORDS = ['rems', 'remote monitoring']
+
+# IV Scan 키워드
+_IV_KEYWORDS = ['iv scan', 'iv curve', 'i-v scan', 'iv test', 'iv start',
+                'iv status', 'iv result', 'iv point', 'iv data']
+
+
+def classify_register(reg: RegisterRow, synonym_db: dict,
+                      review_history: dict,
+                      ref_patterns: dict,
+                      device_type: str = 'inverter') -> str:
+    """
+    레지스터를 카테고리로 분류
+    Returns: 카테고리 문자열
+    """
+    defn = reg.definition
+    defn_lower = defn.lower()
+    defn_upper = to_upper_snake(defn)
+    addr = reg.address if isinstance(reg.address, int) else parse_address(reg.address)
+
+    # 제외 항목
+    for kw in _EXCLUDE_KEYWORDS:
+        if kw in defn_lower:
+            return 'EXCLUDE'
+    for kw in _REMS_KEYWORDS:
+        if kw in defn_lower:
+            return 'EXCLUDE'
+
+    # 1) 레퍼런스 패턴 기반 매칭 (주소로)
+    if addr is not None:
+        for proto, addr_map in ref_patterns.items():
+            if addr in addr_map:
+                ref_name = addr_map[addr]
+                ref_upper = ref_name.upper()
+                if 'DEA_' in ref_upper or 'DEA_' in ref_upper:
+                    return 'DER_MONITOR' if device_type == 'inverter' else 'EXCLUDE'
+                if 'DER_' in ref_upper or 'INVERTER_ON_OFF' in ref_upper:
+                    return 'DER_CONTROL' if device_type == 'inverter' else 'EXCLUDE'
+                if 'IV_' in ref_upper:
+                    return 'IV_SCAN' if device_type == 'inverter' else 'EXCLUDE'
+                if 'ERROR_CODE' in ref_upper or 'ALARM' in ref_upper:
+                    return 'ALARM'
+                if 'INVERTER_MODE' in ref_upper or 'STATUS' in ref_upper:
+                    return 'STATUS'
+                if any(k in ref_upper for k in ['MODEL', 'SERIAL', 'FIRMWARE', 'NOMINAL', 'MPPT_COUNT', 'PHASE']):
+                    return 'INFO'
+                return 'MONITORING'
+
+    # 2) synonym_db 매칭
+    syn_match = match_synonym(defn, synonym_db)
+    if syn_match:
+        cat = syn_match['category']
+        if cat in ('DER_CONTROL', 'DER_MONITOR', 'IV_SCAN') and device_type != 'inverter':
+            return 'EXCLUDE'
+        return cat
+
+    # 3) 키워드 기반 분류
+    # INFO
+    if any(k in defn_lower for k in ['model', 'serial', 'firmware', 'rated', 'nominal',
+                                      'version', '모델', '시리얼', '펌웨어', '정격']):
+        return 'INFO'
+
+    # STATUS
+    if any(k in defn_lower for k in ['status', 'state', 'mode', 'running',
+                                      '상태', '운전', '동작']):
+        return 'STATUS'
+
+    # ALARM
+    if any(k in defn_lower for k in ['alarm', 'fault', 'error', 'warning', 'protection',
+                                      '알람', '고장', '경보', '오류']):
+        return 'ALARM'
+
+    # IV Scan (인버터만)
+    if device_type == 'inverter':
+        for kw in _IV_KEYWORDS:
+            if kw in defn_lower:
+                return 'IV_SCAN'
+
+    # DER 키워드 (인버터만)
+    if device_type == 'inverter':
+        if reg.rw in ('RW', 'WO', 'R/W'):
+            if any(k in defn_lower for k in ['power limit', 'power factor set',
+                                              'reactive power set', 'on/off', 'on off',
+                                              'curtailment', 'derate', 'operation mode set',
+                                              '출력제한', '역률설정', '무효전력설정']):
+                return 'DER_CONTROL'
+
+    # MPPT/String → MONITORING
+    ch = detect_channel_number(defn)
+    if ch:
+        return 'MONITORING'
+
+    # 모니터링 키워드
+    if any(k in defn_lower for k in ['voltage', 'current', 'power', 'energy', 'frequency',
+                                      'temperature', 'factor', '전압', '전류', '전력',
+                                      '발전량', '온도', '주파수', '역률']):
+        return 'MONITORING'
+
+    # 4) 퍼지 매칭
+    fuzzy = match_synonym_fuzzy(defn, synonym_db, threshold=0.6)
+    if fuzzy:
+        cat = fuzzy['category']
+        if cat in ('DER_CONTROL', 'DER_MONITOR', 'IV_SCAN') and device_type != 'inverter':
+            return 'EXCLUDE'
+        return cat
+
+    # 5) review_history에서 동일 패턴 확인
+    for item in review_history.get('approved', []):
+        if item.get('definition', '').upper() == defn_upper:
+            verdict = item.get('verdict', '')
+            if verdict == 'DELETE':
+                return 'EXCLUDE'
+            if verdict.startswith('MOVE:'):
+                return verdict.replace('MOVE:', '')
+
+    # 분류 불가 → REVIEW
+    return 'REVIEW'
+
+
+def assign_h01_field(reg: RegisterRow, synonym_db: dict,
+                     ref_patterns: dict = None) -> str:
+    """레지스터에 대응하는 H01 필드명 추정"""
+    # 1) synonym_db 정확 매칭
+    syn_match = match_synonym(reg.definition, synonym_db)
+    if syn_match and syn_match.get('h01_field'):
+        return syn_match['h01_field']
+
+    # 2) 주소 기반 레퍼런스 → h01_field
+    if ref_patterns:
+        addr = reg.address if isinstance(reg.address, int) else parse_address(reg.address)
+        if addr is not None:
+            h01 = get_h01_field_from_ref(addr, ref_patterns, synonym_db)
+            if h01:
+                return h01
+
+    # 3) 퍼지 매칭
+    fuzzy = match_synonym_fuzzy(reg.definition, synonym_db)
+    if fuzzy and fuzzy.get('h01_field'):
+        return fuzzy['h01_field']
+
+    # 4) MPPT/String 패턴
+    ch = detect_channel_number(reg.definition)
+    if ch:
+        prefix, n = ch
+        defn_lower = reg.definition.lower()
+        if prefix == 'MPPT':
+            if 'voltage' in defn_lower or '전압' in defn_lower:
+                return f'mppt{n}_voltage'
+            if 'current' in defn_lower or '전류' in defn_lower:
+                return f'mppt{n}_current'
+            if 'power' in defn_lower or '전력' in defn_lower:
+                return f'mppt{n}_power'
+        elif prefix == 'STRING':
+            if 'voltage' in defn_lower or '전압' in defn_lower:
+                return f'string{n}_voltage'
+            if 'current' in defn_lower or '전류' in defn_lower:
+                return f'string{n}_current'
+    return ''
+
+
+# ─── Stage 1 메인 함수 ───────────────────────────────────────────────────────
+
+def run_stage1(
+    input_path: str,
+    output_dir: str,
+    device_type: str = 'inverter',
+    progress: ProgressCallback = None,
+) -> dict:
+    """
+    Stage 1 실행: PDF/Excel → Stage 1 Excel
+
+    Args:
+        input_path: PDF 또는 Excel 파일 경로
+        output_dir: 출력 디렉토리
+        device_type: 'inverter', 'relay', 'weather'
+        progress: 진행 콜백 (message, level)
+
+    Returns:
+        {'output_path': str, 'counts': dict, 'meta': dict, 'review_count': int}
+    """
+    def log(msg, level='info'):
+        if progress:
+            progress(msg, level)
+
+    openpyxl = get_openpyxl()
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+
+    # ── Step 0: 레퍼런스 로딩 ──
+    log('레퍼런스 로딩 중...')
+    synonym_db = load_synonym_db()
+    review_history = load_review_history()
+    ref_patterns = load_reference_patterns()
+    log(f'  synonym_db: {len(synonym_db.get("fields", {}))}개 필드')
+    log(f'  review_history: {len(review_history.get("approved", []))}개 이력')
+    log(f'  레퍼런스: {len(ref_patterns)}개 프로토콜')
+
+    # ── Step 1: 입력 파일 읽기 ──
+    ext = os.path.splitext(input_path)[1].lower()
+    basename = os.path.splitext(os.path.basename(input_path))[0]
+
+    log(f'입력 파일 읽기: {os.path.basename(input_path)}')
+    all_tables = []
+
+    if ext == '.pdf':
+        pages = extract_pdf_text_and_tables(input_path)
+        log(f'  PDF {len(pages)}페이지 추출')
+        for p in pages:
+            all_tables.extend(p['tables'])
+    elif ext in ('.xlsx', '.xls'):
+        sheets = extract_excel_sheets(input_path)
+        log(f'  Excel {len(sheets)}시트 추출')
+        for sname, rows in sheets.items():
+            if rows:
+                all_tables.append(rows)
+    else:
+        raise ValueError(f'지원하지 않는 파일 형식: {ext}')
+
+    # ── Step 2: 레지스터 추출 ──
+    log('레지스터 테이블 파싱...')
+    registers = extract_registers_from_tables(all_tables)
+    log(f'  {len(registers)}개 레지스터 추출 (원본)')
+
+    if not registers:
+        raise ValueError('레지스터를 찾지 못했습니다. PDF/Excel 형식을 확인해주세요.')
+
+    # ── Step 2.5: 레퍼런스 기반 enrichment ──
+    # PDF 이름 대신 레퍼런스 속성명 사용 (원본은 comment에 보존)
+    enriched = 0
+    for reg in registers:
+        addr = reg.address if isinstance(reg.address, int) else parse_address(reg.address)
+        if addr is None:
+            continue
+        ref_name = get_ref_name_by_addr(addr, ref_patterns)
+        if ref_name:
+            original = reg.definition
+            reg.definition = ref_name
+            if reg.comment and original != ref_name:
+                reg.comment = f'{original} | {reg.comment}'
+            elif original != ref_name:
+                reg.comment = original
+            enriched += 1
+    log(f'  레퍼런스 enrichment: {enriched}/{len(registers)}개')
+
+    # 중복 이름 제거 — 레퍼런스 주소와 일치하는 것 우선
+    seen_names = {}  # name → (index, is_ref_match)
+    for i, reg in enumerate(registers):
+        name = to_upper_snake(reg.definition)
+        addr = reg.address if isinstance(reg.address, int) else parse_address(reg.address)
+        is_ref = addr is not None and get_ref_name_by_addr(addr, ref_patterns) is not None
+        if name in seen_names:
+            prev_idx, prev_is_ref = seen_names[name]
+            if is_ref and not prev_is_ref:
+                # 새 것이 레퍼런스 매칭 → 이전 것 제거
+                registers[prev_idx] = None
+                seen_names[name] = (i, is_ref)
+            else:
+                # 이전 것 유지 → 새 것 제거
+                registers[i] = None
+        else:
+            seen_names[name] = (i, is_ref)
+    registers = [r for r in registers if r is not None]
+    log(f'  중복 제거 후: {len(registers)}개')
+
+    # ── Step 3: 제조사 정보 ──
+    manufacturer = basename.split('_')[0].split(' ')[0]
+
+    # 레퍼런스에 있지만 PDF에서 추출되지 않은 주소 보완
+    extracted_addrs = set()
+    for reg in registers:
+        a = reg.address if isinstance(reg.address, int) else parse_address(reg.address)
+        if a is not None:
+            extracted_addrs.add(a)
+    补完 = 0
+    mfr_lower = manufacturer.lower()
+    sorted_protos = sorted(ref_patterns.keys(),
+                           key=lambda p: (0 if mfr_lower in p.lower() else 1, p))
+    for proto in sorted_protos[:1]:
+        addr_map = ref_patterns[proto]
+        for addr, ref_name in addr_map.items():
+            if addr not in extracted_addrs and 0x0100 <= addr <= 0xFFFF:
+                registers.append(RegisterRow(
+                    definition=ref_name, address=addr,
+                    address_hex=f'0x{addr:04X}',
+                    data_type='U16', rw='RO',
+                    comment=f'(보완: {proto} 레퍼런스)'))
+                extracted_addrs.add(addr)
+                补完 += 1
+    if 补完 > 0:
+        log(f'  레퍼런스 보완: +{补完}개 ({sorted_protos[0]})')
+    protocol_version = ''
+
+    # PDF 전문에서 제조사/버전 탐색
+    if ext == '.pdf':
+        full_text = ' '.join(p['text'] for p in pages[:3])  # 처음 3페이지
+        # 버전 패턴
+        m = re.search(r'[Vv](\d+\.\d+(?:\.\d+)?)', full_text)
+        if m:
+            protocol_version = f'V{m.group(1)}'
+
+    # MPPT / String 최대 채널 수 탐색 (PDF 이름 + 레퍼런스 이름 모두)
+    max_mppt = 0
+    max_string = 0
+    iv_scan_supported = False
+
+    for reg in registers:
+        # 레지스터 이름에서 채널 감지
+        ch = detect_channel_number(reg.definition)
+        if not ch:
+            # 주소로 레퍼런스에서 채널 감지
+            addr = reg.address if isinstance(reg.address, int) else parse_address(reg.address)
+            if addr is not None:
+                ch = detect_channel_from_ref(addr, ref_patterns)
+        if ch:
+            prefix, n = ch
+            if prefix == 'MPPT':
+                max_mppt = max(max_mppt, n)
+            elif prefix == 'STRING':
+                max_string = max(max_string, n)
+        # IV Scan 감지 (§5: rules.py 사용)
+
+    iv_scan_supported = detect_iv_scan_support(registers, manufacturer)
+
+    meta = {
+        'manufacturer': manufacturer,
+        'protocol_version': protocol_version,
+        'device_type': device_type,
+        'max_mppt': max_mppt,
+        'max_string': max_string,
+        'iv_scan': iv_scan_supported and device_type == 'inverter',
+        'source_file': os.path.basename(input_path),
+        'extracted_date': datetime.now().strftime('%Y-%m-%d %H:%M'),
+        'total_extracted': len(registers),
+    }
+
+    log(f'  제조사: {manufacturer}, MPPT: {max_mppt}, String: {max_string}')
+    log(f'  IV Scan: {"Yes" if meta["iv_scan"] else "No"}')
+
+    # ── Step 4: 카테고리 분류 ──
+    log('카테고리 분류 중...')
+    categorized = {cat: [] for cat in
+                   ['INFO', 'MONITORING', 'STATUS', 'ALARM',
+                    'DER_CONTROL', 'DER_MONITOR', 'IV_SCAN', 'REVIEW']}
+    excluded = []
+
+    for reg in registers:
+        # §7: STAGE1_RULES 기반 분류 (rules.py)
+        cat, reason = classify_register_with_rules(
+            reg, synonym_db, review_history, ref_patterns,
+            device_type, all_regs=registers)
+        if cat == 'EXCLUDE':
+            excluded.append(reg)
+            continue
+        reg.category = cat
+        reg.h01_field = assign_h01_field(reg, synonym_db, ref_patterns)
+
+        if cat == 'REVIEW':
+            reg.review_reason = reason or '자동 분류 불가'
+            fuzzy = match_synonym_fuzzy(reg.definition, synonym_db, threshold=0.4)
+            if fuzzy:
+                reg.review_suggestion = f'{fuzzy["category"]}/{fuzzy["field"]} (유사도 {fuzzy["score"]:.0%})'
+            else:
+                reg.review_suggestion = '분류 불가'
+
+        if cat in categorized:
+            categorized[cat].append(reg)
+
+    # 인버터: DER 표준 레지스터가 없으면 추가
+    if device_type == 'inverter':
+        existing_addrs = set()
+        for cat_regs in categorized.values():
+            for r in cat_regs:
+                a = r.address if isinstance(r.address, int) else parse_address(r.address)
+                if a is not None:
+                    existing_addrs.add(a)
+
+        for dr in DER_CONTROL_REGS:
+            if dr['addr'] not in existing_addrs:
+                categorized['DER_CONTROL'].append(RegisterRow(
+                    definition=dr['name'], address=dr['addr'],
+                    data_type=dr['type'], scale=dr.get('scale', ''),
+                    rw=dr['rw'], comment=dr['desc'], category='DER_CONTROL'))
+
+        for dr in DER_MONITOR_REGS:
+            if dr['addr'] not in existing_addrs:
+                categorized['DER_MONITOR'].append(RegisterRow(
+                    definition=dr['name'], address=dr['addr'],
+                    data_type=dr['type'], scale=dr.get('scale', ''),
+                    unit=dr.get('unit', ''), rw='RO',
+                    comment=dr.get('desc', ''), category='DER_MONITOR'))
+
+    # 비인버터: DER/IV 카테고리 제거
+    if device_type != 'inverter':
+        categorized['DER_CONTROL'] = []
+        categorized['DER_MONITOR'] = []
+        categorized['IV_SCAN'] = []
+
+    counts = {cat: len(regs) for cat, regs in categorized.items()}
+    log('분류 결과:')
+    for cat, cnt in counts.items():
+        if cnt > 0:
+            log(f'  {cat:15s}: {cnt}개')
+    log(f'  제외: {len(excluded)}개')
+
+    # ── Step 5: Excel 생성 ──
+    output_name = f'test_{basename}_stage1.xlsx'
+    output_path = os.path.join(output_dir, output_name)
+    log(f'Excel 생성: {output_name}')
+
+    wb = openpyxl.Workbook()
+
+    # --- SUMMARY 시트 ---
+    ws = wb.active
+    ws.title = 'SUMMARY'
+    header_font = Font(bold=True, size=12)
+    ws['A1'] = 'Stage 1 — 레지스터맵 추출 결과'
+    ws['A1'].font = Font(bold=True, size=14)
+    for i, (k, v) in enumerate([
+        ('제조사', manufacturer),
+        ('프로토콜 버전', protocol_version),
+        ('설비 타입', device_type),
+        ('MPPT 최대', max_mppt),
+        ('String 최대', max_string),
+        ('IV Scan', 'Yes' if meta['iv_scan'] else 'No'),
+        ('원본 파일', os.path.basename(input_path)),
+        ('추출 일시', meta['extracted_date']),
+    ], start=3):
+        ws[f'A{i}'] = k
+        ws[f'A{i}'].font = Font(bold=True)
+        ws[f'B{i}'] = str(v)
+
+    row_n = 13
+    ws[f'A{row_n}'] = '카테고리별 수량'
+    ws[f'A{row_n}'].font = header_font
+    for i, (cat, cnt) in enumerate(counts.items(), start=1):
+        ws[f'A{row_n + i}'] = cat
+        ws[f'B{row_n + i}'] = cnt
+        ws[f'A{row_n + i}'].fill = PatternFill('solid', fgColor=CATEGORY_COLORS.get(cat, 'FFFFFF'))
+
+    # --- META 시트 ---
+    ws_meta = wb.create_sheet('META')
+    for i, (k, v) in enumerate(meta.items(), start=1):
+        ws_meta[f'A{i}'] = k
+        ws_meta[f'B{i}'] = str(v)
+
+    # --- 카테고리별 시트 ---
+    thin_border = Border(
+        left=Side(style='thin'), right=Side(style='thin'),
+        top=Side(style='thin'), bottom=Side(style='thin'))
+
+    cols = ['No', 'Definition', 'Address', 'Reg', 'Type', 'Unit/Scale', 'R/W',
+            'Comment', 'H01 Field', 'Category']
+
+    for cat in ['INFO', 'MONITORING', 'STATUS', 'ALARM',
+                'DER_CONTROL', 'DER_MONITOR', 'IV_SCAN', 'REVIEW']:
+        regs = categorized[cat]
+        if not regs and cat not in ('REVIEW',):
+            if device_type != 'inverter' and cat in ('DER_CONTROL', 'DER_MONITOR', 'IV_SCAN'):
+                continue
+            if not regs:
+                continue
+
+        ws_cat = wb.create_sheet(cat)
+        cat_fill = PatternFill('solid', fgColor=CATEGORY_COLORS.get(cat, 'FFFFFF'))
+
+        # 헤더
+        review_cols = cols
+        if cat == 'REVIEW':
+            review_cols = cols + ['사유', '제안', '사용자 판정']
+        for j, col_name in enumerate(review_cols, start=1):
+            cell = ws_cat.cell(row=1, column=j, value=col_name)
+            cell.font = Font(bold=True, color='FFFFFF')
+            cell.fill = PatternFill('solid', fgColor='333333')
+            cell.border = thin_border
+
+        # 데이터
+        for i, reg in enumerate(sorted(regs, key=lambda r: (r.address if isinstance(r.address, int) else 0)),
+                                start=1):
+            scale_unit = f'{reg.unit} {reg.scale}'.strip() if reg.unit or reg.scale else ''
+            row_data = [
+                i, reg.definition, reg.address_hex, reg.regs, reg.data_type,
+                scale_unit, reg.rw, reg.comment, reg.h01_field, reg.category,
+            ]
+            if cat == 'REVIEW':
+                row_data += [reg.review_reason, reg.review_suggestion, '']
+
+            for j, val in enumerate(row_data, start=1):
+                cell = ws_cat.cell(row=i + 1, column=j, value=val)
+                cell.border = thin_border
+                if j <= len(cols):
+                    cell.fill = cat_fill
+
+        # 열 너비
+        ws_cat.column_dimensions['B'].width = 35
+        ws_cat.column_dimensions['H'].width = 30
+        if cat == 'REVIEW':
+            ws_cat.column_dimensions['K'].width = 40
+            ws_cat.column_dimensions['L'].width = 30
+            ws_cat.column_dimensions['M'].width = 15
+
+    # 저장
+    wb.save(output_path)
+    wb.close()
+    log(f'Stage 1 완료: {output_name}', 'ok')
+
+    return {
+        'output_path': output_path,
+        'output_name': output_name,
+        'counts': counts,
+        'meta': meta,
+        'review_count': counts.get('REVIEW', 0),
+    }

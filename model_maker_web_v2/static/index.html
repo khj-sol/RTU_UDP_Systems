@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Model Maker Web v2</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', sans-serif; background: #0f1117; color: #e0e0e0; }
+
+    header {
+      background: #1a1d27;
+      padding: 14px 24px;
+      border-bottom: 1px solid #2e3248;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    header h1 { font-size: 18px; font-weight: 600; color: #7eb8f7; }
+    header span { font-size: 12px; color: #6b7280; }
+
+    .pipeline {
+      display: flex;
+      gap: 0;
+      padding: 24px;
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+
+    .stage-card {
+      flex: 1;
+      background: #1a1d27;
+      border: 1px solid #2e3248;
+      border-radius: 8px;
+      margin: 0 8px;
+      overflow: hidden;
+    }
+    .stage-card.active { border-color: #7eb8f7; }
+    .stage-card.done { border-color: #4ade80; }
+
+    .stage-header {
+      padding: 12px 16px;
+      background: #22263a;
+      font-size: 13px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .stage-badge {
+      width: 22px; height: 22px;
+      border-radius: 50%;
+      background: #2e3248;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px; font-weight: 700;
+    }
+    .stage-card.active .stage-badge { background: #7eb8f7; color: #0f1117; }
+    .stage-card.done .stage-badge { background: #4ade80; color: #0f1117; }
+
+    .stage-body { padding: 16px; }
+
+    label { font-size: 12px; color: #9ca3af; display: block; margin-bottom: 4px; margin-top: 12px; }
+    input[type=text], input[type=number], select {
+      width: 100%; padding: 7px 10px;
+      background: #0f1117; border: 1px solid #2e3248;
+      border-radius: 6px; color: #e0e0e0; font-size: 13px;
+    }
+    input:focus, select:focus { outline: none; border-color: #7eb8f7; }
+
+    .upload-area {
+      border: 2px dashed #2e3248;
+      border-radius: 8px;
+      padding: 24px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.2s;
+      margin-top: 12px;
+    }
+    .upload-area:hover { border-color: #7eb8f7; }
+    .upload-area.dragover { border-color: #7eb8f7; background: #1e2235; }
+    .upload-area p { font-size: 13px; color: #6b7280; margin-top: 6px; }
+    .upload-area .icon { font-size: 28px; }
+
+    button.run-btn {
+      width: 100%; margin-top: 16px;
+      padding: 9px;
+      background: #7eb8f7; color: #0f1117;
+      border: none; border-radius: 6px;
+      font-size: 13px; font-weight: 700;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    button.run-btn:hover { background: #93c5fd; }
+    button.run-btn:disabled { background: #2e3248; color: #6b7280; cursor: not-allowed; }
+
+    .log-box {
+      background: #0f1117;
+      border: 1px solid #2e3248;
+      border-radius: 6px;
+      padding: 10px;
+      height: 160px;
+      overflow-y: auto;
+      font-size: 11px;
+      font-family: 'Consolas', monospace;
+      color: #a3e635;
+      margin-top: 12px;
+    }
+    .log-box .err { color: #f87171; }
+    .log-box .warn { color: #fbbf24; }
+    .log-box .ok { color: #4ade80; }
+
+    .result-chip {
+      display: inline-block;
+      padding: 3px 8px;
+      border-radius: 12px;
+      font-size: 11px;
+      margin: 2px;
+    }
+    .chip-green { background: #14532d; color: #4ade80; }
+    .chip-red { background: #450a0a; color: #f87171; }
+    .chip-gray { background: #1f2937; color: #9ca3af; }
+
+    .arrow {
+      display: flex; align-items: center; color: #4b5563;
+      font-size: 20px; padding: 0 4px; flex-shrink: 0;
+    }
+
+    .review-section {
+      margin-top: 12px;
+      padding: 10px;
+      background: #12151f;
+      border: 1px solid #2e3248;
+      border-radius: 6px;
+      font-size: 12px;
+    }
+    .review-section h4 { color: #fbbf24; margin-bottom: 8px; }
+    .review-row {
+      display: flex; gap: 6px; align-items: center;
+      padding: 4px 0; border-bottom: 1px solid #1e2235;
+    }
+    .review-row:last-child { border-bottom: none; }
+    .review-def { flex: 1; color: #e0e0e0; }
+    .review-reason { flex: 1; color: #9ca3af; }
+    .review-verdict select {
+      width: auto; padding: 3px 6px; font-size: 11px;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Model Maker Web v2</h1>
+  <span>Inverter Modbus PDF → RTU Register Map  |  Stage 1 → 2 → 3</span>
+</header>
+
+<div class="pipeline">
+
+  <!-- ── Stage 1 ── -->
+  <div class="stage-card active" id="card-s1">
+    <div class="stage-header">
+      <div class="stage-badge">1</div>
+      Stage 1 — PDF / Excel 추출
+    </div>
+    <div class="stage-body">
+      <div class="upload-area" id="drop1" onclick="document.getElementById('file1').click()">
+        <div class="icon">📄</div>
+        <p>Modbus PDF 또는 Excel 파일을 드래그하거나 클릭하여 업로드</p>
+        <input type="file" id="file1" style="display:none" accept=".pdf,.xlsx,.xls" />
+      </div>
+      <label>설비 종류</label>
+      <select id="s1-device">
+        <option value="inverter">인버터</option>
+        <option value="relay">보호계전기</option>
+        <option value="weather">기상대/환경센서</option>
+      </select>
+      <button class="run-btn" id="btn-s1" disabled onclick="runStage1()">Stage 1 실행</button>
+      <div class="log-box" id="log-s1"><span style="color:#4b5563">-- 대기 중 --</span></div>
+    </div>
+  </div>
+
+  <div class="arrow">▶</div>
+
+  <!-- ── Stage 2 ── -->
+  <div class="stage-card" id="card-s2">
+    <div class="stage-header">
+      <div class="stage-badge">2</div>
+      Stage 2 — 필터링 &amp; 매칭 검증
+    </div>
+    <div class="stage-body">
+      <label>MPPT 채널 수</label>
+      <input type="number" id="s2-mppt" min="1" max="12" value="4" />
+      <label>MPPT당 String 수</label>
+      <input type="number" id="s2-str" min="1" max="8" value="2" />
+      <label>용량 (파일명용, 예: 50kW)</label>
+      <input type="text" id="s2-cap" placeholder="50kW" />
+      <button class="run-btn" id="btn-s2" disabled onclick="runStage2()">Stage 2 실행</button>
+      <div class="log-box" id="log-s2"><span style="color:#4b5563">-- Stage 1 완료 후 활성화 --</span></div>
+      <div id="review-area" style="display:none">
+        <div class="review-section">
+          <h4>⚠ REVIEW 항목 — 사용자 판정 필요</h4>
+          <div id="review-rows"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow">▶</div>
+
+  <!-- ── Stage 3 ── -->
+  <div class="stage-card" id="card-s3">
+    <div class="stage-header">
+      <div class="stage-badge">3</div>
+      Stage 3 — 코드 생성
+    </div>
+    <div class="stage-body">
+      <div id="s3-summary" style="font-size:12px; color:#9ca3af; margin-top:8px;">
+        Stage 2 완료 후 활성화됩니다.
+      </div>
+      <button class="run-btn" id="btn-s3" disabled onclick="runStage3()">Stage 3 실행 — registers.py 생성</button>
+      <div class="log-box" id="log-s3"><span style="color:#4b5563">-- Stage 2 완료 후 활성화 --</span></div>
+      <div id="s3-download" style="display:none; margin-top:12px; text-align:center;">
+        <a id="dl-link" href="#" style="color:#4ade80; font-size:13px; font-weight:700;">
+          ⬇ registers.py 다운로드
+        </a>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  const API = '/api';
+  let sessionId = null;
+  let ws = null;
+  let uploadedFilename = null;
+
+  // ─── 세션 초기화 ───────────────────────────────────────────────
+  (async () => {
+    const r = await fetch(`${API}/session/new`, { method: 'POST' });
+    const d = await r.json();
+    sessionId = d.session_id;
+
+    ws = new WebSocket(`ws://${location.host}/api/ws/${sessionId}`);
+    ws.onmessage = (e) => {
+      const msg = JSON.parse(e.data);
+      appendLog(msg.stage, msg.text, msg.level);
+      if (msg.event === 'stage1_done') onStage1Done(msg);
+      if (msg.event === 'stage2_done') onStage2Done(msg);
+      if (msg.event === 'stage3_done') onStage3Done(msg);
+      if (msg.event === 'review_items') showReview(msg.items);
+    };
+  })();
+
+  // ─── 파일 업로드 ───────────────────────────────────────────────
+  const fileInput = document.getElementById('file1');
+  const drop1 = document.getElementById('drop1');
+
+  fileInput.addEventListener('change', async () => {
+    if (fileInput.files.length === 0) return;
+    await uploadFile(fileInput.files[0]);
+  });
+  drop1.addEventListener('dragover', e => { e.preventDefault(); drop1.classList.add('dragover'); });
+  drop1.addEventListener('dragleave', () => drop1.classList.remove('dragover'));
+  drop1.addEventListener('drop', async e => {
+    e.preventDefault(); drop1.classList.remove('dragover');
+    if (e.dataTransfer.files.length) await uploadFile(e.dataTransfer.files[0]);
+  });
+
+  async function uploadFile(file) {
+    const fd = new FormData();
+    fd.append('session_id', sessionId);
+    fd.append('file', file);
+    const r = await fetch(`${API}/stage1/upload`, { method: 'POST', body: fd });
+    const d = await r.json();
+    uploadedFilename = d.filename;
+    drop1.querySelector('p').textContent = `✓ ${file.name}`;
+    document.getElementById('btn-s1').disabled = false;
+  }
+
+  // ─── Stage 실행 ────────────────────────────────────────────────
+  async function runStage1() {
+    document.getElementById('btn-s1').disabled = true;
+    clearLog('s1');
+    await fetch(`${API}/stage1/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_id: sessionId,
+        filename: uploadedFilename,
+        device_type: document.getElementById('s1-device').value,
+      }),
+    });
+  }
+
+  async function runStage2() {
+    document.getElementById('btn-s2').disabled = true;
+    clearLog('s2');
+    await fetch(`${API}/stage2/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_id: sessionId,
+        mppt: parseInt(document.getElementById('s2-mppt').value),
+        strings_per_mppt: parseInt(document.getElementById('s2-str').value),
+        capacity: document.getElementById('s2-cap').value,
+      }),
+    });
+  }
+
+  async function runStage3() {
+    document.getElementById('btn-s3').disabled = true;
+    clearLog('s3');
+    await fetch(`${API}/stage3/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId }),
+    });
+  }
+
+  // ─── 이벤트 핸들러 ─────────────────────────────────────────────
+  function onStage1Done(msg) {
+    document.getElementById('card-s1').className = 'stage-card done';
+    document.getElementById('card-s2').className = 'stage-card active';
+    document.getElementById('btn-s2').disabled = false;
+    // Stage 1 Excel 다운로드 링크
+    appendLog('s1', `카테고리: ${Object.entries(msg.counts||{}).filter(([k,v])=>v>0).map(([k,v])=>`${k}:${v}`).join(' ')}`, 'ok');
+    if (msg.review_count > 0) {
+      appendLog('s1', `REVIEW ${msg.review_count}개 — Stage 2에서 확인`, 'warn');
+    }
+  }
+
+  function onStage2Done(msg) {
+    appendLog('s2', `H01: ${msg.h01_matched}/${msg.h01_total}  DER: ${msg.der_matched}/${msg.der_total}`, 'ok');
+    if (msg.review_count > 0) {
+      appendLog('s2', `⚠ REVIEW ${msg.review_count}개 — 판정 후 Stage 3 진행`, 'warn');
+      // REVIEW가 있으면 자동으로 Stage 3 활성화하되 경고 표시
+    }
+    document.getElementById('card-s2').className = 'stage-card done';
+    document.getElementById('card-s3').className = 'stage-card active';
+    document.getElementById('btn-s3').disabled = false;
+    document.getElementById('s3-summary').innerHTML =
+      `H01 ${msg.h01_matched}/${msg.h01_total}  |  DER ${msg.der_matched}/${msg.der_total}` +
+      (msg.review_count > 0 ? `<br><span style="color:#fbbf24">REVIEW ${msg.review_count}개 미결</span>` : '');
+  }
+
+  function onStage3Done(msg) {
+    document.getElementById('card-s3').className = 'stage-card done';
+    const dlDiv = document.getElementById('s3-download');
+    dlDiv.style.display = 'block';
+    document.getElementById('dl-link').href =
+      `${API}/download/${sessionId}/${msg.filename}`;
+    document.getElementById('dl-link').textContent = `⬇ ${msg.filename} 다운로드`;
+    // 검증 결과
+    const val = msg.validation || {};
+    const passed = Object.values(val).filter(v => v).length;
+    const total = Object.values(val).length;
+    appendLog('s3', `검증: ${passed}/${total} 통과`, passed === total ? 'ok' : 'warn');
+    if (msg.synonym_added > 0) appendLog('s3', `synonym_db: +${msg.synonym_added}개`, 'ok');
+    if (msg.review_recorded > 0) appendLog('s3', `review_history: +${msg.review_recorded}개`, 'ok');
+  }
+
+  function showReview(items) {
+    const area = document.getElementById('review-area');
+    const rows = document.getElementById('review-rows');
+    rows.innerHTML = '';
+    items.forEach((item, i) => {
+      const div = document.createElement('div');
+      div.className = 'review-row';
+      div.innerHTML = `
+        <span class="review-def">${item.definition}</span>
+        <span class="review-reason">${item.reason}</span>
+        <select class="review-verdict" data-idx="${i}" id="rv-${i}">
+          <option value="">-- 판정 --</option>
+          <option value="DELETE">DELETE</option>
+          <option value="MOVE:MONITORING">MOVE:MONITORING</option>
+          <option value="MOVE:INFO">MOVE:INFO</option>
+          <option value="MOVE:STATUS">MOVE:STATUS</option>
+          <option value="MOVE:ALARM">MOVE:ALARM</option>
+          <option value="KEEP">KEEP</option>
+        </select>`;
+      rows.appendChild(div);
+    });
+    area.style.display = 'block';
+
+    // 모든 판정 완료 시 Stage 3 활성화
+    rows.addEventListener('change', checkAllVerdicts);
+  }
+
+  function checkAllVerdicts() {
+    const selects = document.querySelectorAll('.review-verdict');
+    const allDone = Array.from(selects).every(s => s.value !== '');
+    if (allDone) {
+      document.getElementById('card-s2').className = 'stage-card done';
+      document.getElementById('card-s3').className = 'stage-card active';
+      document.getElementById('btn-s3').disabled = false;
+    }
+  }
+
+  // ─── 로그 유틸 ─────────────────────────────────────────────────
+  function appendLog(stage, text, level = '') {
+    const box = document.getElementById(`log-${stage}`);
+    if (!box) return;
+    const span = document.createElement('span');
+    span.className = level;
+    span.textContent = text + '\n';
+    box.appendChild(span);
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function clearLog(stage) {
+    const box = document.getElementById(`log-${stage}`);
+    if (box) box.innerHTML = '';
+  }
+</script>
+
+</body>
+</html>
