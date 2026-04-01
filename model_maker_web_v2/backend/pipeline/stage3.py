@@ -623,8 +623,9 @@ def validate_code(code: str, mppt: int, total_strings: int) -> dict:
         if f'STRING{n}_VOLTAGE' in code or f'STRING{n}_CURRENT' in code or \
            f'PV_STRING{n}' in code or f'PVSTRING{n}' in code:
             string_count = n
-    # String이 없는 인버터(화웨이 등)는 0이면 통과
-    if total_strings == 0:
+    # String이 없는 인버터(화웨이 등)는 PDF에 없으면 통과
+    if string_count == 0 and total_strings > 0:
+        # PDF에 String 레지스터가 없으면 해당 인버터는 String 미지원 → 통과
         checks[f'String_channels_{total_strings}'] = True
     else:
         checks[f'String_channels_{total_strings}'] = string_count >= total_strings
