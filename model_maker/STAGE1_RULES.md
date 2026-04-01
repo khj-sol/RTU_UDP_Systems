@@ -352,7 +352,39 @@ REMS 프로토콜 데이터 항목은 H01 Body Type 4(인버터)와 비교 시 H
 
 ---
 
-## 8. Stage 2 인계 원칙
+## 8. Stage 1 / Stage 2 역할 분리
+
+### Stage 1 — PDF 전체 추출 (MPPT/String 제한 없음)
+
+Stage 1은 PDF에 정의된 **모든 MPPT 채널과 모든 String 채널**에 대한 레지스터를 예외 없이 추출한다.
+
+- PDF에 MPPT 9채널이 정의되어 있으면 MPPT1~9 전부 추출
+- PDF에 String 24채널이 정의되어 있으면 String1~24 전부 추출
+- 인버터 실제 탑재 채널 수와 관계없이 **PDF 기준 최대 채널 수로 추출**
+- IV 스캔 데이터 블록도 지원 트래커 수 전부 추출
+
+> 이 방식으로 Stage 1 결과 하나로 해당 제조사의 모든 용량 모델에 대응한다.
+
+### Stage 2 — 인버터 용량별 필터링
+
+Stage 2에서 사용자가 실제 인버터의 **MPPT 수**와 **String 수**를 입력하면,
+Stage 1에서 추출한 레지스터맵에서 해당 채널에 해당하는 레지스터만 추출하여 최종 파일을 생성한다.
+
+| 입력 항목 | 설명 |
+|----------|------|
+| `mppt_count` | 실제 사용할 MPPT 채널 수 (예: 4) |
+| `strings_per_mppt` | MPPT당 String 수 (예: 2) |
+| `total_strings` | 총 String 수 = `mppt_count × strings_per_mppt` |
+
+**필터링 기준:**
+- `MPPT{n}_VOLTAGE / CURRENT / POWER` — `n ≤ mppt_count`인 채널만 포함
+- `STRING{n}_VOLTAGE / CURRENT` — `n ≤ total_strings`인 채널만 포함
+- IV 스캔 트래커 — `tracker ≤ mppt_count`인 블록만 포함
+- INFO, MONITORING, STATUS, ALARM, DER_CONTROL, DER_MONITOR 항목은 채널 수와 무관하게 전부 포함
+
+---
+
+## 9. Stage 2 인계 원칙
 
 - **애매한 항목은 제외하지 않고 포함**한다. `REVIEW`로 분류하여 Stage 2에서 사용자가 확정한다.
 - 유사 항목이 여러 개이면 모두 추출해두고 Stage 2에서 최적 항목을 선택한다.
