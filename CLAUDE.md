@@ -2,12 +2,14 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## 자동 커밋 규칙
+## 작업 규칙
 
-**코드 수정 완료 시 항상 자동으로 커밋 → push → main merge 실행한다.**
-- 사용자에게 "커밋할까요?" 묻지 않고 바로 실행
+**모든 코드 수정은 승인 없이 바로 실행한다.**
+- 파일 수정, 생성, 삭제 — 사용자 확인 없이 즉시 수행
+- 코드 수정 완료 시 항상 자동으로 커밋 → push → main merge 실행
 - worktree에서 작업 시: `git add → commit → push origin <branch> → cd main && git merge <branch> --no-edit`
 - V2 웹 서버가 main 디렉토리에서 실행되므로 merge까지 해야 반영됨
+- pyc 캐시 삭제도 자동 실행
 
 ## Project Overview
 
