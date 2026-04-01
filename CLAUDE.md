@@ -2,6 +2,13 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## 자동 커밋 규칙
+
+**코드 수정 완료 시 항상 자동으로 커밋 → push → main merge 실행한다.**
+- 사용자에게 "커밋할까요?" 묻지 않고 바로 실행
+- worktree에서 작업 시: `git add → commit → push origin <branch> → cd main && git merge <branch> --no-edit`
+- V2 웹 서버가 main 디렉토리에서 실행되므로 merge까지 해야 반영됨
+
 ## Project Overview
 
 RTU UDP System V1.1.0 — a Python-based Remote Terminal Unit (RTU) implementing the **Solarize Modbus Protocol V2.0.11**. Communicates with a cloud server via UDP using custom binary packets (H01–H06), and with solar inverters/protection relays/weather stations via Modbus RTU over RS485.
