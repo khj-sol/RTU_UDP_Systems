@@ -583,9 +583,37 @@ def _scan_pdf_definitions(pages: list, result: dict):
                         })
                         break
 
-        # ── 2) 텍스트 기반: hex 상태값 패턴 ──
-        # Huawei: "0x0000 Standby: initializing", "0x0300 Shutdown: fault"
-        # Solarize: "0x00 Initial mode", "0x01 Standby mode"
+        # ── 2) 테이블 기반: hex 모드값 테이블 (Solarize Table: 0x00=Initial) ──
+        for tab in p.get('tables', []):
+            cleaned = _clean_table(tab)
+            hex_modes = {}
+            for row in cleaned:
+                cells = [str(c).strip() for c in row]
+                if not cells:
+                    continue
+                # "0x00 | (empty) | Initial mode" 또는 "0x00 | Initial mode"
+                m_hex = _HEX_VAL_RE.match(cells[0])
+                if m_hex:
+                    val = int(m_hex.group(1), 16)
+                    # 설명은 비어있지 않은 셀에서
+                    desc = ''
+                    for c in cells[1:]:
+                        if c and len(c) > 2 and not c.isdigit() and not c.startswith('0x'):
+                            desc = c[:50]
+                            break
+                    dl = desc.lower()
+                    if any(k in dl for k in ['mode', 'standby', 'on-grid', 'fault', 'shutdown',
+                                              'initial', 'off-grid', 'waiting', 'normal']):
+                        hex_modes[val] = desc
+            if len(hex_modes) >= 3:
+                if not any(d['page'] == page_num and d['type'] == 'mode_table'
+                           and len(d['values']) >= 3 for d in result['status_defs']):
+                    result['status_defs'].append({
+                        'address': None, 'name': f'Mode Table (P{page_num})',
+                        'type': 'mode_table', 'values': hex_modes, 'page': page_num,
+                    })
+
+        # ── 2b) 텍스트 기반: hex 상태값 (Huawei: "0x0000 Standby: initializing") ──
         hex_status = {}
         for line in lines:
             m = re.match(r'\s*(0x[0-9A-Fa-f]{2,4})\s+(.+)', line.strip())
@@ -593,12 +621,12 @@ def _scan_pdf_definitions(pages: list, result: dict):
                 val = int(m.group(1), 16)
                 desc = m.group(2).strip()[:50]
                 dl = desc.lower()
-                if any(k in dl for k in ['standby', 'mode', 'fault', 'shutdown', 'running',
-                                          'initial', 'off-grid', 'on-grid', 'waiting',
-                                          'detecting', 'checking', 'spot']):
+                if any(k in dl for k in ['standby', 'fault', 'shutdown', 'running',
+                                          'on-grid', 'off-grid', 'detecting', 'spot']):
                     hex_status[val] = desc
         if len(hex_status) >= 3:
-            if not any(d['page'] == page_num for d in result['status_defs']):
+            if not any(d['page'] == page_num and 'Hex' in d.get('name', '')
+                       for d in result['status_defs']):
                 result['status_defs'].append({
                     'address': None, 'name': f'Hex Status (P{page_num})',
                     'type': 'mode_table', 'values': hex_status, 'page': page_num,
@@ -624,6 +652,55 @@ def _scan_pdf_definitions(pages: list, result: dict):
                     'address': None, 'name': f'Num Status (P{page_num})',
                     'type': 'mode_table', 'values': num_status, 'page': page_num,
                 })
+
+        # ── 3b) 테이블 기반: Sungrow "State | Value(0x hex) | Paraphrase" ──
+        for tab in p.get('tables', []):
+            cleaned = _clean_table(tab)
+            if len(cleaned) < 4:
+                continue
+            # 헤더에 "State" + "Value" 패턴
+            header_joined = ' '.join(str(c).lower() for c in cleaned[0] + (cleaned[1] if len(cleaned) > 1 else []))
+            if 'state' in header_joined and 'value' in header_joined:
+                sg_modes = {}
+                for row in cleaned[2:]:
+                    cells = [str(c).strip() for c in row]
+                    if len(cells) >= 2 and cells[0] and cells[1]:
+                        state_name = cells[0]
+                        value_str = cells[1]
+                        # "0x0" "0x8000" "0x1300" 패턴
+                        m_v = re.match(r'^0x([0-9A-Fa-f]+)$', value_str)
+                        if m_v:
+                            val = int(m_v.group(1), 16)
+                            sg_modes[val] = state_name
+                if len(sg_modes) >= 4:
+                    result['status_defs'].append({
+                        'address': None, 'name': f'Work State Table (P{page_num})',
+                        'type': 'mode_table', 'values': sg_modes, 'page': page_num,
+                    })
+
+        # ── 3c) 테이블 기반: Kstar "SN | Content(00H) | Description" ──
+        for tab in p.get('tables', []):
+            cleaned = _clean_table(tab)
+            if len(cleaned) < 4:
+                continue
+            header_joined = ' '.join(str(c).lower() for c in cleaned[0])
+            if ('sn' in header_joined or 'content' in header_joined) and 'description' in header_joined:
+                ks_modes = {}
+                for row in cleaned[1:]:
+                    cells = [str(c).strip() for c in row]
+                    if len(cells) >= 3 and cells[0].isdigit():
+                        val = int(cells[0])
+                        desc = cells[2] if cells[2] else cells[1]
+                        dl = desc.lower()
+                        if any(k in dl for k in ['initialization', 'waiting', 'normal', 'error',
+                                                  'permanent', 'aging', 'burning', 'detection',
+                                                  'checking', 'standby']):
+                            ks_modes[val] = desc
+                if len(ks_modes) >= 3:
+                    result['status_defs'].append({
+                        'address': None, 'name': f'Operating Mode (P{page_num})',
+                        'type': 'mode_table', 'values': ks_modes, 'page': page_num,
+                    })
 
         # ── 4) 테이블 기반: Sungrow Appendix fault codes ──
         # "002 | 0x0002 | Grid overvoltage | Fault"
@@ -760,11 +837,15 @@ def _scan_excel_definitions(sheets: dict, result: dict):
 
 
 def _extract_value_definitions(table: list) -> dict:
-    """테이블에서 값 → 설명 매핑 추출"""
+    """테이블에서 값 → 설명 매핑 추출 (레지스터 데이터 테이블 제외)"""
     values = {}
     for row in table:
         cells = [str(c).strip() for c in row if str(c).strip()]
         if not cells or len(cells) < 2:
+            continue
+        # 레지스터 데이터 테이블 행 제외 (U16, U32, S16, RO, RW 등 포함)
+        joined = ' '.join(cells)
+        if re.search(r'\b(U16|U32|S16|S32|FLOAT32|RO|RW|04H|06H)\b', joined):
             continue
         # Bit N 패턴
         m_bit = _BIT_DEF_RE.match(cells[0])
