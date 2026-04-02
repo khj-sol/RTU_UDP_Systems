@@ -1063,13 +1063,14 @@ def assign_h01_field(reg: RegisterRow, synonym_db: dict,
                                       'energy produced', 'ac energy', 'ac_energy',
                                       'einv all', 'einv_all',
                                       'eac total', 'eac_total',
+                                      'energy since',
                                       '누적발전량', '누적 발전량',
                                       'total generation energy',
                                       'high byte of total feed', 'high byte oftotal feed']) or \
        any(k in defn_nospace for k in ['accumulatedpower', 'accumulatedenergy',
                                         'totalpowergeneration', 'totalgenerationenergy',
                                         'totalenergyyield', 'totalpoweryields',
-                                        'einvall']):
+                                        'einvall', 'energysincecommissioning']):
         return 'cumulative_energy'
     if any(k in defn_lower for k in ['daily energy', 'today energy', 'daily power yields',
                                       'daily generation', 'einv day', 'einv_day',
