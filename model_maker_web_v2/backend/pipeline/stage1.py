@@ -1214,6 +1214,19 @@ def build_h01_match_table(categorized: dict, meta: dict) -> List[dict]:
     # 2) Handler 계산 (pv_voltage, pv_current) — 항상 O
     for h01_field, rule in H01_HANDLER_COMPUTED_FIELDS.items():
         expected_unit = H01_BASE_UNITS.get(h01_field, '')
+        # pv_power: PDF에서 발견되면 PDF 소스, 아니면 handler 계산
+        if h01_field == 'pv_power':
+            pv_power_reg = _find_matched_reg(categorized, 'pv_power')
+            if pv_power_reg:
+                rows.append(_make_pdf_match_row('pv_power', pv_power_reg))
+            else:
+                rows.append({
+                    'field': h01_field, 'source': 'HANDLER', 'status': 'O',
+                    'address': '-', 'definition': '-',
+                    'type': 'U16', 'unit': expected_unit, 'scale': '',
+                    'note': f'handler 계산: {rule}',
+                })
+            continue
         rows.append({
             'field': h01_field,
             'source': 'HANDLER',
@@ -1223,10 +1236,6 @@ def build_h01_match_table(categorized: dict, meta: dict) -> List[dict]:
             'type': 'U16', 'unit': expected_unit, 'scale': '',
             'note': f'handler 계산: {rule}',
         })
-
-    # 3) PDF 매핑 필요 (type/unit/unit_note 포함)
-    pv_power_reg = _find_matched_reg(categorized, 'pv_power')
-    rows.append(_make_pdf_match_row('pv_power', pv_power_reg, 'Total DC Power 미발견'))
 
     energy_reg = _find_matched_reg(categorized, 'cumulative_energy')
     if not energy_reg:
