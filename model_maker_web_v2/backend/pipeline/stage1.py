@@ -1394,7 +1394,30 @@ def build_h01_match_table(categorized: dict, meta: dict) -> List[dict]:
     for n in range(1, max_string + 1):
         field = f'string{n}_current'
         reg = _find_matched_reg(categorized, field)
-        rows.append(_make_pdf_match_row(field, reg, 'String current 미지원 시 생략'))
+        if reg:
+            rows.append(_make_pdf_match_row(field, reg))
+        else:
+            # String별 레지스터 없으면: MPPT당 1 String이면 MPPT current = String current
+            mppt_n = n  # String N = MPPT N (1:1 매핑, PDF에 String별 레지스터 없을 때)
+            if mppt_n <= max_mppt:
+                mppt_reg = _find_matched_reg(categorized, f'mppt{mppt_n}_current')
+                if mppt_reg:
+                    rows.append({
+                        'field': field, 'source': 'HANDLER', 'status': 'O',
+                        'address': mppt_reg.address_hex, 'definition': mppt_reg.definition,
+                        'type': mppt_reg.data_type, 'unit': 'A', 'scale': mppt_reg.scale or '',
+                        'note': f'= mppt{mppt_n}_current (MPPT당 1 String)',
+                    })
+                else:
+                    # MPPT current도 handler 계산이면
+                    rows.append({
+                        'field': field, 'source': 'HANDLER', 'status': 'O',
+                        'address': '-', 'definition': '-',
+                        'type': 'U16', 'unit': 'A', 'scale': '',
+                        'note': f'= mppt{mppt_n}_current (handler 계산)',
+                    })
+            else:
+                rows.append(_make_pdf_match_row(field, None, 'String current 미지원 시 생략'))
 
     return rows
 
@@ -1701,9 +1724,10 @@ def run_stage1(
                     # mppt1_voltage/current로 매핑 (assign_h01_field에서 처리)
                     break
 
-    # V2: MPPT수 > String수이면 PDF 버그 — MPPT수를 String수로 캡
-    if max_string > 0 and max_mppt > max_string:
-        max_mppt = max_string
+    # String 수 보정: String >= MPPT (최소 MPPT당 1 String)
+    # PDF에 String별 레지스터가 없어도 실제로는 MPPT에 String이 연결됨
+    if max_mppt > 0 and max_string < max_mppt:
+        max_string = max_mppt
 
     # V2: IV Scan 지원 = IV 데이터 레지스터(Tracker/PV point)가 있어야 함
     # IV command(0x600D)만 있고 데이터 레지스터 없으면 미지원 (예: Huawei)
@@ -1821,7 +1845,11 @@ def run_stage1(
         if sunspec_mppt['mppt_count'] > max_mppt:
             max_mppt = sunspec_mppt['mppt_count']
             meta['max_mppt'] = max_mppt
-            log(f'  SunSpec MPPT → max_mppt={max_mppt}로 업데이트')
+            # String 수도 보정
+            if max_string < max_mppt:
+                max_string = max_mppt
+                meta['max_string'] = max_string
+            log(f'  SunSpec MPPT → max_mppt={max_mppt}, max_string={max_string}로 업데이트')
         log(f'  SunSpec 표준 인버터 감지 → 정의 데이터 자동 적용')
 
     counts = {cat: len(regs) for cat, regs in categorized.items()}
