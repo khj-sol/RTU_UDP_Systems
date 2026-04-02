@@ -644,18 +644,54 @@ def detect_iv_from_pdf(registers: List[RegisterRow], pages: list = None) -> dict
 
 # ─── H01 매칭 상태 표 ──────────────────────────────────────────────────────
 
+# H01 필드별 기대 단위 (단위 검증용)
+H01_EXPECTED_UNITS = {
+    'r_voltage': 'V', 's_voltage': 'V', 't_voltage': 'V',
+    'r_current': 'A', 's_current': 'A', 't_current': 'A',
+    'ac_power': 'W', 'power_factor': '', 'frequency': 'Hz',
+    'pv_voltage': 'V', 'pv_current': 'A', 'pv_power': 'W',
+    'cumulative_energy': 'Wh', 'daily_energy': 'Wh',
+}
+
+
+def _check_unit(h01_field: str, reg_unit: str) -> str:
+    """단위 검증 — 불일치 시 변환 노트 반환"""
+    expected = H01_EXPECTED_UNITS.get(h01_field, '')
+    if not expected or not reg_unit:
+        return ''
+    ru = reg_unit.strip()
+    # 정확 일치
+    if ru == expected:
+        return ''
+    # kWh→Wh, MWh→Wh 변환 필요
+    if expected == 'Wh':
+        if ru in ('kWh', 'KWH'):
+            return 'kWh→Wh (*1000)'
+        if ru in ('MWh', 'MWH'):
+            return 'MWh→Wh (*1000000)'
+    # kW→W
+    if expected == 'W' and ru in ('kW', 'KW'):
+        return 'kW→W (*1000)'
+    # mA→A
+    if expected == 'A' and ru in ('mA', 'MA'):
+        return 'mA→A (/1000)'
+    return ''
+
+
 def build_h01_match_table(categorized: dict, meta: dict) -> List[dict]:
-    """V2: H01 Body 전체 필드 매칭 상태"""
+    """V2: H01 Body 전체 필드 매칭 상태 + 단위/타입 검증"""
     rows = []
     max_mppt = meta.get('max_mppt', 0)
     max_string = meta.get('max_string', 0)
 
     # 1) DER 겹침 (9개) — 항상 O
     for h01_field, der_info in H01_DER_OVERLAP_FIELDS.items():
+        expected_unit = H01_EXPECTED_UNITS.get(h01_field, '')
         rows.append({
             'field': h01_field,
             'source': 'DER',
             'status': 'O',
+            'type': 'S32', 'unit': expected_unit,
             'address': f'0x{der_info["addr_low"]:04X}~0x{der_info["addr_high"]:04X}',
             'definition': der_info['der_name'],
             'note': 'DER-AVM 고정 주소 사용',
@@ -663,61 +699,42 @@ def build_h01_match_table(categorized: dict, meta: dict) -> List[dict]:
 
     # 2) Handler 계산 (pv_voltage, pv_current) — 항상 O
     for h01_field, rule in H01_HANDLER_COMPUTED_FIELDS.items():
+        expected_unit = H01_EXPECTED_UNITS.get(h01_field, '')
         rows.append({
             'field': h01_field,
             'source': 'HANDLER',
             'status': 'O',
             'address': '-',
             'definition': '-',
+            'type': 'U16', 'unit': expected_unit,
             'note': f'handler 계산: {rule}',
         })
 
-    # 3) PDF 매핑 필요
+    # 3) PDF 매핑 필요 (type/unit/unit_note 포함)
     pv_power_reg = _find_matched_reg(categorized, 'pv_power')
-    rows.append({
-        'field': 'pv_power', 'source': 'PDF',
-        'status': 'O' if pv_power_reg else 'X',
-        'address': pv_power_reg.address_hex if pv_power_reg else '-',
-        'definition': pv_power_reg.definition if pv_power_reg else '-',
-        'note': '' if pv_power_reg else 'Total DC Power 미발견',
-    })
+    rows.append(_make_pdf_match_row('pv_power', pv_power_reg, 'Total DC Power 미발견'))
 
     energy_reg = _find_matched_reg(categorized, 'cumulative_energy')
     if not energy_reg:
         energy_reg = _find_matched_reg(categorized, 'total_energy')
-    rows.append({
-        'field': 'cumulative_energy', 'source': 'PDF',
-        'status': 'O' if energy_reg else 'X',
-        'address': energy_reg.address_hex if energy_reg else '-',
-        'definition': energy_reg.definition if energy_reg else '-',
-        'note': '' if energy_reg else 'Total Energy 미발견',
-    })
+    rows.append(_make_pdf_match_row('cumulative_energy', energy_reg, 'Total Energy 미발견'))
 
     status_reg = _find_matched_reg(categorized, 'inverter_status', cat='STATUS')
     if not status_reg and categorized.get('STATUS'):
         status_reg = categorized['STATUS'][0]
-    rows.append({
-        'field': 'status', 'source': 'PDF',
-        'status': 'O' if status_reg else 'X',
-        'address': status_reg.address_hex if status_reg else '-',
-        'definition': status_reg.definition if status_reg else '-',
-        'note': '' if status_reg else 'Work State 미발견',
-    })
+    rows.append(_make_pdf_match_row('status', status_reg, 'Work State 미발견'))
 
     alarm_regs = categorized.get('ALARM', [])
     alarm_dist = distribute_alarms(alarm_regs)
     for slot in ['alarm1', 'alarm2', 'alarm3']:
         regs = alarm_dist.get(slot, [])
         if regs:
-            rows.append({
-                'field': slot, 'source': 'PDF', 'status': 'O',
-                'address': regs[0].address_hex, 'definition': regs[0].definition, 'note': '',
-            })
+            rows.append(_make_pdf_match_row(slot, regs[0]))
         else:
             rows.append({
                 'field': slot, 'source': 'PDF',
                 'status': '-' if slot != 'alarm1' else 'X',
-                'address': '-', 'definition': '-',
+                'address': '-', 'definition': '-', 'type': '', 'unit': '',
                 'note': '보조 알람 없음' if slot != 'alarm1' else '알람 미발견',
             })
 
@@ -725,23 +742,12 @@ def build_h01_match_table(categorized: dict, meta: dict) -> List[dict]:
         for mtype in ['voltage', 'current']:
             field = f'mppt{n}_{mtype}'
             reg = _find_matched_reg(categorized, field)
-            rows.append({
-                'field': field, 'source': 'PDF',
-                'status': 'O' if reg else 'X',
-                'address': reg.address_hex if reg else '-',
-                'definition': reg.definition if reg else '-', 'note': '',
-            })
+            rows.append(_make_pdf_match_row(field, reg))
 
     for n in range(1, max_string + 1):
         field = f'string{n}_current'
         reg = _find_matched_reg(categorized, field)
-        rows.append({
-            'field': field, 'source': 'PDF',
-            'status': 'O' if reg else 'X',
-            'address': reg.address_hex if reg else '-',
-            'definition': reg.definition if reg else '-',
-            'note': '' if reg else 'String current 미지원 시 생략',
-        })
+        rows.append(_make_pdf_match_row(field, reg, 'String current 미지원 시 생략'))
 
     return rows
 
@@ -753,6 +759,25 @@ def _find_matched_reg(categorized: dict, h01_field: str, cat: str = None) -> Opt
             if reg.h01_field == h01_field:
                 return reg
     return None
+
+
+def _make_pdf_match_row(h01_field: str, reg, miss_note: str = '') -> dict:
+    """PDF 매칭 행 생성 (type/unit/unit_note 포함)"""
+    if reg:
+        unit_note = _check_unit(h01_field, reg.unit)
+        return {
+            'field': h01_field, 'source': 'PDF', 'status': 'O',
+            'address': reg.address_hex, 'definition': reg.definition,
+            'type': reg.data_type, 'unit': reg.unit or '',
+            'note': f'단위변환: {unit_note}' if unit_note else '',
+        }
+    else:
+        return {
+            'field': h01_field, 'source': 'PDF', 'status': 'X',
+            'address': '-', 'definition': '-',
+            'type': '', 'unit': '',
+            'note': miss_note,
+        }
 
 
 # ─── Stage 1 메인 ───────────────────────────────────────────────────────────
@@ -1162,12 +1187,13 @@ def run_stage1(
     ws_h01['A1'] = f'H01 모니터링 매칭 — {h01_matched}/{h01_total}'
     ws_h01['A1'].font = title_font
 
-    h01_cols = ['No', 'H01 Field', 'Source', 'Status', 'Address', 'Definition', 'Note']
+    h01_cols = ['No', 'H01 Field', 'Source', 'Status', 'Address', 'Definition', 'Type', 'Unit', 'Note']
     _write_header(ws_h01, h01_cols, 3)
 
     for i, rd in enumerate(h01_match_table, start=1):
         vals = [i, rd['field'], rd['source'], rd['status'],
-                rd['address'], rd['definition'], rd['note']]
+                rd['address'], rd['definition'],
+                rd.get('type', ''), rd.get('unit', ''), rd.get('note', '')]
         sc = MATCH_COLORS.get(rd['status'], 'FFFFFF')
         for j, val in enumerate(vals, start=1):
             cell = ws_h01.cell(row=3 + i, column=j, value=val)
