@@ -755,8 +755,10 @@ def should_exclude(reg: RegisterRow) -> bool:
                 return True
 
     # 이름이 너무 길면 제외 (PDF에서 설명문이 이름으로 추출된 경우)
+    # 단, INFO 필수 키워드(model, serial 등) 포함 시 제외하지 않음
     if len(defn_upper) > MAX_NAME_LENGTH:
-        return True
+        if not is_info_register(reg.definition):
+            return True
 
     return False
 
