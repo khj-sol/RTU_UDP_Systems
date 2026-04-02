@@ -264,6 +264,11 @@ EXCLUDE_KEYWORDS = [
     'device type',  # 설정용 device type (0x30B1 등)
     # REMS (§6)
     'rems', 'remote monitoring system',
+    # V2: 제어 관련 레지스터 제외 (DER-AVM으로만 제어)
+    'start/stop', 'remote start', 'remote stop', 'emergency stop',
+    'power on command', 'shut down command',
+    # V2: Q(P)/Q(U) 커브, 모델명 테이블
+    'q(p)', 'q(u)', 'q(v)', 'qu curve', 'qp curve',
 ]
 
 # 보호 파라미터 주소 범위 (§6: 0x5000~ 보호설정 블록)
@@ -513,3 +518,41 @@ DEVICE_CATEGORIES = {
 def get_valid_categories(device_type: str) -> List[str]:
     """설비 타입별 유효 카테고리"""
     return DEVICE_CATEGORIES.get(device_type, DEVICE_CATEGORIES['inverter'])
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# V2: H01 DER 겹침 필드 판단
+# ═══════════════════════════════════════════════════════════════════════════
+
+# H01에서 DER 주소를 사용하는 9개 필드의 키워드
+# 이 필드들은 PDF에서 매핑 불필요 (DER 고정 주소맵으로 자동 삽입)
+H01_DER_OVERLAP_KEYWORDS = {
+    'r_voltage':    ['phase a voltage', 'l1 voltage', 'r-phase voltage', 'phase r voltage',
+                     'ua', 'grid a voltage', 'a-n voltage', 'a phase voltage'],
+    's_voltage':    ['phase b voltage', 'l2 voltage', 's-phase voltage', 'phase s voltage',
+                     'ub', 'grid b voltage', 'b-n voltage', 'b phase voltage'],
+    't_voltage':    ['phase c voltage', 'l3 voltage', 't-phase voltage', 'phase t voltage',
+                     'uc', 'grid c voltage', 'c-n voltage', 'c phase voltage'],
+    'r_current':    ['phase a current', 'l1 current', 'r-phase current', 'phase r current',
+                     'ia', 'grid a current', 'a phase current'],
+    's_current':    ['phase b current', 'l2 current', 's-phase current', 'phase s current',
+                     'ib', 'grid b current', 'b phase current'],
+    't_current':    ['phase c current', 'l3 current', 't-phase current', 'phase t current',
+                     'ic', 'grid c current', 'c phase current'],
+    'ac_power':     ['total active power', 'total output power', 'grid active power',
+                     'active power', 'output power', 'total power output'],
+    'power_factor': ['power factor', 'cos phi', 'pf'],
+    'frequency':    ['grid frequency', 'output frequency', 'frequency'],
+}
+
+
+def is_h01_der_overlap(reg: RegisterRow) -> Optional[str]:
+    """
+    V2: H01 DER 겹침 필드인지 판단
+    Returns: 겹치는 H01 필드명 or None
+    """
+    defn_lower = reg.definition.lower()
+    for h01_field, keywords in H01_DER_OVERLAP_KEYWORDS.items():
+        if any(k in defn_lower for k in keywords):
+            return h01_field
+    return None

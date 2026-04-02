@@ -415,6 +415,40 @@ def get_openpyxl():
         raise ImportError("openpyxl required: pip install openpyxl")
 
 
+# ─── MAPPING_RULES_V2: H01 DER 겹침 필드 ──────────────────────────────────────
+# 이 9개 필드는 PDF에서 매핑 불필요 → DER-AVM 고정 주소맵으로 자동 삽입
+H01_DER_OVERLAP_FIELDS = {
+    'r_voltage':    {'der_name': 'DEA_L1_VOLTAGE', 'addr_low': 0x03EE, 'addr_high': 0x03EF},
+    's_voltage':    {'der_name': 'DEA_L2_VOLTAGE', 'addr_low': 0x03F0, 'addr_high': 0x03F1},
+    't_voltage':    {'der_name': 'DEA_L3_VOLTAGE', 'addr_low': 0x03F2, 'addr_high': 0x03F3},
+    'r_current':    {'der_name': 'DEA_L1_CURRENT', 'addr_low': 0x03E8, 'addr_high': 0x03E9},
+    's_current':    {'der_name': 'DEA_L2_CURRENT', 'addr_low': 0x03EA, 'addr_high': 0x03EB},
+    't_current':    {'der_name': 'DEA_L3_CURRENT', 'addr_low': 0x03EC, 'addr_high': 0x03ED},
+    'ac_power':     {'der_name': 'DEA_TOTAL_ACTIVE_POWER', 'addr_low': 0x03F4, 'addr_high': 0x03F5},
+    'power_factor': {'der_name': 'DEA_POWER_FACTOR', 'addr_low': 0x03F8, 'addr_high': 0x03F9},
+    'frequency':    {'der_name': 'DEA_FREQUENCY', 'addr_low': 0x03FA, 'addr_high': 0x03FB},
+}
+
+# Handler 계산 필드 — PDF 매핑 불필요
+H01_HANDLER_COMPUTED_FIELDS = {
+    'pv_voltage': 'average(MPPT_N_voltage for N if voltage > 100V)',
+    'pv_current': '1순위: sum(STRING_N_current), 2순위: sum(MPPT_N_current)',
+}
+
+# H01 안 겹치는 필드 — PDF에서 매핑 필요
+H01_PDF_REQUIRED_FIELDS = [
+    'pv_power',             # Total DC power
+    'cumulative_energy',    # Total power yields
+    'mppt_N_voltage',       # MPPT별 전압
+    'mppt_N_current',       # MPPT별 전류
+    'string_N_current',     # String별 전류 (지원 시)
+]
+
+# V2 카테고리 (5개 + DER 고정 + REVIEW)
+V2_CATEGORIES = ['INFO', 'MONITORING', 'STATUS', 'ALARM',
+                 'DER_CONTROL', 'DER_MONITOR', 'IV_SCAN', 'REVIEW']
+
+
 # ─── 카테고리 색상 ───────────────────────────────────────────────────────────
 
 CATEGORY_COLORS = {
