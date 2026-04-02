@@ -1750,6 +1750,7 @@ def run_stage1(
         'device_type': device_type,
         'max_mppt': max_mppt,
         'max_string': max_string,
+        'string_monitoring': max_string > max_mppt,  # True: String별 전류 모니터링 지원
         'iv_scan': iv_scan_supported and device_type == 'inverter',
         'iv_data_points': iv_info.get('data_points', 0),
         'iv_trackers': len(iv_info.get('trackers', [])),
@@ -1906,6 +1907,7 @@ def run_stage1(
         ('제조사', manufacturer), ('프로토콜 버전', protocol_version),
         ('설비 타입', device_type), ('MPPT', max_mppt),
         ('String', max_string),
+        ('String 모니터링', 'Yes' if meta['string_monitoring'] else 'No (MPPT당 1 String)'),
         ('IV Scan', 'Yes' if meta['iv_scan'] else 'No'),
         ('IV Data Points', meta.get('iv_data_points', 0) if meta['iv_scan'] else '-'),
         ('IV Trackers', meta.get('iv_trackers', 0) if meta['iv_scan'] else '-'),
