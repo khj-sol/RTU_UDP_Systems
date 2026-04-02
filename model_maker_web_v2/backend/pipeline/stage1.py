@@ -1776,7 +1776,7 @@ def run_stage1(
 
     h01_match_table = build_h01_match_table(categorized, meta)
     h01_matched = sum(1 for r in h01_match_table if r['status'] == 'O')
-    h01_total = len(h01_match_table)
+    h01_total = sum(1 for r in h01_match_table if r['status'] != '-')
     log(f'H01 매칭: {h01_matched}/{h01_total}')
 
     # ── DER 매칭 테이블 생성 ──
