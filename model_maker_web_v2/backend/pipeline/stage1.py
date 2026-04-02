@@ -953,7 +953,8 @@ def assign_h01_field(reg: RegisterRow, synonym_db: dict,
                                           'i status',
                                           '인버터 모드', '시스템동작상태', '동작상태',
                                           'device status', 'system status']) or \
-           any(k in defn_nospace_s for k in ['workmode', 'invworkmode', 'runningmode']) or \
+           any(k in defn_nospace_s for k in ['workmode', 'invworkmode', 'runningmode',
+                                              'sysstatemode']) or \
            defn_lower.strip() in ('state', 'running'):
             return 'inverter_status'
         return ''
@@ -1005,6 +1006,7 @@ def assign_h01_field(reg: RegisterRow, synonym_db: dict,
                                       'total energy yield', 'energy yield',
                                       'energy produced', 'ac energy', 'ac_energy',
                                       'einv all', 'einv_all',
+                                      'eac total', 'eac_total',
                                       '누적발전량', '누적 발전량',
                                       'total generation energy',
                                       'high byte of total feed', 'high byte oftotal feed']) or \
@@ -1015,6 +1017,7 @@ def assign_h01_field(reg: RegisterRow, synonym_db: dict,
         return 'cumulative_energy'
     if any(k in defn_lower for k in ['daily energy', 'today energy', 'daily power yields',
                                       'daily generation', 'einv day', 'einv_day',
+                                      'eac today', 'eac_today',
                                       '일발전량', '일 발전량',
                                       '금일발전량', '금일 발전량']):
         return 'daily_energy'
