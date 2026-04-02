@@ -168,20 +168,11 @@ def _parse_register_row(row: list, col_map: dict) -> Optional[RegisterRow]:
     if not row:
         return None
 
-    # 셀 내 줄바꿈 처리:
-    # - 이름(name) 셀: 첫 줄만 이름, 나머지는 comment로 분리 (CPS 등 설명 포함)
-    # - 기타 셀: 줄바꿈→공백 치환 (Huawei 좁은 컬럼)
-    _name_extra = ''  # 이름 셀에서 분리된 설명
-    name_col = col_map.get('name')
+    # 원본 보존 + 줄바꿈→공백 버전 둘 다 준비
     raw_row = [str(c) if c is not None else '' for c in row]
-    row = []
-    for ci, c in enumerate(raw_row):
-        if ci == name_col and '\n' in c:
-            lines = c.strip().split('\n')
-            row.append(lines[0].strip())
-            _name_extra = ' '.join(l.strip() for l in lines[1:] if l.strip())
-        else:
-            row.append(re.sub(r'\s*\n\s*', ' ', c).strip())
+    # 기본 row: 줄바꿈→공백 (주소/타입/단위 파싱용)
+    row = [re.sub(r'\s*\n\s*', ' ', c).strip() for c in raw_row]
+    _name_extra = ''  # 이름 셀에서 분리된 설명
 
     _RANGE_ADDR_RE = re.compile(r'^(\d{4,5})\s*[-–~]\s*(\d{4,5})$')
     _RANGE_HEX_RE = re.compile(r'^(0x[0-9A-Fa-f]{4})\s*[-–~]\s*(0x[0-9A-Fa-f]{4})$', re.I)

@@ -365,13 +365,17 @@ _INFO_DEFAULT_GAP = 30
 
 
 # PDF 섹션 제목 패턴 — "Device information" 등 (Device attributes는 제외 — 운영 레지스터 혼재)
+# 섹션 제목 패턴 — 줄 시작 또는 섹션 번호 뒤에 와야 함 (본문 레지스터 설명과 구분)
 _INFO_SECTION_RE = re.compile(
+    r'(?:^|\n)\s*(?:\d+\.?\d*\.?\s+)?'  # 줄 시작 + 선택적 섹션 번호 (2.1, 3.2. 등)
+    r'(?:'
     r'device\s+(?:information|info)\b|'
     r'basic\s+(?:information|parameters)\b|'
-    r'inverter\s+(?:\w+\s+)?information\b|equipment\s+information\b|'
+    r'inverter\s+(?:system\s+)?information\b|equipment\s+information\b|'
     r'system\s+information\b|'
-    r'장치\s*정보|기기\s*정보|설비\s*정보',
-    re.I
+    r'장치\s*정보|기기\s*정보|설비\s*정보'
+    r')',
+    re.I | re.MULTILINE
 )
 
 
