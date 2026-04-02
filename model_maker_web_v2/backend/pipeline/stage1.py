@@ -1538,7 +1538,7 @@ def run_stage1(
         log(f'  DER 고정 주소 제외: {before - len(registers)}개')
 
     # ── INFO 블록 사전 감지 (enrichment 전 — PDF 원본 이름 기준) ──
-    info_block = detect_info_block(registers)
+    info_block = detect_info_block(registers, pages=pages)
     info_addrs = info_block['info_addrs']
     log(f'  INFO 블록: {len(info_addrs)}개 레지스터, '
         f'Model={"✓" if info_block["model_found"] else "✗ MISSING"}, '

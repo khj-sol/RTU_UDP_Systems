@@ -250,8 +250,33 @@ _INFO_STOP_MEASUREMENT = re.compile(
 _INFO_MAX_GAP = 50
 
 
-def detect_info_block(registers: list) -> dict:
-    """INFO 레지스터 블록 감지 — Model/SN 앵커 기반.
+# PDF 섹션 제목 패턴 — "Device information", "Device attributes" 등
+_INFO_SECTION_RE = re.compile(
+    r'device\s+(?:information|attributes|info)\b|'
+    r'basic\s+(?:information|parameters)\b|'
+    r'inverter\s+information\b|equipment\s+information\b|'
+    r'장치\s*정보|기기\s*정보|설비\s*정보',
+    re.I
+)
+
+
+def _find_info_section_pages(pages: list) -> list:
+    """PDF 페이지에서 Device Information 섹션이 있는 페이지 번호 반환."""
+    if not pages:
+        return []
+    result = []
+    for p in pages[:25]:  # 앞 25페이지만 탐색
+        if _INFO_SECTION_RE.search(p.get('text', '')):
+            result.append(p['page'])
+    return result
+
+
+def detect_info_block(registers: list, pages: list = None) -> dict:
+    """INFO 레지스터 블록 감지.
+
+    우선순위:
+    1. PDF 섹션 제목 ("Device information" 등) → 해당 페이지 테이블의 RO 레지스터
+    2. Model/SN 앵커 기반 블록 확장 (섹션 제목 없을 때 fallback)
 
     Returns: {
         'info_addrs': set of addresses classified as INFO,
@@ -262,6 +287,7 @@ def detect_info_block(registers: list) -> dict:
     }
     """
     from . import parse_address
+    from .stage1 import extract_registers_from_tables, _detect_table_columns
 
     # RO 레지스터만 주소순 정렬
     ro_regs = []
@@ -279,7 +305,70 @@ def detect_info_block(registers: list) -> dict:
         return {'info_addrs': set(), 'model_found': False, 'sn_found': False,
                 'model_addr': None, 'sn_addr': None}
 
-    # ── 1단계: 앵커 탐색 (첫 번째 매칭만) ──
+    # ── 0단계: PDF 섹션 제목 기반 감지 (우선) ──
+    if pages:
+        info_pages = _find_info_section_pages(pages)
+        if info_pages:
+            # 해당 페이지의 첫 번째 테이블에서 레지스터 주소 수집
+            section_addrs = set()
+            for p in pages:
+                if p['page'] in info_pages:
+                    for tab in p.get('tables', []):
+                        regs_from_tab = extract_registers_from_tables([tab])
+                        for r in regs_from_tab:
+                            rw = (getattr(r, 'rw', '') or '').upper()
+                            if rw and rw not in ('RO', 'R', 'READ'):
+                                continue
+                            if r.address and isinstance(r.address, int):
+                                section_addrs.add(r.address)
+            if section_addrs:
+                # 섹션 내에서도 앵커 + STOP 규칙 적용 (섹션에 운영 레지스터도 섞여 있을 수 있음)
+                all_addrs = {a for a, _ in ro_regs}
+                candidate_addrs = sorted(section_addrs & all_addrs)
+                # 앵커 찾기
+                model_addr = None
+                sn_addr = None
+                for addr, reg in ro_regs:
+                    if addr not in candidate_addrs:
+                        continue
+                    defn = reg.definition.replace('_', ' ')
+                    if not model_addr and _MODEL_RE.search(defn) and not _MODEL_EXCLUDE_RE.search(defn):
+                        model_addr = addr
+                    if not sn_addr and _SN_RE.search(defn) and not _SN_EXCLUDE_RE.search(defn):
+                        sn_addr = addr
+                # 앵커부터 STOP까지만 포함
+                anchors_found = [a for a in [model_addr, sn_addr] if a]
+                if anchors_found:
+                    block_start = min(anchors_found)
+                    info_addrs = set()
+                    prev = block_start
+                    for addr in candidate_addrs:
+                        if addr < block_start:
+                            continue
+                        reg_at = next((r for a, r in ro_regs if a == addr), None)
+                        if not reg_at:
+                            continue
+                        defn = reg_at.definition.replace('_', ' ')
+                        if addr in anchors_found:
+                            info_addrs.add(addr)
+                            prev = addr
+                            continue
+                        if _INFO_BLOCK_STOP.search(defn) or _INFO_STOP_MEASUREMENT.search(defn):
+                            break
+                        if _INFO_BLOCK_KEYWORDS.search(defn) or (addr - prev <= 5):
+                            info_addrs.add(addr)
+                            prev = addr
+                        elif addr - prev > _INFO_MAX_GAP:
+                            break
+                    return {
+                        'info_addrs': info_addrs,
+                        'model_found': model_addr is not None,
+                        'sn_found': sn_addr is not None,
+                        'model_addr': model_addr,
+                        'sn_addr': sn_addr,
+                    }
+
+    # ── 1단계: 앵커 탐색 (첫 번째 매칭만) — 섹션 제목 없을 때 fallback ──
     model_anchor = None  # (addr, reg)
     sn_anchor = None
     for addr, reg in ro_regs:
