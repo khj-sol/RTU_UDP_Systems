@@ -336,7 +336,13 @@
     document.getElementById('card-s1').className = 'stage-card done';
     document.getElementById('card-s2').className = 'stage-card active';
     document.getElementById('btn-s2').disabled = false;
-    // Stage 1 Excel 다운로드 링크
+    // IV 미지원 시 data points를 0으로
+    const ivField = document.getElementById('s2-iv-points');
+    if (!msg.iv_scan) {
+      ivField.value = '0';
+    } else {
+      ivField.value = String(msg.iv_data_points || 64);
+    }
     appendLog('s1', `카테고리: ${Object.entries(msg.counts||{}).filter(([k,v])=>v>0).map(([k,v])=>`${k}:${v}`).join(' ')}`, 'ok');
     if (msg.review_count > 0) {
       appendLog('s1', `REVIEW ${msg.review_count}개 — Stage 2에서 확인`, 'warn');

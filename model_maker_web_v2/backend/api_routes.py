@@ -116,6 +116,8 @@ async def stage1_run(body: dict):
                 'level': 'ok',
                 'counts': result['counts'],
                 'review_count': result['review_count'],
+                'iv_scan': result['meta'].get('iv_scan', False),
+                'iv_data_points': result['meta'].get('iv_data_points', 0),
             })
         except Exception as e:
             await ws_manager.send_json(sid, {
