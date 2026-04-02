@@ -473,11 +473,11 @@ H01_DER_OVERLAP_FIELDS = {
 H01_HANDLER_COMPUTED_FIELDS = {
     'pv_voltage': 'average(MPPT_N_voltage for N if voltage > 100V)',
     'pv_current': '1순위: sum(STRING_N_current), 2순위: sum(MPPT_N_current)',
+    'pv_power': '1순위: PDF Total DC Power, 2순위: sum(MPPT_N_power)',
 }
 
 # H01 안 겹치는 필드 — PDF에서 매핑 필요
 H01_PDF_REQUIRED_FIELDS = [
-    'pv_power',             # Total DC power
     'cumulative_energy',    # Total power yields
     'mppt_N_voltage',       # MPPT별 전압
     'mppt_N_current',       # MPPT별 전류
