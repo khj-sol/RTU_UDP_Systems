@@ -298,33 +298,76 @@ async def websocket_endpoint(ws: WebSocket, session_id: str):
 
 
 def _update_review_verdicts(excel_path: str, verdicts: list):
-    """Stage 2 Excel REVIEW 시트에 사용자 판정 기록"""
+    """Stage 2 Excel REVIEW 시트에 사용자 판정 기록 + review_history 저장"""
     try:
         import openpyxl
         wb = openpyxl.load_workbook(excel_path)
-        if 'REVIEW' not in wb.sheetnames:
+
+        # V2: 2_REVIEW 또는 REVIEW 시트
+        review_sheet = '2_REVIEW' if '2_REVIEW' in wb.sheetnames else 'REVIEW'
+        if review_sheet not in wb.sheetnames:
             wb.close()
             return
 
-        ws = wb['REVIEW']
+        ws = wb[review_sheet]
         header = [str(c.value).strip() if c.value else '' for c in ws[1]]
 
-        # '사용자 판정' 컬럼 인덱스
+        # '선택' 또는 '판정' 컬럼 인덱스
         verdict_col = None
         for i, h in enumerate(header):
-            if '판정' in h:
+            if '판정' in h or '선택' in h:
                 verdict_col = i + 1
                 break
         if verdict_col is None:
             wb.close()
             return
 
+        # Definition 컬럼
+        def_col = None
+        addr_col = None
+        for i, h in enumerate(header):
+            if 'definition' in h.lower() or h == 'Definition':
+                def_col = i + 1
+            if 'address' in h.lower() or h == 'Address':
+                addr_col = i + 1
+
+        # 판정 기록 + review_history 수집
+        history_entries = []
         for v in verdicts:
-            row_idx = v.get('row', 0) + 2  # 1-indexed + header
+            row_idx = v.get('row', 0) + 4  # V2: 데이터는 row 4부터 (title + empty + header + data)
             verdict_val = v.get('verdict', '')
-            ws.cell(row=row_idx, column=verdict_col, value=verdict_val)
+            # ALT1/ALT2 → KEEP으로 매핑 (추천 채택)
+            write_val = verdict_val
+            if verdict_val in ('ALT1', 'ALT2'):
+                write_val = 'KEEP'  # 추천 채택 = 포함
+            ws.cell(row=row_idx, column=verdict_col, value=write_val)
+
+            # review_history에 저장할 데이터
+            defn = str(ws.cell(row=row_idx, column=def_col).value or '') if def_col else ''
+            addr = str(ws.cell(row=row_idx, column=addr_col).value or '') if addr_col else ''
+            if defn and verdict_val == 'DELETE':
+                history_entries.append({
+                    'definition': defn.upper().replace(' ', '_'),
+                    'address': addr,
+                    'verdict': 'DELETE',
+                })
 
         wb.save(excel_path)
         wb.close()
+
+        # review_history에 DELETE 항목 저장 (다음번 자동 제외)
+        if history_entries:
+            from .pipeline import load_review_history, save_review_history
+            history = load_review_history()
+            existing = {item.get('definition', '') for item in history.get('approved', [])}
+            added = 0
+            for entry in history_entries:
+                if entry['definition'] not in existing:
+                    history['approved'].append(entry)
+                    added += 1
+            if added:
+                history['stats']['total_reviewed'] = history['stats'].get('total_reviewed', 0) + added
+                save_review_history(history)
+
     except Exception:
         pass

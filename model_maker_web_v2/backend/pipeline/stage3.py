@@ -700,13 +700,16 @@ STRING_CURRENT_MONITOR = {has_string}
 
 # ─── 코드 검증 ───────────────────────────────────────────────────────────────
 
-def validate_code(code: str, mppt: int, total_strings: int) -> dict:
+def validate_code(code: str, mppt: int, total_strings: int,
+                   iv_scan: bool = True, der_avm: bool = True) -> dict:
     checks = {}
     checks['class_RegisterMap'] = 'class RegisterMap' in code
     checks['class_InverterMode'] = 'class InverterMode' in code
-    checks['class_IVScanCommand'] = 'class IVScanCommand' in code
-    checks['class_IVScanStatus'] = 'class IVScanStatus' in code
-    checks['class_DerActionMode'] = 'class DerActionMode' in code
+    if iv_scan:
+        checks['class_IVScanCommand'] = 'class IVScanCommand' in code
+        checks['class_IVScanStatus'] = 'class IVScanStatus' in code
+    if der_avm:
+        checks['class_DerActionMode'] = 'class DerActionMode' in code
     checks['class_DeviceType'] = 'class DeviceType' in code
     checks['class_ErrorCode1'] = 'class ErrorCode1' in code
     checks['InverterMode_to_string'] = 'def to_string' in code
@@ -915,7 +918,7 @@ def run_stage3(
 
     # ── 검증 ──
     log('코드 검증...')
-    validation = validate_code(code, mppt_count, total_strings)
+    validation = validate_code(code, mppt_count, total_strings, iv_scan, der_avm)
     passed = sum(1 for v in validation.values() if v)
     total = len(validation)
     log(f'  검증: {passed}/{total} 통과')
