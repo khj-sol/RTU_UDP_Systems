@@ -488,15 +488,14 @@ _HEX_VAL_RE = re.compile(r'^0x([0-9A-Fa-f]{2,4})$')
 _MODE_VAL_RE = re.compile(r'^(\d{1,2})\s*[:：]\s*(.+)')
 
 
-def scan_definition_tables(pages: list, excel_sheets: dict = None) -> dict:
+def scan_definition_tables(pages: list, excel_sheets: dict = None,
+                           registers: list = None) -> dict:
     """
     PDF/Excel에서 STATUS/ALARM 정의 테이블 탐색
-    Returns: {
-        'status_defs': [{'address': int, 'name': str, 'type': 'mode_table',
-                         'values': {0: 'Initial', 1: 'Standby', ...}, 'page': N}],
-        'alarm_defs': [{'address': int, 'name': str, 'type': 'bitfield'|'fault_codes',
-                        'values': {0: 'Grid Volt Low', 1: 'Grid Volt High', ...}, 'page': N}],
-    }
+    3가지 경로:
+    1. Appendix/본문 페이지에서 정의 테이블 탐색
+    2. Excel 시트(EKOS Fault MAP, 데이타형식)에서 탐색
+    3. 레지스터 comment에서 인라인 정의 추출
     """
     result = {'status_defs': [], 'alarm_defs': []}
 
@@ -504,8 +503,52 @@ def scan_definition_tables(pages: list, excel_sheets: dict = None) -> dict:
         _scan_pdf_definitions(pages, result)
     if excel_sheets:
         _scan_excel_definitions(excel_sheets, result)
+    if registers:
+        _scan_register_comments(registers, result)
 
     return result
+
+
+def _scan_register_comments(registers: list, result: dict):
+    """레지스터 이름/comment에서 인라인 정의 추출"""
+    for reg in registers:
+        comment = (getattr(reg, 'comment', '') or '').strip()
+        defn = (reg.definition or '').strip()
+        addr = reg.address if isinstance(reg.address, int) else 0
+        category = getattr(reg, 'category', '')
+
+        if category not in ('STATUS', 'ALARM') and not any(
+                k in defn.lower() for k in ['mode', 'status', 'state', 'error', 'alarm', 'fault']):
+            continue
+
+        combined = f'{defn} {comment}'.lower()
+
+        # 1) comment에 인라인 값 정의: "0:cWaitMode1:cNormalMode2:cFaultMode"
+        inline_vals = {}
+        for m in re.finditer(r'(\d+)\s*[:：]\s*([a-zA-Z가-힣]\w{2,})', comment):
+            inline_vals[int(m.group(1))] = m.group(2)
+        if len(inline_vals) >= 2:
+            def_type = _detect_definition_type(inline_vals)
+            if def_type:
+                target = 'status_defs' if def_type == 'mode_table' else 'alarm_defs'
+                result[target].append({
+                    'address': addr, 'name': f'{defn} (comment)',
+                    'type': def_type, 'values': inline_vals, 'page': -1,
+                })
+                continue
+
+        # 2) comment에 테이블 참조: "Table 3.1.4", "See Appendix 3", "Error Code Table 1"
+        has_table_ref = bool(re.search(r'Table\s+[\d.]+|Appendix\s+\d|Code\s+Table', comment, re.I))
+        if has_table_ref:
+            # 정의는 Appendix에서 이미 탐색했으므로, 레지스터에 참조 마크만
+            # 나중에 run_stage1에서 연결
+            pass
+
+        # 3) 레지스터 이름에 "Mode Table", "Error Code" 참조
+        if any(k in combined for k in ['mode table', 'error code table', 'fault code table',
+                                        'alarm code table']):
+            # 이미 Appendix 탐색에서 찾았을 가능성 — 주소 연결용
+            pass
 
 
 def _scan_pdf_definitions(pages: list, result: dict):
@@ -1170,15 +1213,27 @@ def _get_unit_scale(reg_unit: str, h01_field: str) -> tuple:
 
 
 def _make_pdf_match_row(h01_field: str, reg, miss_note: str = '') -> dict:
-    """PDF 매칭 행 생성 — scale은 PDF 원문 그대로, 단위 변환은 Note에만"""
+    """PDF 매칭 행 생성 — scale은 PDF 원문 그대로, 정의 테이블 포함"""
     if reg:
         _, unit_desc = _get_unit_scale(reg.unit, h01_field)
+        # 정의 요약 (value_definitions가 있으면)
+        val_defs = getattr(reg, 'value_definitions', None)
+        val_defs_str = ''
+        if val_defs and isinstance(val_defs, dict):
+            items = sorted(val_defs.items())[:6]
+            val_defs_str = ', '.join(f'{k}={v[:15]}' for k, v in items)
+            if len(val_defs) > 6:
+                val_defs_str += f'... (+{len(val_defs)-6})'
+        note = unit_desc
+        if val_defs_str:
+            note = f'{val_defs_str}' + (f' | {unit_desc}' if unit_desc else '')
         return {
             'field': h01_field, 'source': 'PDF', 'status': 'O',
             'address': reg.address_hex, 'definition': reg.definition,
             'type': reg.data_type, 'unit': reg.unit or '',
-            'scale': reg.scale or '',  # PDF 원문 스케일 그대로
-            'note': unit_desc,  # 단위 변환 참고만
+            'scale': reg.scale or '',
+            'note': note,
+            'value_definitions': val_defs,
         }
     else:
         return {
@@ -1460,6 +1515,27 @@ def run_stage1(
         if cnt > 0:
             log(f'  {cat:15s}: {cnt}개')
     log(f'  제외: {len(excluded)}개')
+
+    # ── 정의 테이블 탐색 (Definition-Based) ──
+    all_regs_for_scan = []
+    for cat_regs in categorized.values():
+        if isinstance(cat_regs, list):
+            all_regs_for_scan.extend(cat_regs)
+    if ext == '.pdf':
+        def_tables = scan_definition_tables(pages, registers=all_regs_for_scan)
+    elif ext in ('.xlsx', '.xls'):
+        raw_sheets = extract_excel_sheets(input_path)
+        def_tables = scan_definition_tables(None, raw_sheets, all_regs_for_scan)
+    else:
+        def_tables = {'status_defs': [], 'alarm_defs': []}
+
+    # 정의를 레지스터에 연결
+    _link_definitions_to_registers(categorized, def_tables)
+
+    st_defs = len(def_tables['status_defs'])
+    al_defs = len(def_tables['alarm_defs'])
+    if st_defs or al_defs:
+        log(f'정의 테이블: STATUS {st_defs}개, ALARM {al_defs}개')
 
     h01_match_table = build_h01_match_table(categorized, meta)
     h01_matched = sum(1 for r in h01_match_table if r['status'] == 'O')
@@ -1759,6 +1835,57 @@ def run_stage1(
         'der_match': {'matched': der_matched, 'total': der_total},
         'iv_info': iv_info,
     }
+
+
+def _link_definitions_to_registers(categorized: dict, def_tables: dict):
+    """정의 테이블을 STATUS/ALARM 레지스터에 연결"""
+    # STATUS 레지스터에 정의 연결
+    for reg in categorized.get('STATUS', []):
+        addr = reg.address if isinstance(reg.address, int) else 0
+        defn_lower = reg.definition.lower().replace('_', ' ')
+        comment_lower = (reg.comment or '').lower()
+
+        for d in def_tables['status_defs']:
+            # 1) 주소 매칭
+            if d.get('address') and d['address'] == addr:
+                reg.value_definitions = d['values']
+                break
+            # 2) 이름 매칭: comment에 인라인 정의가 있는 경우
+            if d.get('address') == addr and addr > 0:
+                reg.value_definitions = d['values']
+                break
+            # 3) 키워드 매칭: mode/status 레지스터 + 정의 타입 일치
+            if d['type'] == 'mode_table' and not d.get('address'):
+                if any(k in defn_lower for k in ['inverter mode', 'work mode', 'work state',
+                                                   'operating mode', 'running status',
+                                                   '시스템동작상태', 'device status']):
+                    if not getattr(reg, 'value_definitions', None):
+                        reg.value_definitions = d['values']
+
+    # ALARM 레지스터에 정의 연결
+    for reg in categorized.get('ALARM', []):
+        addr = reg.address if isinstance(reg.address, int) else 0
+        defn_lower = reg.definition.lower().replace('_', ' ')
+        comment_lower = (reg.comment or '').lower()
+
+        for d in def_tables['alarm_defs']:
+            # 1) 주소 매칭
+            if d.get('address') and d['address'] == addr:
+                reg.value_definitions = d['values']
+                break
+            # 2) 이름 키워드 매칭 (Error Code 1 → Error Code Table1)
+            if not d.get('address'):
+                d_name_lower = d['name'].lower()
+                # "Error Code Table1" ↔ "Error Code1"
+                if ('error code' in defn_lower and 'error code' in d_name_lower) or \
+                   ('alarm code' in defn_lower and 'alarm' in d_name_lower) or \
+                   ('dsp alarm' in defn_lower and 'dsp alarm' in d_name_lower) or \
+                   ('dsp error' in defn_lower and 'dsp error' in d_name_lower) or \
+                   ('arm alarm' in defn_lower and 'arm alarm' in d_name_lower) or \
+                   ('fault status' in defn_lower and 'fault' in d_name_lower) or \
+                   ('error message' in defn_lower and 'error' in d_name_lower):
+                    if not getattr(reg, 'value_definitions', None):
+                        reg.value_definitions = d['values']
 
 
 def _build_der_match_table(categorized: dict) -> List[dict]:
