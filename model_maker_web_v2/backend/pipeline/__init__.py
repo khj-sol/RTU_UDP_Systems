@@ -353,6 +353,11 @@ def detect_channel_number(definition: str) -> Optional[tuple]:
     if m:
         return ('MPPT', int(m.group(1)))
 
+    # ABB: "Input 1 Voltage", "Input 2 Current" → MPPT
+    m = re.search(r'\bInput\s+(\d+)\s+(Voltage|Current|Power)', definition, re.I)
+    if m:
+        return ('MPPT', int(m.group(1)))
+
     for pat, prefix in [(MPPT_VOLTAGE_RE, 'MPPT'), (MPPT_CURRENT_RE, 'MPPT'),
                          (MPPT_POWER_RE, 'MPPT'), (PV_VOLTAGE_RE, 'MPPT'),
                          (PV_CURRENT_RE, 'MPPT'),
