@@ -440,6 +440,7 @@ def extract_registers_from_tables(tables: List[List[list]]) -> List[RegisterRow]
     """모든 테이블에서 레지스터 행 추출"""
     registers = []
     seen_addrs = set()
+    prev_col_map = {}  # 이전 테이블에서 감지한 col_map 유지
     for table in tables:
         if not table or len(table) < 1:
             continue
@@ -451,9 +452,14 @@ def extract_registers_from_tables(tables: List[List[list]]) -> List[RegisterRow]
         if first_has_addr:
             data_rows = table
             col_map = _detect_table_columns([], data_rows)
+            # 헤더 없는 테이블 — 이전 col_map이 더 풍부하면 사용
+            if prev_col_map and len(col_map) < len(prev_col_map):
+                col_map = dict(prev_col_map)
         else:
             data_rows = table[1:]
             col_map = _detect_table_columns(table[0], data_rows)
+            if col_map:
+                prev_col_map = dict(col_map)
         for row in data_rows:
             reg = _parse_register_row(row, col_map)
             if reg and reg.address not in seen_addrs:
