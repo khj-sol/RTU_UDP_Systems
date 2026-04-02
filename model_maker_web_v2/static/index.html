@@ -409,9 +409,14 @@
     const total = document.querySelectorAll('[class="review-row"]').length;
     const checked = document.querySelectorAll('.review-radio:checked').length;
     if (checked >= total) {
-      // 모든 판정 완료 → Stage 3 활성화
+      // 모든 판정 완료 → Stage 3 활성화 + REVIEW 미결 표시 제거
       document.getElementById('card-s3').className = 'stage-card active';
       document.getElementById('btn-s3').disabled = false;
+      const sumEl = document.getElementById('s3-summary');
+      if (sumEl) {
+        sumEl.innerHTML = sumEl.innerHTML.replace(/<br>.*REVIEW.*미결<\/span>/, '')
+                                         .replace(/REVIEW.*미결/, '');
+      }
       appendLog('s2', `REVIEW ${total}개 판정 완료`, 'ok');
 
       // 판정 결과를 WebSocket으로 전송
