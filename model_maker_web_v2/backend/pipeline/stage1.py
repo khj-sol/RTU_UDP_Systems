@@ -437,7 +437,8 @@ def assign_h01_field(reg: RegisterRow, synonym_db: dict,
     if category == 'INFO':
         # INFO에서 H01과 겹치는 필드만 매핑
         if any(k in defn_lower for k in ['total energy', 'cumulative energy', 'total power yields',
-                                          '누적발전량', '누적 발전량']):
+                                          '누적발전량', '누적 발전량', '적산전력량',
+                                          'total generation energy']):
             return 'cumulative_energy'
         if any(k in defn_lower for k in ['daily energy', 'today energy', 'daily power yields',
                                           '일발전량', '일 발전량', '금일발전량']):
@@ -475,9 +476,10 @@ def assign_h01_field(reg: RegisterRow, synonym_db: dict,
     if any(k in defn_lower for k in ['total energy', 'cumulative energy', 'total power yields',
                                       'lifetime energy', 'accumulated energy', 'total generation',
                                       'total power generation', 'total powergeneration',
-                                      '누적발전량', '누적 발전량']) or \
+                                      '누적발전량', '누적 발전량', '적산전력량',
+                                      'total generation energy']) or \
        any(k in defn_nospace for k in ['accumulatedpower', 'accumulatedenergy',
-                                        'totalpowergeneration']):
+                                        'totalpowergeneration', 'totalgenerationenergy']):
         return 'cumulative_energy'
     if any(k in defn_lower for k in ['daily energy', 'today energy', 'daily power yields',
                                       'daily generation', '일발전량', '일 발전량',

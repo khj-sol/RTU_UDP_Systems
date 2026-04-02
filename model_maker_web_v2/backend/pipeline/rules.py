@@ -100,13 +100,17 @@ def _alarm_score(reg: RegisterRow) -> int:
     defn_lower = reg.definition.lower()
     # 1순위(0): 명확한 에러/폴트 코드 레지스터
     if any(k in defn_lower for k in ['error_code', 'error code', 'fault code',
-                                      'fault/alarm code', 'alarm code']):
+                                      'fault/alarm code', 'alarm code',
+                                      'sw fault', 'dsp error', 'dsp alarm']):
         return 0
-    # 2순위(1): PID 알람
+    # 2순위(1): HW Fault / PID 알람
+    if any(k in defn_lower for k in ['hw fault', 'hardware fault']):
+        return 1
     if 'pid' in defn_lower and 'alarm' in defn_lower:
         return 1
-    # 3순위(2): 통신 폴트
-    if any(k in defn_lower for k in ['communicate fault', 'comm fault', 'communication']):
+    # 3순위(2): Grid Status / 통신 폴트
+    if any(k in defn_lower for k in ['grid status', 'grid fault',
+                                      'communicate fault', 'comm fault', 'communication']):
         return 2
     # 4순위(3): 일반 알람/폴트/워닝 키워드
     if any(k in defn_lower for k in ['alarm', 'fault', 'error', 'warning', 'protection']):
@@ -423,7 +427,10 @@ def classify_register_with_rules(
             return ('EXCLUDE', '')
         return (cat, '')
 
-    # 4) §2-2: STATUS 키워드
+    # 4) §2-2: STATUS 키워드 (단, Fault/Alarm/Grid Status는 ALARM 우선)
+    if any(k in defn_lower for k in ['fault status', 'alarm status', 'fault state',
+                                      'grid status']):
+        return ('ALARM', '')
     if any(k in defn_lower for k in ['status', 'state', 'mode', 'running',
                                       '상태', '운전', '동작']):
         # §7: 동일 물리량 중복 체크
