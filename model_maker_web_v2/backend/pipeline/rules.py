@@ -214,44 +214,54 @@ INFO_KNOWN_NAMES = {
     'MODEL': [
         'model', 'device model', 'device model name', 'device type',
         'device type code', 'type code', 'model id', 'model code',
-        'model name', 'machine model', 'inverter model', '모델', '모델명',
+        'model name', 'machine model', 'inverter model',
+        '모델', '모델명', '기기모델', '장비모델', '인버터모델', '제품모델',
     ],
     'SERIAL_NUMBER': [
         'sn', 'serial number', 'device serial number', 'device sn',
-        'inverter sn', '시리얼', '제품번호', 'serialnumber', '시리얼번호',
+        'inverter sn', 'serialnumber',
+        '시리얼', '시리얼번호', '제품번호', '일련번호', '기기번호', '장비번호',
     ],
     'PRODUCT_CODE': [
         'pn', 'product code', 'product number',
+        '제품코드', '품목코드',
     ],
     'FIRMWARE': [
         'firmware version', 'firmware', 'master firmware version',
         'slave firmware version', 'software version', 'protocol version',
         'ems firmware version', 'lcd firmware version',
         'firmware version of arm', 'dsp version', 'communication version',
-        '펌웨어', '인버터 버전',
+        '펌웨어', '인버터 버전', '펌웨어 버전', '소프트웨어 버전',
+        '마스터 펌웨어', '슬레이브 펌웨어', '통신 버전', '프로토콜 버전',
     ],
     'MPPT_COUNT': [
         'mppt number', 'number of mppts', 'mppt count', 'number of mppt',
-        'mppt tracker', 'mppt수',
+        'mppt tracker', 'mppt수', 'mppt 수', 'mppt 개수',
     ],
     'PV_STRING_COUNT': [
         'number of pv strings', 'pv string count', 'string count',
+        '스트링 수', '스트링수', 'pv 스트링',
     ],
     'RATED_POWER': [
         'nominal active power', 'rated power', 'nominal power',
         'maximum active power', 'max active power',
         'maximum apparent power', 'max apparent power',
-        'rated active power', '정격출력', '인버터 용량',
+        'rated active power',
+        '정격출력', '인버터 용량', '정격용량', '정격전력', '최대출력',
+        '공칭출력', '공칭전력', '피상전력정격',
     ],
     'RATED_VOLTAGE': [
-        'nominal voltage', 'rated voltage', '정격전압',
+        'nominal voltage', 'rated voltage',
+        '정격전압', '공칭전압',
     ],
     'RATED_FREQUENCY': [
-        'nominal frequency', 'rated frequency', '정격주파수',
+        'nominal frequency', 'rated frequency',
+        '정격주파수', '공칭주파수',
     ],
     'PHASE': [
         'grid phase number', 'phase number', 'output type', 'phase count',
-        'phase type', '상수',
+        'phase type',
+        '상수', '위상수', '출력타입', '출력유형',
     ],
 }
 
