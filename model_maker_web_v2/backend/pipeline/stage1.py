@@ -1650,11 +1650,17 @@ def run_stage1(
     for i, reg in enumerate(registers):
         name = to_upper_snake(reg.definition)
         # 이름+단위 조합으로 중복 체크 (같은 이름이라도 단위 다르면 유지)
+        # SunSpec: 같은 이름(DCA/DCV/DCW)이 MPPT별 반복 → 주소 다르면 유지
         name_key = f'{name}_{reg.unit}' if reg.unit else name
         if name_key in seen_names:
-            registers[i] = None
-        else:
-            seen_names[name_key] = i
+            # 주소가 다르면 별도 레지스터로 유지
+            prev_addr = registers[seen_names[name_key]].address if registers[seen_names[name_key]] else 0
+            if reg.address != prev_addr:
+                name_key = f'{name}_{reg.address}'  # 주소 포함 키로 변경
+            else:
+                registers[i] = None
+                continue
+        seen_names[name_key] = i
     registers = [r for r in registers if r is not None]
     log(f'  중복 제거 후: {len(registers)}개')
 
@@ -1806,9 +1812,16 @@ def run_stage1(
             log(f'  Model 레지스터 없음 → PDF에서 추출: {pdf_model}')
 
     # ── SunSpec: 표준 정의 데이터 적용 (SolarEdge, Fronius 등) ──
-    from .sunspec import is_sunspec_pdf, apply_sunspec_definitions
+    from .sunspec import is_sunspec_pdf, apply_sunspec_definitions, detect_sunspec_mppt
     if is_sunspec_pdf(registers, manufacturer):
         apply_sunspec_definitions(categorized, log)
+        # SunSpec MPPT 블록으로 max_mppt 업데이트
+        sunspec_mppt = detect_sunspec_mppt(registers)
+        log(f'  SunSpec MPPT 블록: {sunspec_mppt["mppt_count"]}개, 현재 max_mppt={max_mppt}')
+        if sunspec_mppt['mppt_count'] > max_mppt:
+            max_mppt = sunspec_mppt['mppt_count']
+            meta['max_mppt'] = max_mppt
+            log(f'  SunSpec MPPT → max_mppt={max_mppt}로 업데이트')
         log(f'  SunSpec 표준 인버터 감지 → 정의 데이터 자동 적용')
 
     counts = {cat: len(regs) for cat, regs in categorized.items()}
