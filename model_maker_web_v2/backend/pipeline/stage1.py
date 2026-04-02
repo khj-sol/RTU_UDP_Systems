@@ -480,12 +480,27 @@ def assign_h01_field(reg: RegisterRow, synonym_db: dict,
     category = getattr(reg, 'category', '')
 
     # V2: INFO/ALARM 카테고리는 H01 모니터링 필드가 아님 — 특정 키워드만 매칭
+    comment_lower = (getattr(reg, 'comment', '') or '').lower()
+
     if category == 'INFO':
         # INFO에서 H01과 겹치는 필드만 매핑
+        # cumulative_energy LOW (소수부/Wh): decimal, low byte — comment도 체크
+        if any(k in defn_lower for k in ['decimals of total energy', 'decimal of total',
+                                          'low byte of total feed', 'low byte oftotal feed']) or \
+           any(k in comment_lower for k in ['decimals of total', 'decimal of total']):
+            return 'cumulative_energy_low'
+        # cumulative_energy HIGH (정수부)
         if any(k in defn_lower for k in ['total energy', 'cumulative energy', 'total power yields',
                                           'total energy yield', 'energy yield',
-                                          '누적발전량', '누적 발전량', '적산전력량',
-                                          'total generation energy']):
+                                          '누적발전량', '누적 발전량',
+                                          'total generation energy',
+                                          'high byte of total feed', 'high byte oftotal feed']):
+            return 'cumulative_energy'
+        # 적산전력량 MWh/Wh 쌍 (EKOS)
+        if '적산전력량' in defn_lower:
+            unit = getattr(reg, 'unit', '').upper()
+            if unit in ('WH', 'wh', 'Wh'):
+                return 'cumulative_energy_low'
             return 'cumulative_energy'
         if any(k in defn_lower for k in ['daily energy', 'today energy', 'daily power yields',
                                           '일발전량', '일 발전량', '금일발전량']):
@@ -520,14 +535,25 @@ def assign_h01_field(reg: RegisterRow, synonym_db: dict,
                                       '태양전지 전력', '태양전지전력']):
         return 'pv_power'
     defn_nospace = defn_lower.replace(' ', '')
-    # 'total generation'만으로는 안 됨 — 'total generation time'과 충돌
-    # 'energy', 'yield', 'power' 키워드 필수
+    # cumulative_energy LOW (소수부/Wh/Low Byte) — comment도 체크
+    if any(k in defn_lower for k in ['decimals of total energy', 'decimal of total',
+                                      'low byte of total feed', 'low byte oftotal feed']) or \
+       any(k in comment_lower for k in ['decimals of total', 'decimal of total']):
+        return 'cumulative_energy_low'
+    # 적산전력량 Wh (EKOS LOW)
+    if '적산전력량' in defn_lower:
+        unit = getattr(reg, 'unit', '').upper()
+        if unit in ('WH',):
+            return 'cumulative_energy_low'
+        return 'cumulative_energy'
+    # cumulative_energy HIGH (정수부)
     if any(k in defn_lower for k in ['total energy', 'cumulative energy', 'total power yields',
                                       'lifetime energy', 'accumulated energy',
                                       'total power generation', 'total powergeneration',
                                       'total energy yield', 'energy yield',
-                                      '누적발전량', '누적 발전량', '적산전력량',
-                                      'total generation energy']) or \
+                                      '누적발전량', '누적 발전량',
+                                      'total generation energy',
+                                      'high byte of total feed', 'high byte oftotal feed']) or \
        any(k in defn_nospace for k in ['accumulatedpower', 'accumulatedenergy',
                                         'totalpowergeneration', 'totalgenerationenergy',
                                         'totalenergyyield']):
@@ -754,6 +780,18 @@ def build_h01_match_table(categorized: dict, meta: dict) -> List[dict]:
         energy_reg = _find_matched_reg(categorized, 'total_energy')
     rows.append(_make_pdf_match_row('cumulative_energy', energy_reg, 'Total Energy 미발견'))
 
+    # cumulative_energy_low (소수부/Wh/Low Byte) — 있으면 매핑, 없으면 N/A
+    energy_low_reg = _find_matched_reg(categorized, 'cumulative_energy_low')
+    if energy_low_reg:
+        rows.append(_make_pdf_match_row('cumulative_energy_low', energy_low_reg))
+    else:
+        rows.append({
+            'field': 'cumulative_energy_low', 'source': 'PDF',
+            'status': '-', 'address': '-', 'definition': '-',
+            'type': '', 'unit': '', 'scale': '',
+            'note': '소수부 레지스터 없음 (단일 레지스터)',
+        })
+
     status_reg = _find_matched_reg(categorized, 'inverter_status', cat='STATUS')
     if not status_reg and categorized.get('STATUS'):
         status_reg = categorized['STATUS'][0]
@@ -975,10 +1013,12 @@ def run_stage1(
     seen_names = {}
     for i, reg in enumerate(registers):
         name = to_upper_snake(reg.definition)
-        if name in seen_names:
+        # 이름+단위 조합으로 중복 체크 (같은 이름이라도 단위 다르면 유지)
+        name_key = f'{name}_{reg.unit}' if reg.unit else name
+        if name_key in seen_names:
             registers[i] = None
         else:
-            seen_names[name] = i
+            seen_names[name_key] = i
     registers = [r for r in registers if r is not None]
     log(f'  중복 제거 후: {len(registers)}개')
 
