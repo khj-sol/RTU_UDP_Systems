@@ -510,6 +510,15 @@ def assign_h01_field(reg: RegisterRow, synonym_db: dict,
             return 'temperature'
         return ''  # 나머지 INFO는 h01_field 없음
 
+    # V2: STATUS 카테고리 — inverter_status 매핑
+    if category == 'STATUS':
+        if any(k in defn_lower for k in ['inverter mode', 'work mode', 'work state',
+                                          'operating mode', 'running status', 'run mode',
+                                          '인버터 모드', '시스템동작상태', '동작상태',
+                                          'device status', 'system status']):
+            return 'inverter_status'
+        return ''
+
     # 0) 채널 번호가 있으면 최우선
     ch = detect_channel_number(reg.definition)
     if ch:
@@ -794,8 +803,28 @@ def build_h01_match_table(categorized: dict, meta: dict) -> List[dict]:
 
     status_reg = _find_matched_reg(categorized, 'inverter_status', cat='STATUS')
     if not status_reg and categorized.get('STATUS'):
-        status_reg = categorized['STATUS'][0]
+        # h01_field가 없는 STATUS 레지스터 중 Work Mode/Inverter Mode 키워드 검색
+        for sr in categorized['STATUS']:
+            dl = sr.definition.lower().replace('_', ' ')
+            if any(k in dl for k in ['inverter mode', 'work mode', 'work state',
+                                      'operating mode', 'running status',
+                                      '시스템동작상태', '동작상태']):
+                status_reg = sr
+                break
+    # 상태 정의(값 테이블) 검증
+    status_note = ''
+    if status_reg:
+        comment = (status_reg.comment or '').lower()
+        defn = status_reg.definition.lower()
+        has_mode_def = any(k in comment + defn for k in ['mode table', 'standby', 'on-grid',
+                                                          'fault', 'normal', 'waiting', 'stop',
+                                                          'cwaitmode', 'cnormalmode',
+                                                          'f007', '동작상태'])
+        if not has_mode_def:
+            status_note = '상태 정의 테이블 미확인 — 매핑 검증 필요'
     rows.append(_make_pdf_match_row('status', status_reg, 'Work State 미발견'))
+    if status_note and rows[-1]['status'] == 'O':
+        rows[-1]['note'] = status_note
 
     alarm_regs = categorized.get('ALARM', [])
     alarm_dist = distribute_alarms(alarm_regs)
