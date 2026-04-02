@@ -2081,6 +2081,20 @@ def run_stage1(
     _apply_saved_definitions(categorized, manufacturer, log)
 
     h01_match_table = build_h01_match_table(categorized, meta)
+
+    # ── X 필드 후보 제안 ──
+    x_fields = [row for row in h01_match_table if row['status'] == 'X']
+    suggestions = {}
+    if x_fields:
+        all_regs_flat = []
+        for cat_regs in categorized.values():
+            all_regs_flat.extend(cat_regs)
+        for x_row in x_fields:
+            candidates = _suggest_candidates(x_row['field'], all_regs_flat, categorized)
+            if candidates:
+                suggestions[x_row['field']] = candidates
+                log(f'  X [{x_row["field"]}] 후보 {len(candidates)}개 제안')
+
     h01_matched = sum(1 for r in h01_match_table if r['status'] == 'O')
     h01_total = sum(1 for r in h01_match_table if r['status'] != '-')
     log(f'H01 매칭: {h01_matched}/{h01_total}')
@@ -2378,7 +2392,175 @@ def run_stage1(
         'h01_match': {'matched': h01_matched, 'total': h01_total, 'table': h01_match_table},
         'der_match': {'matched': der_matched, 'total': der_total},
         'iv_info': iv_info,
+        'suggestions': suggestions,
     }
+
+
+def _suggest_candidates(x_field: str, all_regs: list, categorized: dict) -> list:
+    """
+    X 필드에 대한 후보 레지스터 제안
+    Returns: [{'addr': hex, 'definition': str, 'score': int, 'reason': str, 'source': str}, ...]
+    """
+    candidates = []
+
+    # 필드별 검색 키워드 + 단위 + 타입 힌트
+    _FIELD_HINTS = {
+        'pv_power': {
+            'keywords': ['dc power', 'pv power', 'input power', 'total power', 'pac',
+                         'output power', 'active power', 'i dc power'],
+            'unit': 'W', 'type_pref': ['S32', 'U32', 'S16', 'U16'],
+            'handler': 'sum(MPPT_N_power) — MPPT power 합산으로 handler 계산',
+        },
+        'cumulative_energy': {
+            'keywords': ['total energy', 'cumulative', 'lifetime energy', 'eac total',
+                         'einv all', 'energy total', 'energy since', 'energy yield',
+                         'total power yields', 'total poweryields', 'ac energy',
+                         'generate energy', 'generated energy', 'accumulated',
+                         'production total', 'total production'],
+            'unit_keywords': ['kwh', 'wh', 'mwh'],
+            'unit': 'Wh', 'alt_units': ['kWh', 'MWh', 'KWH', '0.1kWH'],
+            'type_pref': ['U32', 'S32'],
+        },
+        'status': {
+            'keywords': ['inverter mode', 'work mode', 'work state', 'operating mode',
+                         'operation state', 'operating status', 'running status',
+                         'device status', 'inverter status', 'system status',
+                         'inverter state', 'working mode', 'run state', 'operational'],
+            'exact': ['state', 'running', 'mode', 'status'],
+            'type_pref': ['U16'],
+        },
+        'alarm1': {
+            'keywords': ['fault code', 'error code', 'alarm code', 'faultcode',
+                         'warningcode', 'warning code', 'fault status',
+                         'fault register', 'alarm register', 'error register',
+                         'fault', 'alarm', 'error', 'warning'],
+            'type_pref': ['U16', 'U32'],
+        },
+    }
+
+    # MPPT/String X → 기본 후보 없음 (패턴 감지 문제)
+    if 'mppt' in x_field or 'string' in x_field:
+        # MPPT/String 번호 추출
+        m = re.search(r'(\d+)', x_field)
+        n = int(m.group(1)) if m else 0
+        is_voltage = 'voltage' in x_field
+        is_current = 'current' in x_field
+
+        for reg in all_regs:
+            dl = reg.definition.lower()
+            score = 0
+            reason = ''
+
+            if is_voltage:
+                if any(k in dl for k in ['volt', 'vpv', 'v pv', 'dc volt']):
+                    if str(n) in dl or f'pv{n}' in dl or f'input {n}' in dl:
+                        score = 80
+                        reason = f'PV{n} voltage 후보'
+            elif is_current:
+                if any(k in dl for k in ['curr', 'ipv', 'i pv', 'dc curr']):
+                    if str(n) in dl or f'pv{n}' in dl or f'input {n}' in dl:
+                        score = 80
+                        reason = f'PV{n} current 후보'
+
+            if score > 0:
+                candidates.append({
+                    'addr': reg.address_hex,
+                    'definition': reg.definition[:50],
+                    'unit': reg.unit or '',
+                    'score': score,
+                    'reason': reason,
+                    'source': 'PDF',
+                })
+
+        # handler 계산 후보 (current = power/voltage)
+        if is_current:
+            candidates.append({
+                'addr': '-',
+                'definition': f'mppt{n}_power / mppt{n}_voltage',
+                'unit': 'A',
+                'score': 60,
+                'reason': 'handler 계산 (P/V=I)',
+                'source': 'HANDLER',
+            })
+        return sorted(candidates, key=lambda c: -c['score'])[:5]
+
+    # 일반 필드 (pv_power, cumulative_energy, status, alarm1)
+    base_field = x_field.replace('1', '').replace('2', '').replace('3', '')
+    hints = _FIELD_HINTS.get(base_field, _FIELD_HINTS.get(x_field, {}))
+    if not hints:
+        return []
+
+    keywords = hints.get('keywords', [])
+    exact_matches = hints.get('exact', [])
+    expected_unit = hints.get('unit', '')
+    alt_units = hints.get('alt_units', [])
+
+    for reg in all_regs:
+        dl = reg.definition.lower().replace('_', ' ')
+        dl_nospace = dl.replace(' ', '')
+        score = 0
+        reason = ''
+
+        # 키워드 매칭
+        for kw in keywords:
+            if kw in dl or kw.replace(' ', '') in dl_nospace:
+                score = max(score, 70)
+                reason = f'키워드 "{kw}" 매칭'
+                break
+
+        # 정확한 이름 매칭
+        for ex in exact_matches:
+            if dl.strip() == ex:
+                score = max(score, 60)
+                reason = f'정확한 이름 "{ex}"'
+                break
+
+        # 단위 기반 후보 (cumulative_energy: kWh 단위면 후보)
+        ru = (reg.unit or '').strip()
+        unit_keywords = hints.get('unit_keywords', [])
+        if unit_keywords and ru and ru.lower() in unit_keywords and score == 0:
+            if 'energy' in dl or 'total' in dl or 'accum' in dl or 'yield' in dl:
+                score = 55
+                reason = f'단위 {ru} + 이름 조합'
+
+        # 단위 보너스
+        if expected_unit and ru:
+            if ru == expected_unit or ru in alt_units:
+                score += 15
+                reason += f' +단위({ru})'
+
+        # 타입 보너스
+        dt = (reg.data_type or '').upper()
+        if dt in hints.get('type_pref', []):
+            score += 5
+
+        # 이미 h01_field 할당된 레지스터는 감점
+        if getattr(reg, 'h01_field', ''):
+            score -= 30
+
+        if score >= 40:
+            candidates.append({
+                'addr': reg.address_hex,
+                'definition': reg.definition[:50],
+                'unit': ru,
+                'score': min(score, 100),
+                'reason': reason,
+                'source': 'PDF',
+            })
+
+    # handler 후보 (pv_power)
+    if 'handler' in hints:
+        candidates.append({
+            'addr': '-',
+            'definition': hints['handler'],
+            'unit': expected_unit,
+            'score': 50,
+            'reason': 'handler 계산',
+            'source': 'HANDLER',
+        })
+
+    # 점수순 정렬, 상위 5개
+    return sorted(candidates, key=lambda c: -c['score'])[:5]
 
 
 def _link_definitions_to_registers(categorized: dict, def_tables: dict):
