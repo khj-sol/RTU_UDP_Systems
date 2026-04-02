@@ -269,6 +269,19 @@ EXCLUDE_KEYWORDS = [
     'power on command', 'shut down command',
     # V2: Q(P)/Q(U) 커브, 모델명 테이블
     'q(p)', 'q(u)', 'q(v)', 'qu curve', 'qp curve',
+    'uin', 'uout', 'u1 limit', 'u2 limit', 'ulimit',
+    'hysteresis', 'curve(italy)', 'v1i(', 'v2i(', 'v1s(', 'v2s',
+    'qmax(', 'pin(italy)', 'pout(italy)',
+    'enablemode', 'lower q/sn', 'upper q/sn',
+    # V2: 시스템 클럭/예약
+    'system clock', 'reserved',
+    # V2: PID 관련 설정
+    'anti-pid', 'pid suppression', 'pid impedance', 'pid function',
+    # V2: 국가코드/지역코드 값
+    'great britain', 'us-ne', 'us-sa', 'us-',
+    # V2: 기타 설정값/커브
+    'upper u limit', 'lower u limit',
+    'key stop', 'dispatch run', 'derating run',
 ]
 
 # 보호 파라미터 주소 범위 (§6: 0x5000~ 보호설정 블록)

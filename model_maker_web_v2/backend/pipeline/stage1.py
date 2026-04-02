@@ -278,6 +278,61 @@ def _clean_table(table: List[list]) -> List[list]:
     return [[_clean_cell(c) for c in row] for row in table]
 
 
+# V2: 유효하지 않은 레지스터 이름 필터
+_JUNK_NAME_RE = re.compile(r'^\d{1,5}$')  # 숫자만 (105, 220 등)
+_MODEL_NAME_RE = re.compile(
+    r'^SG\d+|^SH\d+|^SC\d+|^KSG|^SUN\d+|^HU?N?\d+|^GW\d+|'  # Sungrow/Huawei/Goodwe 모델명
+    r'^[A-Z]{2,5}\d{2,}[A-Z]*[-_]',  # 일반 모델명 패턴 (SG60KTL-M 등)
+    re.I
+)
+_COUNTRY_NAME_RE = re.compile(
+    r'^(?:Mexico|Brazil|Germany|France|Italy|Spain|Australia|India|China|Japan|Korea|'
+    r'Thailand|Vietnam|Philippines|South Africa|UK|USA|Canada|Turkey|Holland|'
+    r'Belgium|Austria|Denmark|Sweden|Norway|Finland|Poland|Czech|Hungary|Romania|'
+    r'Portugal|Greece|Israel|Chile|Colombia|Peru|Argentina|Egypt|Jordan|Saudi|'
+    r'UAE|Kuwait|Taiwan|Malaysia|Indonesia|Singapore|New Zealand)',
+    re.I
+)
+
+
+def _is_valid_register_name(name: str) -> bool:
+    """V2: 유효한 레지스터 이름인지 판단"""
+    stripped = name.strip()
+    if not stripped or len(stripped) < 2:
+        return False
+    # 숫자만 (PDF 값이 이름으로 추출됨)
+    if _JUNK_NAME_RE.match(stripped):
+        return False
+    # 인버터 모델명 테이블 (SG60KTL, SG50KTL-M 등)
+    if _MODEL_NAME_RE.match(stripped):
+        return False
+    # 국가명/국가코드 테이블
+    if _COUNTRY_NAME_RE.match(stripped):
+        return False
+    # 숫자 + 짧은 단위만 (예: "220V", "50Hz" — 설정값)
+    if re.match(r'^\d+\.?\d*\s*[A-Za-z%°]{0,3}$', stripped):
+        return False
+    # V2: 무의미한 이름 (Reserved, U16 등 — 데이터 타입이 이름으로 추출된 경우)
+    stripped_lower = stripped.lower()
+    if stripped_lower in ('reserved', 'u16', 'u32', 's16', 's32', 'n/a', 'none', '-', '--'):
+        return False
+    # V2: Q(P)/Q(U) 커브 파라미터 (QP P1_, QU V1_, Q U1_, Curve 등)
+    if re.match(r'^Q[PU ]\s*[A-Z]\d', stripped, re.I):
+        return False
+    if re.match(r'^LP\s+P\d', stripped, re.I):  # LP P34KSG_ 등
+        return False
+    # V2: 상태값 테이블 엔트리 (Initial standby, Starting, Stop, Derating run 등)
+    if stripped_lower in ('initial standby', 'standby', 'starting', 'stop',
+                           'derating run', 'dispatch run', 'key stop',
+                           'curve', 'device abnormal'):
+        return False
+    # V2: 너무 짧은 이름 (3자 이하인데 키워드가 아닌 것)
+    if len(stripped) <= 3 and not any(k in stripped_lower for k in
+            ['sn', 'pf', 'pv', 'dc', 'ac', 'bus', 'ia', 'ib', 'ic', 'ua', 'ub', 'uc']):
+        return False
+    return True
+
+
 def extract_registers_from_tables(tables: List[List[list]]) -> List[RegisterRow]:
     """모든 테이블에서 레지스터 행 추출"""
     registers = []
@@ -299,6 +354,9 @@ def extract_registers_from_tables(tables: List[List[list]]) -> List[RegisterRow]
         for row in data_rows:
             reg = _parse_register_row(row, col_map)
             if reg and reg.address not in seen_addrs:
+                # V2: 유효하지 않은 이름 필터 (모델명 테이블, 숫자값 등)
+                if not _is_valid_register_name(reg.definition):
+                    continue
                 seen_addrs.add(reg.address)
                 registers.append(reg)
     return registers
