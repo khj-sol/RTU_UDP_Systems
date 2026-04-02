@@ -799,7 +799,15 @@ def run_stage3(
     all_regs = s2_data['all_regs']
     review_items = s2_data['review_items']
 
-    manufacturer = meta.get('제조사', 'Unknown')
+    manufacturer = meta.get('제조사', meta.get('manufacturer', 'Unknown'))
+    device_type = meta.get('설비 타입', meta.get('device_type', 'inverter'))
+
+    # iv_data_points from meta (Stage 1에서 감지한 값 우선)
+    if iv_data_points == 64:
+        try:
+            iv_data_points = int(meta.get('IV Data Points', meta.get('iv_data_points', 64)))
+        except (ValueError, TypeError):
+            pass
 
     # REVIEW 판정 반영
     for item in review_items:
@@ -856,11 +864,21 @@ def run_stage3(
     protocol_name = manufacturer.lower()
     protocol_version = meta.get('프로토콜 버전', '')
 
-    iv_scan = len(regs_by_cat.get('IV_SCAN', [])) > 0 or \
-              any(to_upper_snake(r.definition) == 'IV_CURVE_SCAN'
-                  for cat_regs in regs_by_cat.values() if isinstance(cat_regs, list)
-                  for r in cat_regs)
-    der_avm = len(regs_by_cat.get('DER_CONTROL', [])) > 0
+    # V2: IV/DER 판단 — 레지스터 유무 + 메타데이터 + 제조사 확정
+    iv_scan = (
+        len(regs_by_cat.get('IV_SCAN', [])) > 0 or
+        meta.get('IV Scan', '').lower() in ('yes', 'true', '1') or
+        meta.get('iv_scan', '').lower() in ('yes', 'true', '1') or
+        any(to_upper_snake(r.definition) == 'IV_CURVE_SCAN'
+            for cat_regs in regs_by_cat.values() if isinstance(cat_regs, list)
+            for r in cat_regs) or
+        manufacturer.lower() in ('solarize', 'kstar', 'senergy')
+    )
+    # DER-AVM은 인버터면 항상 True (고정 주소맵)
+    der_avm = (
+        len(regs_by_cat.get('DER_CONTROL', [])) > 0 or
+        device_type == 'inverter'
+    )
 
     log(f'제조사: {manufacturer}, 프로토콜: {protocol_name}')
     log(f'MPPT: {mppt_count}, String: {total_strings} ({strings_per_mppt}/MPPT)')
