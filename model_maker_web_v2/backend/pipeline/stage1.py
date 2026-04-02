@@ -95,7 +95,7 @@ _ADDR_RE = re.compile(r'(?:0x|0X)?([0-9A-Fa-f]{4})[Hh]?')
 _TYPE_RE = re.compile(r'\b(U16|S16|U32|S32|I16|I32|INT16|UINT16|INT32|UINT32|FLOAT32|ASCII|STRING|STR|Bitfield16|Bitfield32)\b', re.I)
 _RW_RE   = re.compile(r'\b(R/?W|RO|WO|Read|Write|R/W)\b', re.I)
 _SCALE_RE = re.compile(r'(?:scale|factor|×|x)\s*[=:]?\s*([\d.]+)', re.I)
-_UNIT_RE = re.compile(r'\b(V|A|W|kW|VA|kVA|VAr|kVAr|Hz|°C|℃|Wh|kWh|MWh|%)\b')
+_UNIT_RE = re.compile(r'\b(V|A|W|kW|KW|VA|kVA|KVA|VAr|kVAr|KVar|Hz|°C|℃|Wh|kWh|KWh|Kwh|KWH|MWh|MWH|%)\b')
 
 
 def _detect_table_columns(header_row: list, data_rows: list = None) -> dict:
@@ -265,7 +265,7 @@ def _parse_register_row(row: list, col_map: dict) -> Optional[RegisterRow]:
         dtype = dtype.replace(old, new)
 
     # 단위 + 스케일 추출 — "0.1V", "0.01A", "kWh" 등에서 분리
-    _SCALE_UNIT_RE = re.compile(r'^([\d.]+)\s*(V|A|W|kW|VA|kVA|VAr|kVAr|Hz|°C|℃|Wh|kWh|MWh|%)$')
+    _SCALE_UNIT_RE = re.compile(r'^([\d.]+)\s*(V|A|W|kW|KW|VA|kVA|KVA|VAr|kVAr|KVar|Hz|°C|℃|Wh|kWh|KWh|Kwh|KWH|MWh|MWH|%)$')
 
     unit = ''
     scale = ''
@@ -483,6 +483,7 @@ def assign_h01_field(reg: RegisterRow, synonym_db: dict,
     if category == 'INFO':
         # INFO에서 H01과 겹치는 필드만 매핑
         if any(k in defn_lower for k in ['total energy', 'cumulative energy', 'total power yields',
+                                          'total energy yield', 'energy yield',
                                           '누적발전량', '누적 발전량', '적산전력량',
                                           'total generation energy']):
             return 'cumulative_energy'
@@ -519,13 +520,17 @@ def assign_h01_field(reg: RegisterRow, synonym_db: dict,
                                       '태양전지 전력', '태양전지전력']):
         return 'pv_power'
     defn_nospace = defn_lower.replace(' ', '')
+    # 'total generation'만으로는 안 됨 — 'total generation time'과 충돌
+    # 'energy', 'yield', 'power' 키워드 필수
     if any(k in defn_lower for k in ['total energy', 'cumulative energy', 'total power yields',
-                                      'lifetime energy', 'accumulated energy', 'total generation',
+                                      'lifetime energy', 'accumulated energy',
                                       'total power generation', 'total powergeneration',
+                                      'total energy yield', 'energy yield',
                                       '누적발전량', '누적 발전량', '적산전력량',
                                       'total generation energy']) or \
        any(k in defn_nospace for k in ['accumulatedpower', 'accumulatedenergy',
-                                        'totalpowergeneration', 'totalgenerationenergy']):
+                                        'totalpowergeneration', 'totalgenerationenergy',
+                                        'totalenergyyield']):
         return 'cumulative_energy'
     if any(k in defn_lower for k in ['daily energy', 'today energy', 'daily power yields',
                                       'daily generation', '일발전량', '일 발전량',
