@@ -21,7 +21,7 @@ from . import (
     load_review_history, save_review_history,
     get_openpyxl, ProgressCallback,
 )
-from .stage2 import read_stage1_excel  # 같은 형식
+from .stage2 import read_stage1_excel_v2 as read_stage1_excel  # V2 호환
 
 
 # ─── Stage 2 Excel 읽기 ─────────────────────────────────────────────────────
