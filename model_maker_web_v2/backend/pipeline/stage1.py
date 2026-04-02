@@ -644,8 +644,8 @@ def detect_iv_from_pdf(registers: List[RegisterRow], pages: list = None) -> dict
 
 # ─── H01 매칭 상태 표 ──────────────────────────────────────────────────────
 
-# H01 필드별 기대 단위 (단위 검증용)
-H01_EXPECTED_UNITS = {
+# H01 필드별 기본 단위 (RTU UDP 프로토콜 기준)
+H01_BASE_UNITS = {
     'r_voltage': 'V', 's_voltage': 'V', 't_voltage': 'V',
     'r_current': 'A', 's_current': 'A', 't_current': 'A',
     'ac_power': 'W', 'power_factor': '', 'frequency': 'Hz',
@@ -653,29 +653,13 @@ H01_EXPECTED_UNITS = {
     'cumulative_energy': 'Wh', 'daily_energy': 'Wh',
 }
 
-
-def _check_unit(h01_field: str, reg_unit: str) -> str:
-    """단위 검증 — 불일치 시 변환 노트 반환"""
-    expected = H01_EXPECTED_UNITS.get(h01_field, '')
-    if not expected or not reg_unit:
-        return ''
-    ru = reg_unit.strip()
-    # 정확 일치
-    if ru == expected:
-        return ''
-    # kWh→Wh, MWh→Wh 변환 필요
-    if expected == 'Wh':
-        if ru in ('kWh', 'KWH'):
-            return 'kWh→Wh (*1000)'
-        if ru in ('MWh', 'MWH'):
-            return 'MWh→Wh (*1000000)'
-    # kW→W
-    if expected == 'W' and ru in ('kW', 'KW'):
-        return 'kW→W (*1000)'
-    # mA→A
-    if expected == 'A' and ru in ('mA', 'MA'):
-        return 'mA→A (/1000)'
-    return ''
+# 단위 스케일 팩터 (k=1000, M=1000000 등)
+_UNIT_SCALE_MAP = {
+    ('kWh', 'Wh'): 1000, ('MWh', 'Wh'): 1000000, ('GWh', 'Wh'): 1000000000,
+    ('kW', 'W'): 1000, ('MW', 'W'): 1000000,
+    ('kVA', 'VA'): 1000, ('kVAr', 'VAr'): 1000,
+    ('mA', 'A'): 0.001, ('mV', 'V'): 0.001,
+}
 
 
 def build_h01_match_table(categorized: dict, meta: dict) -> List[dict]:
@@ -686,12 +670,12 @@ def build_h01_match_table(categorized: dict, meta: dict) -> List[dict]:
 
     # 1) DER 겹침 (9개) — 항상 O
     for h01_field, der_info in H01_DER_OVERLAP_FIELDS.items():
-        expected_unit = H01_EXPECTED_UNITS.get(h01_field, '')
+        expected_unit = H01_BASE_UNITS.get(h01_field, '')
         rows.append({
             'field': h01_field,
             'source': 'DER',
             'status': 'O',
-            'type': 'S32', 'unit': expected_unit,
+            'type': 'S32', 'unit': expected_unit, 'scale': '0.1',
             'address': f'0x{der_info["addr_low"]:04X}~0x{der_info["addr_high"]:04X}',
             'definition': der_info['der_name'],
             'note': 'DER-AVM 고정 주소 사용',
@@ -699,14 +683,14 @@ def build_h01_match_table(categorized: dict, meta: dict) -> List[dict]:
 
     # 2) Handler 계산 (pv_voltage, pv_current) — 항상 O
     for h01_field, rule in H01_HANDLER_COMPUTED_FIELDS.items():
-        expected_unit = H01_EXPECTED_UNITS.get(h01_field, '')
+        expected_unit = H01_BASE_UNITS.get(h01_field, '')
         rows.append({
             'field': h01_field,
             'source': 'HANDLER',
             'status': 'O',
             'address': '-',
             'definition': '-',
-            'type': 'U16', 'unit': expected_unit,
+            'type': 'U16', 'unit': expected_unit, 'scale': '',
             'note': f'handler 계산: {rule}',
         })
 
@@ -734,7 +718,7 @@ def build_h01_match_table(categorized: dict, meta: dict) -> List[dict]:
             rows.append({
                 'field': slot, 'source': 'PDF',
                 'status': '-' if slot != 'alarm1' else 'X',
-                'address': '-', 'definition': '-', 'type': '', 'unit': '',
+                'address': '-', 'definition': '-', 'type': '', 'unit': '', 'scale': '',
                 'note': '보조 알람 없음' if slot != 'alarm1' else '알람 미발견',
             })
 
@@ -761,21 +745,44 @@ def _find_matched_reg(categorized: dict, h01_field: str, cat: str = None) -> Opt
     return None
 
 
+def _get_unit_scale(reg_unit: str, h01_field: str) -> tuple:
+    """레지스터 단위 → (H01 기본단위 변환 스케일, 변환 설명)"""
+    base = H01_BASE_UNITS.get(h01_field, '')
+    ru = (reg_unit or '').strip()
+    if not base or not ru or ru == base:
+        return (1, '')
+    # k/M/G 접두사 변환
+    for (src, dst), factor in _UNIT_SCALE_MAP.items():
+        if ru.upper() == src.upper() and dst.upper() == base.upper():
+            return (factor, f'{ru}→{base} (*{factor})')
+    # 스케일 포함된 단위 (예: 0.1V → V)
+    return (1, '')
+
+
 def _make_pdf_match_row(h01_field: str, reg, miss_note: str = '') -> dict:
-    """PDF 매칭 행 생성 (type/unit/unit_note 포함)"""
+    """PDF 매칭 행 생성 (type/unit/scale 포함)"""
     if reg:
-        unit_note = _check_unit(h01_field, reg.unit)
+        reg_scale = reg.scale or ''
+        unit_factor, unit_desc = _get_unit_scale(reg.unit, h01_field)
+        # 전체 스케일 = 레지스터 스케일 * 단위 변환 스케일
+        scale_str = reg_scale
+        if unit_factor != 1:
+            if reg_scale:
+                scale_str = f'{reg_scale} * {unit_factor}'
+            else:
+                scale_str = str(unit_factor)
         return {
             'field': h01_field, 'source': 'PDF', 'status': 'O',
             'address': reg.address_hex, 'definition': reg.definition,
             'type': reg.data_type, 'unit': reg.unit or '',
-            'note': f'단위변환: {unit_note}' if unit_note else '',
+            'scale': scale_str,
+            'note': unit_desc,
         }
     else:
         return {
             'field': h01_field, 'source': 'PDF', 'status': 'X',
             'address': '-', 'definition': '-',
-            'type': '', 'unit': '',
+            'type': '', 'unit': '', 'scale': '',
             'note': miss_note,
         }
 
@@ -1187,13 +1194,13 @@ def run_stage1(
     ws_h01['A1'] = f'H01 모니터링 매칭 — {h01_matched}/{h01_total}'
     ws_h01['A1'].font = title_font
 
-    h01_cols = ['No', 'H01 Field', 'Source', 'Status', 'Address', 'Definition', 'Type', 'Unit', 'Note']
+    h01_cols = ['No', 'H01 Field', 'Source', 'Status', 'Address', 'Definition', 'Type', 'Unit', 'Scale', 'Note']
     _write_header(ws_h01, h01_cols, 3)
 
     for i, rd in enumerate(h01_match_table, start=1):
         vals = [i, rd['field'], rd['source'], rd['status'],
                 rd['address'], rd['definition'],
-                rd.get('type', ''), rd.get('unit', ''), rd.get('note', '')]
+                rd.get('type', ''), rd.get('unit', ''), rd.get('scale', ''), rd.get('note', '')]
         sc = MATCH_COLORS.get(rd['status'], 'FFFFFF')
         for j, val in enumerate(vals, start=1):
             cell = ws_h01.cell(row=3 + i, column=j, value=val)
