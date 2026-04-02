@@ -1860,8 +1860,15 @@ def run_stage1(
             log(f'  {cat:15s}: {cnt}개')
     log(f'  제외: {len(excluded)}개')
 
-    # ── 정의 테이블 탐색 (참고용 — 레지스터 연결은 추후 정밀도 개선 후) ──
-    # def_tables = scan_definition_tables(pages, ...) — 정밀도 개선 시 활성화
+    # ── 정의 테이블 탐색 + 레지스터 연결 ──
+    if ext == '.pdf':
+        def_tables = scan_definition_tables(pages, registers=registers)
+        st_count = sum(len(d['values']) for d in def_tables['status_defs'])
+        al_count = sum(len(d['values']) for d in def_tables['alarm_defs'])
+        if st_count or al_count:
+            _link_definitions_to_registers(categorized, def_tables)
+            log(f'  정의 테이블: status {len(def_tables["status_defs"])}개({st_count}값), '
+                f'alarm {len(def_tables["alarm_defs"])}개({al_count}값)')
 
     h01_match_table = build_h01_match_table(categorized, meta)
     h01_matched = sum(1 for r in h01_match_table if r['status'] == 'O')
