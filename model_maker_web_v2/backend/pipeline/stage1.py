@@ -760,23 +760,15 @@ def _get_unit_scale(reg_unit: str, h01_field: str) -> tuple:
 
 
 def _make_pdf_match_row(h01_field: str, reg, miss_note: str = '') -> dict:
-    """PDF 매칭 행 생성 (type/unit/scale 포함)"""
+    """PDF 매칭 행 생성 — scale은 PDF 원문 그대로, 단위 변환은 Note에만"""
     if reg:
-        reg_scale = reg.scale or ''
-        unit_factor, unit_desc = _get_unit_scale(reg.unit, h01_field)
-        # 전체 스케일 = 레지스터 스케일 * 단위 변환 스케일
-        scale_str = reg_scale
-        if unit_factor != 1:
-            if reg_scale:
-                scale_str = f'{reg_scale} * {unit_factor}'
-            else:
-                scale_str = str(unit_factor)
+        _, unit_desc = _get_unit_scale(reg.unit, h01_field)
         return {
             'field': h01_field, 'source': 'PDF', 'status': 'O',
             'address': reg.address_hex, 'definition': reg.definition,
             'type': reg.data_type, 'unit': reg.unit or '',
-            'scale': scale_str,
-            'note': unit_desc,
+            'scale': reg.scale or '',  # PDF 원문 스케일 그대로
+            'note': unit_desc,  # 단위 변환 참고만
         }
     else:
         return {
