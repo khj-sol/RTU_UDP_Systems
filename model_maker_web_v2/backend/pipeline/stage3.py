@@ -27,19 +27,68 @@ from .stage2 import read_stage1_excel_v2 as read_stage1_excel  # V2 호환
 # ─── Stage 2 Excel 읽기 ─────────────────────────────────────────────────────
 
 def read_stage2_excel(path: str) -> dict:
-    """Stage 2 Excel → {meta, all_regs, review_items}"""
+    """Stage 2 Excel → {meta, all_regs, review_items} — V2 + 레거시 호환"""
     openpyxl = get_openpyxl()
     wb = openpyxl.load_workbook(path, data_only=True)
     result = {'meta': {}, 'all_regs': [], 'review_items': []}
 
-    if 'SUMMARY' in wb.sheetnames:
-        ws = wb['SUMMARY']
+    is_v2 = '1_REGISTER_MAP' in wb.sheetnames
+
+    # ── META 읽기 ──
+    summary_sheet = '3_SUMMARY' if is_v2 else 'SUMMARY'
+    meta_sheet = '1_REGISTER_MAP' if is_v2 else summary_sheet
+    if meta_sheet in wb.sheetnames:
+        ws = wb[meta_sheet]
         for row in ws.iter_rows(values_only=True):
             cells = [str(c).strip() if c is not None else '' for c in row]
-            if len(cells) >= 2 and cells[0]:
+            if len(cells) >= 2 and cells[0] and cells[1]:
                 result['meta'][cells[0]] = cells[1]
 
-    if 'ALL' in wb.sheetnames:
+    # ── 레지스터 읽기 ──
+    if is_v2 and '1_REGISTER_MAP' in wb.sheetnames:
+        # V2: 1_REGISTER_MAP에서 섹션별로 파싱
+        ws = wb['1_REGISTER_MAP']
+        current_cat = ''
+        header = None
+        for row in ws.iter_rows(values_only=True):
+            cells = [str(c).strip() if c is not None else '' for c in row]
+            first = cells[0] if cells else ''
+            # 섹션 감지
+            if 'INFO 레지스터' in first:
+                current_cat = 'INFO'
+                header = None
+                continue
+            elif 'H01 MONITORING' in first:
+                current_cat = 'MONITORING'
+                header = None
+                continue
+            elif 'STATUS 레지스터' in first:
+                current_cat = 'STATUS'
+                header = None
+                continue
+            elif 'ALARM 레지스터' in first:
+                current_cat = 'ALARM'
+                header = None
+                continue
+            elif first.startswith('Stage 2') or not first:
+                if not current_cat:
+                    continue
+                if not any(cells):
+                    current_cat = ''
+                    header = None
+                    continue
+            # 헤더
+            if first == 'No':
+                header = cells
+                continue
+            if not header or not first or not first.isdigit():
+                continue
+            # 행 파싱
+            reg = _parse_s2_reg_row(cells, header, current_cat)
+            if reg:
+                result['all_regs'].append(reg)
+    elif 'ALL' in wb.sheetnames:
+        # 레거시: ALL 시트
         ws = wb['ALL']
         rows = list(ws.iter_rows(values_only=True))
         if len(rows) >= 2:
@@ -74,24 +123,66 @@ def read_stage2_excel(path: str) -> dict:
                         d['h01_field'] = cells[i]
                 result['all_regs'].append(RegisterRow.from_dict(d))
 
-    if 'REVIEW' in wb.sheetnames:
-        ws = wb['REVIEW']
-        rows = list(ws.iter_rows(values_only=True))
-        if len(rows) >= 2:
-            header = [str(c).strip() if c else '' for c in rows[0]]
-            for row in rows[1:]:
-                cells = [str(c).strip() if c is not None else '' for c in row]
-                if not any(cells):
-                    continue
+    # ── REVIEW 읽기 ──
+    review_sheet = '2_REVIEW' if is_v2 else 'REVIEW'
+    if review_sheet in wb.sheetnames:
+        ws = wb[review_sheet]
+        header = None
+        for row in ws.iter_rows(values_only=True):
+            cells = [str(c).strip() if c is not None else '' for c in row]
+            first = cells[0] if cells else ''
+            if first == 'No':
+                header = cells
+                continue
+            if header and first and first.isdigit():
                 item = {}
                 for i, h in enumerate(header):
-                    if i >= len(cells):
-                        break
-                    item[h] = cells[i]
+                    if i < len(cells):
+                        item[h] = cells[i]
                 result['review_items'].append(item)
 
     wb.close()
     return result
+
+
+def _parse_s2_reg_row(cells, header, category):
+    """Stage 2 V2 레지스터 행 파싱"""
+    col_map = {}
+    for i, h in enumerate(header):
+        hl = h.lower()
+        if 'definition' in hl or 'name' in hl:
+            col_map['definition'] = i
+        elif 'address' in hl:
+            col_map['address'] = i
+        elif 'type' in hl and 'data' not in hl:
+            col_map['type'] = i
+        elif 'unit' in hl or 'scale' in hl:
+            col_map['scale'] = i
+        elif 'r/w' in hl:
+            col_map['rw'] = i
+        elif 'h01' in hl:
+            col_map['h01_field'] = i
+        elif 'comment' in hl:
+            col_map['comment'] = i
+
+    defn = cells[col_map['definition']] if 'definition' in col_map and col_map['definition'] < len(cells) else ''
+    if not defn:
+        return None
+
+    addr_raw = cells[col_map['address']] if 'address' in col_map and col_map['address'] < len(cells) else ''
+    addr = parse_address(addr_raw)
+
+    return RegisterRow(
+        definition=defn,
+        address=addr if addr is not None else 0,
+        address_hex=addr_raw if addr_raw.startswith('0x') else (f'0x{addr:04X}' if addr else ''),
+        data_type=cells[col_map.get('type', 99)] if col_map.get('type', 99) < len(cells) else 'U16',
+        scale=cells[col_map.get('scale', 99)] if col_map.get('scale', 99) < len(cells) else '',
+        rw=cells[col_map.get('rw', 99)] if col_map.get('rw', 99) < len(cells) else 'RO',
+        h01_field=cells[col_map.get('h01_field', 99)] if col_map.get('h01_field', 99) < len(cells) else '',
+        comment=cells[col_map.get('comment', 99)] if col_map.get('comment', 99) < len(cells) else '',
+        category=category,
+    )
 
 
 # ─── 레퍼런스 ErrorCode BITS 로딩 ───────────────────────────────────────────
