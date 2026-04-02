@@ -498,12 +498,12 @@ def detect_iv_from_pdf(registers: List[RegisterRow], pages: list = None) -> dict
     result = {'supported': False, 'iv_command_addr': None, 'data_points': 0,
               'trackers': [], 'format': 'unknown', 'total_iv_regs': 0}
 
-    # 1) IV Scan 명령 레지스터
+    # 1) IV Scan 명령 레지스터 (command만으로는 supported 판정 안 함)
     for reg in registers:
         if _IV_COMMAND_RE.search(reg.definition):
             addr = reg.address if isinstance(reg.address, int) else parse_address(reg.address)
             result['iv_command_addr'] = addr
-            result['supported'] = True
+            # supported는 데이터 레지스터 유무로 판단 (아래에서)
             break
 
     # 2-A) Solarize 형식: Tracker/String 블록
@@ -899,12 +899,16 @@ def run_stage1(
     if max_string > 0 and max_mppt > max_string:
         max_mppt = max_string
 
-    iv_scan_supported = detect_iv_scan_support(registers, manufacturer)
-
-    # V2: IV Scan 상세 감지 (Tracker/String/data_points)
+    # V2: IV Scan 지원 = IV 데이터 레지스터(Tracker/PV point)가 있어야 함
+    # IV command(0x600D)만 있고 데이터 레지스터 없으면 미지원 (예: Huawei)
     iv_info = detect_iv_from_pdf(registers)
-    if iv_info['supported']:
+    iv_scan_supported = iv_info['supported'] and len(iv_info.get('trackers', [])) > 0
+
+    # 확정 제조사 + 데이터 레지스터 없으면 keyword fallback
+    if not iv_scan_supported and manufacturer.lower() in ('solarize', 'kstar', 'senergy'):
         iv_scan_supported = True
+        iv_info['supported'] = True
+
     # IV command는 DER 고정 주소(0x600D)에서 제거되므로, 지원 시 고정값 삽입
     if iv_scan_supported and not iv_info.get('iv_command_addr'):
         iv_info['iv_command_addr'] = 0x600D
