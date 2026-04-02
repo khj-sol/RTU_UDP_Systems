@@ -2082,18 +2082,13 @@ def run_stage1(
 
     h01_match_table = build_h01_match_table(categorized, meta)
 
-    # ── X 필드 후보 제안 ──
-    x_fields = [row for row in h01_match_table if row['status'] == 'X']
-    suggestions = {}
-    if x_fields:
-        all_regs_flat = []
-        for cat_regs in categorized.values():
+    # ── 5가지 섹션 후보 제안 ──
+    all_regs_flat = []
+    for cat_name, cat_regs in categorized.items():
+        if cat_name not in ('DER_CONTROL', 'DER_MONITOR', 'IV_SCAN'):
             all_regs_flat.extend(cat_regs)
-        for x_row in x_fields:
-            candidates = _suggest_candidates(x_row['field'], all_regs_flat, categorized)
-            if candidates:
-                suggestions[x_row['field']] = candidates
-                log(f'  X [{x_row["field"]}] 후보 {len(candidates)}개 제안')
+    suggestions = _build_all_suggestions(
+        h01_match_table, categorized, all_regs_flat, meta, log)
 
     h01_matched = sum(1 for r in h01_match_table if r['status'] == 'O')
     h01_total = sum(1 for r in h01_match_table if r['status'] != '-')
@@ -2394,6 +2389,184 @@ def run_stage1(
         'iv_info': iv_info,
         'suggestions': suggestions,
     }
+
+
+def _build_all_suggestions(h01_table: list, categorized: dict,
+                           all_regs: list, meta: dict, log=None) -> dict:
+    """
+    5가지 섹션에 대한 후보 제안 통합
+    1. INFO: Model/SN 미매칭
+    2. H01: X 필드 (pv_power, cumulative_energy 등)
+    3. STATUS/ALARM: 매칭 안 됐거나 정의 없음
+    4. MPPT/String: 미감지
+    5. IV Scan: 미감지
+    """
+    suggestions = {}
+
+    # ── 1. INFO: Model/SN 미매칭 ──
+    info_regs = categorized.get('INFO', [])
+    has_model = any(
+        any(k in r.definition.lower() for k in ['model', 'device type', 'type code'])
+        and not any(k in r.definition.lower() for k in ['working', 'battery', 'pf', 'init fault'])
+        for r in info_regs)
+    has_sn = any(
+        any(k in r.definition.lower() for k in ['serial_number', 'serial n', 'serialn', 'c_serial',
+                                                  'sn[', 'sn0', 'sn1', 'serial no', 'inverter sn',
+                                                  'product code', 'c_serialnumber'])
+        for r in info_regs)
+
+    if not has_model:
+        cands = _suggest_info_field(all_regs, 'model')
+        if cands:
+            suggestions['info_model'] = cands
+            if log: log(f'  제안: INFO Model 후보 {len(cands)}개')
+
+    if not has_sn:
+        cands = _suggest_info_field(all_regs, 'sn')
+        if cands:
+            suggestions['info_sn'] = cands
+            if log: log(f'  제안: INFO SN 후보 {len(cands)}개')
+
+    # ── 2. H01: X 필드 ──
+    x_fields = [row for row in h01_table if row['status'] == 'X']
+    for x_row in x_fields:
+        candidates = _suggest_candidates(x_row['field'], all_regs, categorized)
+        if candidates:
+            suggestions[x_row['field']] = candidates
+            if log: log(f'  제안: H01 [{x_row["field"]}] 후보 {len(candidates)}개')
+
+    # ── 3. STATUS/ALARM 정의 없음 ──
+    status_regs = categorized.get('STATUS', [])
+    status_with_defs = [r for r in status_regs
+                        if getattr(r, 'h01_field', '') == 'inverter_status'
+                        and getattr(r, 'value_definitions', None)]
+    if status_regs and not status_with_defs:
+        # STATUS 레지스터는 있지만 정의가 없음
+        suggestions['status_definitions'] = [{
+            'addr': '-', 'definition': 'STATUS 레지스터 값 정의 테이블 없음',
+            'score': 0, 'reason': 'PDF에서 Inverter Mode/State 값 정의를 찾지 못함',
+            'source': 'REVIEW',
+        }]
+        if log: log(f'  제안: STATUS 정의 테이블 미발견')
+
+    alarm_regs = categorized.get('ALARM', [])
+    alarm_with_defs = [r for r in alarm_regs if getattr(r, 'value_definitions', None)]
+    if alarm_regs and not alarm_with_defs:
+        suggestions['alarm_definitions'] = [{
+            'addr': '-', 'definition': 'ALARM 레지스터 값 정의 테이블 없음',
+            'score': 0, 'reason': 'PDF에서 Fault/Error Code 정의를 찾지 못함',
+            'source': 'REVIEW',
+        }]
+        if log: log(f'  제안: ALARM 정의 테이블 미발견')
+
+    # ── 4. MPPT/String 미감지 ──
+    max_mppt = meta.get('max_mppt', 0)
+    max_string = meta.get('max_string', 0)
+    if max_mppt == 0:
+        cands = _suggest_mppt(all_regs)
+        if cands:
+            suggestions['mppt_detection'] = cands
+            if log: log(f'  제안: MPPT 후보 {len(cands)}개')
+
+    # ── 5. IV Scan ──
+    iv_scan = meta.get('iv_scan', False)
+    has_iv_regs = bool(categorized.get('IV_SCAN'))
+    if not iv_scan and not has_iv_regs:
+        cands = _suggest_iv_scan(all_regs)
+        if cands:
+            suggestions['iv_scan'] = cands
+            if log: log(f'  제안: IV Scan 후보 {len(cands)}개')
+
+    return suggestions
+
+
+def _suggest_info_field(all_regs: list, field_type: str) -> list:
+    """INFO Model/SN 후보 제안"""
+    candidates = []
+    for reg in all_regs:
+        dl = reg.definition.lower()
+        score = 0
+        reason = ''
+
+        if field_type == 'model':
+            if any(k in dl for k in ['model', 'device type', 'type code', 'product']):
+                if not any(k in dl for k in ['working', 'battery', 'pf']):
+                    score = 70
+                    reason = 'Model 키워드'
+            if (reg.data_type or '').upper() in ('STRING', 'STRINGING', 'ASCII'):
+                if 'model' in dl or 'product' in dl:
+                    score = 85
+                    reason = 'Model + STRING 타입'
+        elif field_type == 'sn':
+            if any(k in dl for k in ['serial', 'sn']):
+                score = 70
+                reason = 'SN 키워드'
+            if (reg.data_type or '').upper() in ('STRING', 'STRINGING', 'ASCII'):
+                if 'serial' in dl or 'sn' in dl:
+                    score = 85
+                    reason = 'SN + STRING 타입'
+
+        if score > 0:
+            candidates.append({
+                'addr': reg.address_hex,
+                'definition': reg.definition[:50],
+                'unit': reg.unit or '',
+                'score': score,
+                'reason': reason,
+                'source': 'PDF',
+            })
+
+    return sorted(candidates, key=lambda c: -c['score'])[:5]
+
+
+def _suggest_mppt(all_regs: list) -> list:
+    """MPPT 후보 제안 (MPPT=0일 때)"""
+    candidates = []
+    for reg in all_regs:
+        dl = reg.definition.lower()
+        score = 0
+        reason = ''
+
+        # DC/PV/Input voltage/current
+        if re.search(r'\b(dc|pv|input)\s*(voltage|current|power)', dl):
+            if 'fault' not in dl and 'high' not in dl and 'low' not in dl:
+                score = 60
+                reason = 'DC/PV/Input V/I/P (Central type MPPT=1)'
+
+        # Numbered PV: PV1, Vpv1, MPPT1 등
+        if re.search(r'(pv|mppt|vpv|ppv|ipv)\s*[1-9]', dl):
+            score = 80
+            reason = 'PV/MPPT 번호 감지'
+
+        if score > 0:
+            candidates.append({
+                'addr': reg.address_hex,
+                'definition': reg.definition[:50],
+                'unit': reg.unit or '',
+                'score': score,
+                'reason': reason,
+                'source': 'PDF',
+            })
+
+    return sorted(candidates, key=lambda c: -c['score'])[:8]
+
+
+def _suggest_iv_scan(all_regs: list) -> list:
+    """IV Scan 후보 제안"""
+    candidates = []
+    for reg in all_regs:
+        dl = reg.definition.lower()
+        if any(k in dl for k in ['iv curve', 'iv scan', 'i-v curve', 'i-v scan',
+                                   'iv_curve', 'iv data', 'iv point']):
+            candidates.append({
+                'addr': reg.address_hex,
+                'definition': reg.definition[:50],
+                'unit': reg.unit or '',
+                'score': 80,
+                'reason': 'IV Scan 키워드',
+                'source': 'PDF',
+            })
+    return sorted(candidates, key=lambda c: -c['score'])[:5]
 
 
 def _suggest_candidates(x_field: str, all_regs: list, categorized: dict) -> list:
