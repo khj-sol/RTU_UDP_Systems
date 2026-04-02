@@ -782,13 +782,13 @@ def classify_register_with_rules(
     defn_upper = to_upper_snake(defn)
     addr = reg.address if isinstance(reg.address, int) else parse_address(reg.address)
 
+    # 0) INFO 블록 — detect_info_block()으로 사전 감지된 주소 (EXCLUDE보다 우선)
+    if info_addrs and addr is not None and addr in info_addrs:
+        return ('INFO', '')
+
     # §6: 제외 항목
     if should_exclude(reg):
         return ('EXCLUDE', '')
-
-    # 0) INFO 블록 — detect_info_block()으로 사전 감지된 주소 집합
-    if info_addrs and addr is not None and addr in info_addrs:
-        return ('INFO', '')
 
     # 1) 레퍼런스 패턴 기반 (주소 매칭)
     if addr is not None:

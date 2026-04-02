@@ -93,7 +93,7 @@ def extract_excel_sheets(excel_path: str) -> Dict[str, List[List[str]]]:
 
 _ADDR_RE = re.compile(r'(?:0x|0X)?([0-9A-Fa-f]{4})[Hh]?')
 _TYPE_RE = re.compile(r'\b(U16|S16|U32|S32|US16|US32|I16|I32|INT16|UINT16|INT32|UINT32|FLOAT32|ASCII|STRING|STR|Bitfield16|Bitfield32)\b', re.I)
-_RW_RE   = re.compile(r'\b(R/?W|RO|WO|Read|Write|R/W)\b', re.I)
+_RW_RE   = re.compile(r'\b(R/?W|RO|RD|WO|WR|Read|Write|R/W)\b', re.I)
 _SCALE_RE = re.compile(r'(?:scale|factor|×|x)\s*[=:]?\s*([\d.]+)', re.I)
 _UNIT_RE = re.compile(r'\b(V|A|W|kW|KW|VA|kVA|KVA|VAr|kVAr|KVar|Hz|°C|℃|Wh|kWh|KWh|Kwh|KWH|MWh|MWH|%)\b')
 
@@ -168,8 +168,20 @@ def _parse_register_row(row: list, col_map: dict) -> Optional[RegisterRow]:
     if not row:
         return None
 
-    # 셀 내 줄바꿈을 공백으로 치환 (Huawei PDF 등 좁은 컬럼에서 셀이 줄바꿈됨)
-    row = [re.sub(r'\s*\n\s*', ' ', str(c)).strip() if c is not None else '' for c in row]
+    # 셀 내 줄바꿈 처리:
+    # - 이름(name) 셀: 첫 줄만 이름, 나머지는 comment로 분리 (CPS 등 설명 포함)
+    # - 기타 셀: 줄바꿈→공백 치환 (Huawei 좁은 컬럼)
+    _name_extra = ''  # 이름 셀에서 분리된 설명
+    name_col = col_map.get('name')
+    raw_row = [str(c) if c is not None else '' for c in row]
+    row = []
+    for ci, c in enumerate(raw_row):
+        if ci == name_col and '\n' in c:
+            lines = c.strip().split('\n')
+            row.append(lines[0].strip())
+            _name_extra = ' '.join(l.strip() for l in lines[1:] if l.strip())
+        else:
+            row.append(re.sub(r'\s*\n\s*', ' ', c).strip())
 
     _RANGE_ADDR_RE = re.compile(r'^(\d{4,5})\s*[-–~]\s*(\d{4,5})$')
     _RANGE_HEX_RE = re.compile(r'^(0x[0-9A-Fa-f]{4})\s*[-–~]\s*(0x[0-9A-Fa-f]{4})$', re.I)
@@ -252,6 +264,19 @@ def _parse_register_row(row: list, col_map: dict) -> Optional[RegisterRow]:
             break
     if not name:
         return None
+
+    # 이름에 설명이 합쳐진 경우: 원본 셀에서 줄바꿈 기준 첫 줄만 이름으로 사용
+    # (name_col 감지 실패 시 fallback 경로에서도 적용)
+    if not _name_extra:
+        # 원본 raw_row에서 name에 해당하는 셀 찾기
+        for ci, c in enumerate(raw_row):
+            if c and name in re.sub(r'\s*\n\s*', ' ', c) and '\n' in c:
+                lines = c.strip().split('\n')
+                first_line = lines[0].strip()
+                if len(first_line) >= 3 and first_line != name:
+                    _name_extra = ' '.join(l.strip() for l in lines[1:] if l.strip())
+                    name = first_line
+                break
 
     dtype = ''
     type_idx = col_map.get('type')
@@ -340,12 +365,12 @@ def _parse_register_row(row: list, col_map: dict) -> Optional[RegisterRow]:
     if rw_idx is not None and rw_idx < len(row):
         m = _RW_RE.search(str(row[rw_idx]))
         if m:
-            rw = m.group(1).upper().replace('READ', 'RO').replace('WRITE', 'WO')
+            rw = m.group(1).upper().replace('READ', 'RO').replace('WRITE', 'WO').replace('RD', 'RO').replace('WR', 'WO')
     if not rw:
         for cell in row:
             m = _RW_RE.search(str(cell))
             if m:
-                rw = m.group(1).upper().replace('READ', 'RO').replace('WRITE', 'WO')
+                rw = m.group(1).upper().replace('READ', 'RO').replace('WRITE', 'WO').replace('RD', 'RO').replace('WR', 'WO')
                 break
 
     comment = ''
@@ -354,6 +379,9 @@ def _parse_register_row(row: list, col_map: dict) -> Optional[RegisterRow]:
         comment = str(row[comment_idx]).strip()
         if comment in ('None', '-'):
             comment = ''
+    # 이름 셀에서 분리된 설명을 comment에 추가
+    if _name_extra:
+        comment = f'{_name_extra} | {comment}'.strip(' |') if comment else _name_extra
 
     regs_val = '1'
     regs_idx = col_map.get('regs')
