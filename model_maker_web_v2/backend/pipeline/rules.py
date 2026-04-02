@@ -197,46 +197,158 @@ def get_string_voltage_rule() -> str:
 # §3. 인버터 정보 필수 추출 항목
 # ═══════════════════════════════════════════════════════════════════════════
 
-INFO_REQUIRED = {
-    'DEVICE_MODEL':       ['model', 'device model', '모델', 'product model',
-                           'device type code', 'type code', 'device type'],
-    'SERIAL_NUMBER':      ['serial', 'sn', '시리얼', '제품번호', 'serial number'],
-    'FIRMWARE_VERSION':   ['firmware', 'fw version', 'software version', '펌웨어',
-                           'protocol version', 'communication version'],
-    'MPPT_COUNT':         ['mppt count', 'number of mppt', 'mppt tracker', 'mppt수'],
-    'NOMINAL_POWER':      ['nominal power', 'rated power', '정격출력', 'max output',
-                           'nominal active power', 'rated active power',
-                           'nominal reactive power', 'rated reactive power'],
-    'NOMINAL_VOLTAGE':    ['nominal voltage', 'rated voltage', '정격전압'],
-    'NOMINAL_FREQUENCY':  ['nominal frequency', 'rated frequency', '정격주파수'],
-    'GRID_PHASE_NUMBER':  ['phase number', 'phase count', '상수', 'phase type',
-                           'output type'],
-    'TOTAL_RUNNING_TIME': ['total running time', 'running time', '총 가동시간',
-                           'daily running time', '가동시간'],
-    'TOTAL_ENERGY':       ['total power yields', 'total energy', '누적 발전량',
-                           'total generation', 'cumulative energy',
-                           'monthly power yields'],
-    'DAILY_ENERGY':       ['daily power yields', 'daily energy', '일일 발전량',
-                           'today energy', 'daily generation'],
-    'INNER_TEMPERATURE':  ['internal temperature', 'inner temperature', 'module temperature',
-                           '내부 온도', 'inverter temperature', 'cabinet temperature',
-                           'inner_temp'],
-    'APPARENT_POWER':     ['apparent power', '피상전력', 'total apparent power'],
-    'COUNTRY_CODE':       ['present country', 'country code', 'country id', '국가코드'],
-    'INSULATION':         ['insulation resistance', 'array insulation', '절연저항'],
-    'BUS_VOLTAGE':        ['bus voltage', 'dc bus', 'bus volt', '버스전압'],
-}
+# ═══════════════════════════════════════════════════════════════════════════
+# §3. INFO 블록 감지 — 앵커(Model/SN) 기반 + RO + 위치 규칙
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# 제너럴 룰:
+#   1. INFO 레지스터는 PDF 앞쪽에 위치 (Device attributes 섹션)
+#   2. 모두 RO (Read-Only)
+#   3. Model + SN이 앵커 — 하나라도 없으면 표시하여 RTU가 인지
+#   4. 앵커 주변 연속 RO 레지스터 블록이 INFO
+#
+# 앵커 키워드 (단어 경계 매칭, 제외 필터 적용):
+_MODEL_RE = re.compile(
+    r'\b(model|device\s*type|type\s*code|모델)\b', re.I)
+_MODEL_EXCLUDE_RE = re.compile(
+    r'meter|replace|target|sub.?device|third|label|lcd|inverter model definition', re.I)
+
+_SN_RE = re.compile(
+    r'\bsn\b|\bserial\b|시리얼|제품번호', re.I)
+_SN_EXCLUDE_RE = re.compile(
+    r'alarm|clearance|license|board|layout|feature|monitor|third|label|historical|latest', re.I)
+
+# INFO 블록 확장 시 허용되는 키워드 (앵커 이후 연속 RO 레지스터에 적용)
+_INFO_BLOCK_KEYWORDS = re.compile(
+    r'model|sn\b|serial|firmware|software|protocol\s*version|'
+    r'mppt|string|rated|nominal|maximum|max\s*output|'
+    r'apparent|phase|output\s*type|device\s*type|type\s*code|product|'
+    r'pn\b|version|power|정격|모델|펌웨어|시리얼',
+    re.I
+)
+
+# INFO 블록 확장 시 중단하는 키워드 (운영 데이터 감지 → 블록 종료)
+_INFO_BLOCK_STOP = re.compile(
+    r'energy|temperature|temp\b|insulation|bus\s*volt|country|'
+    r'running\s*time|meter\b|reactive\s*power|real.?time|'
+    r'alarm|fault|error|warning|status|mode\b|frequency\b|'
+    r'daily|total\s*(power|energy)|monthly|'
+    r'sales\s*area|upgrade|subpackage|unique\s*id|'
+    r'current\b(?!.*calibration)|voltage\b(?!.*nominal|.*rated)',
+    re.I
+)
+
+# INFO 블록 내 최대 주소 간격 (이 이상 벌어지면 블록 종료)
+_INFO_MAX_GAP = 25
+
+
+def detect_info_block(registers: list) -> dict:
+    """INFO 레지스터 블록 감지 — Model/SN 앵커 기반.
+
+    Returns: {
+        'info_addrs': set of addresses classified as INFO,
+        'model_found': bool,
+        'sn_found': bool,
+        'model_addr': int or None,
+        'sn_addr': int or None,
+    }
+    """
+    from . import parse_address
+
+    # RO 레지스터만 주소순 정렬
+    ro_regs = []
+    for reg in registers:
+        rw = (getattr(reg, 'rw', '') or '').upper()
+        if rw and rw not in ('RO', 'R', 'READ'):
+            continue
+        addr = reg.address if isinstance(reg.address, int) else parse_address(getattr(reg, 'address_hex', ''))
+        if addr is None:
+            continue
+        ro_regs.append((addr, reg))
+    ro_regs.sort(key=lambda x: x[0])
+
+    if not ro_regs:
+        return {'info_addrs': set(), 'model_found': False, 'sn_found': False,
+                'model_addr': None, 'sn_addr': None}
+
+    # ── 1단계: 앵커 탐색 (첫 번째 매칭만) ──
+    model_anchor = None  # (addr, reg)
+    sn_anchor = None
+    for addr, reg in ro_regs:
+        defn = reg.definition.replace('_', ' ')
+        if not model_anchor and _MODEL_RE.search(defn) and not _MODEL_EXCLUDE_RE.search(defn):
+            model_anchor = (addr, reg)
+        if not sn_anchor and _SN_RE.search(defn) and not _SN_EXCLUDE_RE.search(defn):
+            sn_anchor = (addr, reg)
+        if model_anchor and sn_anchor:
+            break
+
+    model_found = model_anchor is not None
+    sn_found = sn_anchor is not None
+
+    if not model_found and not sn_found:
+        return {'info_addrs': set(), 'model_found': False, 'sn_found': False,
+                'model_addr': None, 'sn_addr': None}
+
+    anchors = [a for a in [model_anchor, sn_anchor] if a]
+    block_start = min(a[0] for a in anchors)
+
+    # ── 2단계: 앵커부터 전방 확장 ──
+    # block_start 이전 레지스터도 포함 (SN이 Model 앞에 올 수 있음)
+    info_addrs = set()
+    prev_addr = block_start
+
+    for addr, reg in ro_regs:
+        if addr < block_start:
+            # 앵커 직전 레지스터도 포함 (앵커 간 간격 이내)
+            if block_start - addr <= _INFO_MAX_GAP:
+                defn = reg.definition.replace('_', ' ')
+                if _INFO_BLOCK_KEYWORDS.search(defn) and not _INFO_BLOCK_STOP.search(defn):
+                    info_addrs.add(addr)
+            continue
+
+        # 주소 간격 초과 → 블록 종료
+        if addr - prev_addr > _INFO_MAX_GAP and addr not in {a[0] for a in anchors}:
+            break
+
+        defn = reg.definition.replace('_', ' ')
+
+        # 앵커 주소는 무조건 포함
+        if addr in {a[0] for a in anchors}:
+            info_addrs.add(addr)
+            prev_addr = addr
+            continue
+
+        # 운영 데이터 키워드 → 블록 종료
+        if _INFO_BLOCK_STOP.search(defn):
+            break
+
+        # INFO 키워드 매칭 또는 앵커 근접 (간격 ≤ 5)
+        if _INFO_BLOCK_KEYWORDS.search(defn) or (addr - prev_addr <= 5):
+            info_addrs.add(addr)
+            prev_addr = addr
+        else:
+            # 키워드 불일치 + 간격 큼 → 블록 종료
+            break
+
+    return {
+        'info_addrs': info_addrs,
+        'model_found': model_found,
+        'sn_found': sn_found,
+        'model_addr': model_anchor[0] if model_anchor else None,
+        'sn_addr': sn_anchor[0] if sn_anchor else None,
+    }
 
 
 def is_info_register(definition: str) -> bool:
-    """§3: 인버터 정보 레지스터 여부"""
-    defn_lower = definition.lower()
-    # PDF 줄바꿈 제거 시 공백이 사라질 수 있으므로 공백 제거 버전도 체크
-    defn_nospace = defn_lower.replace(' ', '')
-    for field, keywords in INFO_REQUIRED.items():
-        for k in keywords:
-            if k in defn_lower or k.replace(' ', '') in defn_nospace:
-                return True
+    """§3: 인버터 정보 레지스터 여부 — detect_info_block 사용 시 호출하지 않음.
+    하위 호환용: 단독 호출 시 키워드 기반 판별."""
+    defn_norm = definition.lower().replace(' ', '').replace('_', '')
+    for k in ['model', 'serial', 'firmware', 'software', 'protocolversion',
+              'mppt', 'ratedpower', 'nominalpower', 'maximumactive',
+              'outputtype', 'devicetype', 'phasenumber']:
+        if k in defn_norm:
+            return True
     return False
 
 
@@ -400,6 +512,7 @@ def classify_register_with_rules(
     ref_patterns: dict,
     device_type: str = 'inverter',
     all_regs: List[RegisterRow] = None,
+    info_addrs: set = None,
 ) -> tuple:
     """
     §7: STAGE1_RULES에 따른 카테고리 분류
@@ -414,9 +527,8 @@ def classify_register_with_rules(
     if should_exclude(reg):
         return ('EXCLUDE', '')
 
-    # 0) INFO 키워드 최우선 — PDF에서 추출한 이름 기반
-    # (레퍼런스 주소 매칭보다 먼저 체크하여 다른 제조사 레퍼런스와 주소 충돌 방지)
-    if is_info_register(defn):
+    # 0) INFO 블록 — detect_info_block()으로 사전 감지된 주소 집합
+    if info_addrs and addr is not None and addr in info_addrs:
         return ('INFO', '')
 
     # 1) 레퍼런스 패턴 기반 (주소 매칭)
@@ -436,21 +548,11 @@ def classify_register_with_rules(
                     return ('ALARM', '')
                 if any(k in ref_name for k in ['INVERTER_MODE', 'RUNNING_STATUS', 'STATUS']):
                     return ('STATUS', '')
-                if any(k in ref_name for k in ['MODEL', 'SERIAL', 'FIRMWARE', 'NOMINAL',
-                                                'MPPT_COUNT', 'PHASE', 'EMS_', 'LCD_',
-                                                'DEVICE_TYPE', 'OUTPUT_TYPE',
-                                                'TOTAL_RUNNING', 'DAILY_RUNNING',
-                                                'INNER_TEMP', 'MODULE_TEMP',
-                                                'APPARENT_POWER', 'COUNTRY',
-                                                'INSULATION', 'BUS_VOLTAGE',
-                                                'TOTAL_ENERGY', 'DAILY_ENERGY',
-                                                'TODAY_ENERGY', 'MONTHLY_ENERGY']):
-                    return ('INFO', '')
+                # INFO는 키워드(is_info_register)에서만 분류
+                # reference pattern 주소 기반 INFO 분류 제거 — 제조사 간 주소 충돌 방지
                 return ('MONITORING', '')
 
-    # 2) §3: INFO 키워드 (synonym_db보다 먼저 — INFO가 MONITORING으로 잘못 분류되는 것 방지)
-    if is_info_register(defn):
-        return ('INFO', '')
+    # 2) INFO는 detect_info_block()의 info_addrs로만 분류 (step 0에서 처리됨)
 
     # 3) synonym_db 매칭
     syn = match_synonym(defn, synonym_db)
