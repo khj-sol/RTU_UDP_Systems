@@ -408,7 +408,7 @@ def extract_registers_from_tables(tables: List[List[list]]) -> List[RegisterRow]
 def assign_h01_field(reg: RegisterRow, synonym_db: dict,
                      ref_patterns: dict = None) -> str:
     """레지스터에 대응하는 H01 필드명 추정 (V2)"""
-    defn_lower = reg.definition.lower()
+    defn_lower = reg.definition.lower().replace('_', ' ')
     category = getattr(reg, 'category', '')
 
     # V2: INFO/ALARM 카테고리는 H01 모니터링 필드가 아님 — 특정 키워드만 매칭
@@ -443,10 +443,15 @@ def assign_h01_field(reg: RegisterRow, synonym_db: dict,
     # 1) V2: pv_power / energy 키워드 (synonym/ref보다 먼저 — 정확한 키워드 우선)
     if any(k in defn_lower for k in ['total dc power', 'total pv power', 'dc power',
                                       'pv total power', 'pv_total_input_power',
-                                      'input power']):
+                                      'input power', 'pac', 'output power',
+                                      'inverter current output']):
         return 'pv_power'
+    defn_nospace = defn_lower.replace(' ', '')
     if any(k in defn_lower for k in ['total energy', 'cumulative energy', 'total power yields',
-                                      'lifetime energy', 'accumulated energy', 'total generation']):
+                                      'lifetime energy', 'accumulated energy', 'total generation',
+                                      'total power generation', 'total powergeneration']) or \
+       any(k in defn_nospace for k in ['accumulatedpower', 'accumulatedenergy',
+                                        'totalpowergeneration']):
         return 'cumulative_energy'
     if any(k in defn_lower for k in ['daily energy', 'today energy', 'daily power yields',
                                       'daily generation']):
