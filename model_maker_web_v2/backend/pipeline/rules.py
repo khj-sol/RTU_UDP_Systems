@@ -315,7 +315,7 @@ EXCLUDE_KEYWORDS = [
     'dateyear', 'datemonth', 'datesecond',
     # 기타 설정
     'first connect', 'soft start', 'start time',
-    'device type',  # 설정용 device type (0x30B1 등)
+    # 'device type' — 제거 (INFO의 Device type code와 충돌)
     # REMS (§6)
     'rems', 'remote monitoring system',
     # V2: 제어 관련 레지스터 제외 (DER-AVM으로만 제어)
