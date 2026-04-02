@@ -440,7 +440,8 @@ def _is_valid_register_name(name: str) -> bool:
         return False
     # V2: 너무 짧은 이름 (3자 이하인데 키워드가 아닌 것)
     if len(stripped) <= 3 and not any(k in stripped_lower for k in
-            ['sn', 'pn', 'pf', 'pv', 'dc', 'ac', 'bus', 'ia', 'ib', 'ic', 'ua', 'ub', 'uc']):
+            ['sn', 'pn', 'pf', 'pv', 'dc', 'ac', 'bus', 'ia', 'ib', 'ic', 'ua', 'ub', 'uc',
+             '모델', '버전', '용량', '전압', '전류', '전력', '온도', '상태']):
         return False
     return True
 
@@ -1467,6 +1468,7 @@ def run_stage1(
 
     log(f'입력 파일 읽기: {os.path.basename(input_path)}')
     all_tables = []
+    pages = None  # PDF만 사용, Excel은 None
 
     if ext == '.pdf':
         pages = extract_pdf_text_and_tables(input_path)

@@ -214,11 +214,11 @@ INFO_KNOWN_NAMES = {
     'MODEL': [
         'model', 'device model', 'device model name', 'device type',
         'device type code', 'type code', 'model id', 'model code',
-        'model name', 'machine model', 'inverter model', '모델',
+        'model name', 'machine model', 'inverter model', '모델', '모델명',
     ],
     'SERIAL_NUMBER': [
         'sn', 'serial number', 'device serial number', 'device sn',
-        'inverter sn', '시리얼', '제품번호', 'serialnumber',
+        'inverter sn', '시리얼', '제품번호', 'serialnumber', '시리얼번호',
     ],
     'PRODUCT_CODE': [
         'pn', 'product code', 'product number',
@@ -228,7 +228,7 @@ INFO_KNOWN_NAMES = {
         'slave firmware version', 'software version', 'protocol version',
         'ems firmware version', 'lcd firmware version',
         'firmware version of arm', 'dsp version', 'communication version',
-        '펌웨어',
+        '펌웨어', '인버터 버전',
     ],
     'MPPT_COUNT': [
         'mppt number', 'number of mppts', 'mppt count', 'number of mppt',
@@ -241,7 +241,7 @@ INFO_KNOWN_NAMES = {
         'nominal active power', 'rated power', 'nominal power',
         'maximum active power', 'max active power',
         'maximum apparent power', 'max apparent power',
-        'rated active power', '정격출력',
+        'rated active power', '정격출력', '인버터 용량',
     ],
     'RATED_VOLTAGE': [
         'nominal voltage', 'rated voltage', '정격전압',
@@ -277,12 +277,12 @@ def is_known_info_name(definition: str) -> bool:
 #
 # 앵커 키워드 (단어 경계 매칭, 제외 필터 적용):
 _MODEL_RE = re.compile(
-    r'\b(model|device\s*type|type\s*code|모델)\b', re.I)
+    r'\b(model|device\s*type|type\s*code|모델|모델명)\b', re.I)
 _MODEL_EXCLUDE_RE = re.compile(
     r'meter|replace|target|sub.?device|third|label|lcd|inverter model definition', re.I)
 
 _SN_RE = re.compile(
-    r'\bsn\b|\bserial\b|serialnumber|시리얼|제품번호', re.I)
+    r'\bsn\b|\bserial\b|serialnumber|시리얼|제품번호|시리얼번호', re.I)
 _SN_EXCLUDE_RE = re.compile(
     r'alarm|clearance|license|board|layout|feature|monitor|third|label|historical|latest', re.I)
 
@@ -294,7 +294,8 @@ _INFO_BLOCK_STOP = re.compile(
     r'running\s*time|meter\b|reactive\s*power|real.?time|'
     r'alarm|fault|error|warning|status|mode\b|'
     r'daily|total\s*(power|energy)|monthly|'
-    r'sales\s*area|upgrade|subpackage|unique\s*id',
+    r'sales\s*area|upgrade|subpackage|unique\s*id|'
+    r'현재시각|시스템동작|발전유무|동작상태|시간|year|month|day|hour|minute|second',
     re.I
 )
 
