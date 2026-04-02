@@ -55,6 +55,51 @@ def extract_pdf_text_and_tables(pdf_path: str) -> List[dict]:
     return pages
 
 
+def _extract_model_from_pdf(pdf_path: str, manufacturer: str) -> str:
+    """PDF 메타데이터/파일명/첫 페이지에서 인버터 모델명 추출"""
+    model = ''
+
+    # 1) PDF 메타데이터 title
+    try:
+        import fitz
+        doc = fitz.open(pdf_path)
+        title = (doc.metadata or {}).get('title', '')
+        # title에서 제조사명 제거 후 모델명 추출
+        if title:
+            # "EG4 18KPV-12LV Modbus Protocol" → "18KPV-12LV"
+            # "TRIO-20.0(27.6)-TL-OUTD - Modbus RTU Registers Map" → "TRIO-20.0(27.6)-TL-OUTD"
+            cleaned = title
+            for rm in ['modbus', 'protocol', 'registers?', 'map', 'rtu', 'rs485',
+                        'communication', 'interface', 'guide', 'application', 'note',
+                        'version', 'customer', 'user', 'manual', 'definition']:
+                cleaned = re.sub(rf'\b{rm}\b', '', cleaned, flags=re.I)
+            cleaned = re.sub(rf'\b{re.escape(manufacturer)}\b', '', cleaned, flags=re.I)
+            cleaned = re.sub(r'[-–—]+\s*$', '', cleaned)
+            cleaned = re.sub(r'\s+', ' ', cleaned).strip(' -–—')
+            if cleaned and len(cleaned) >= 3:
+                model = cleaned
+        doc.close()
+    except Exception:
+        pass
+
+    # 2) 파일명에서 추출 (메타데이터 없을 때)
+    if not model:
+        fname = os.path.splitext(os.path.basename(pdf_path))[0]
+        # "EG4_18KPV-12LV_Modbus_Protocol" → "18KPV-12LV"
+        cleaned = fname
+        for rm in ['Modbus', 'Protocol', 'Register', 'Map', 'RTU', 'RS485',
+                    'Communication', 'Interface', 'Guide', 'Application', 'Note',
+                    'Version', 'Customer', 'User', 'Manual', 'Comm']:
+            cleaned = cleaned.replace(rm, '').replace(rm.lower(), '')
+        cleaned = re.sub(rf'^{re.escape(manufacturer)}[_\s-]*', '', cleaned, flags=re.I)
+        cleaned = re.sub(r'[_\s]+v?\d+$', '', cleaned)  # trailing version
+        cleaned = re.sub(r'[_\s]+', ' ', cleaned).strip(' _-')
+        if cleaned and len(cleaned) >= 3:
+            model = cleaned
+
+    return model
+
+
 def extract_excel_sheets(excel_path: str) -> Dict[str, List[List[str]]]:
     """openpyxl로 Excel 시트별 행 추출 — 헤더 반복 시 섹션별 분리"""
     openpyxl = get_openpyxl()
@@ -1670,6 +1715,27 @@ def run_stage1(
         categorized['DER_CONTROL'] = []
         categorized['DER_MONITOR'] = []
         categorized['IV_SCAN'] = []
+
+    # ── Model 레지스터 없으면 PDF 메타데이터에서 모델명 추출 ──
+    has_model_reg = any(
+        any(k in r.definition.lower() for k in ['model', 'device type', 'type code'])
+        and not any(k in r.definition.lower() for k in ['working', 'battery', 'pf', 'init fault',
+                                                          'output type', 'phase type'])
+        for r in categorized.get('INFO', []))
+    if not has_model_reg:
+        pdf_model = _extract_model_from_pdf(input_path, manufacturer)
+        if pdf_model:
+            categorized['INFO'].insert(0, RegisterRow(
+                definition='DEVICE_MODEL (PDF)',
+                address='PDF',
+                address_hex='PDF',
+                data_type='TEXT',
+                rw='RO',
+                comment=pdf_model,
+                category='INFO',
+            ))
+            meta['pdf_model'] = pdf_model
+            log(f'  Model 레지스터 없음 → PDF에서 추출: {pdf_model}')
 
     counts = {cat: len(regs) for cat, regs in categorized.items()}
     log('분류 결과:')
