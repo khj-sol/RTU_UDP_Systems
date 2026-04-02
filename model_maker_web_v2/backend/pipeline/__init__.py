@@ -277,15 +277,20 @@ MPPT_CURRENT_RE = re.compile(r'MPPT[_\s]*(\d+)[_\s]*(?:INPUT[_\s]*)?CURRENT', re
 MPPT_POWER_RE   = re.compile(r'MPPT[_\s]*(\d+)[_\s]*(?:INPUT[_\s]*)?POWER', re.I)
 STRING_VOLTAGE_RE = re.compile(r'STRING[_\s]*(\d+)[_\s]*(?:INPUT[_\s]*)?VOLTAGE', re.I)
 STRING_CURRENT_RE = re.compile(r'STRING[_\s]*(\d+)[_\s]*(?:INPUT[_\s]*)?CURRENT', re.I)
-PV_VOLTAGE_RE = re.compile(r'PV[_\s]*(\d+)[_\s]*VOLTAGE', re.I)
-PV_CURRENT_RE = re.compile(r'PV[_\s]*(\d+)[_\s]*CURRENT', re.I)
+PV_VOLTAGE_RE = re.compile(r'PV[_\s]*(\d+)[_\s]*(?:INPUT[_\s]*)?VOLTAGE', re.I)
+PV_CURRENT_RE = re.compile(r'PV[_\s]*(\d+)[_\s]*(?:INPUT[_\s]*)?CURRENT', re.I)
 
 
 def detect_channel_number(definition: str) -> Optional[tuple]:
     """
     레지스터 이름에서 채널 번호 추출
     Returns: ('MPPT', n) or ('STRING', n) or None
+    IV Point/calibration 패턴은 제외 (IV 데이터, 보정값)
     """
+    dl = definition.lower()
+    # V2: IV 데이터/보정값 제외 — H01 MPPT가 아님
+    if 'point' in dl or 'calibration' in dl or 'coefficient' in dl:
+        return None
     for pat, prefix in [(MPPT_VOLTAGE_RE, 'MPPT'), (MPPT_CURRENT_RE, 'MPPT'),
                          (MPPT_POWER_RE, 'MPPT'), (PV_VOLTAGE_RE, 'MPPT'),
                          (PV_CURRENT_RE, 'MPPT'),
