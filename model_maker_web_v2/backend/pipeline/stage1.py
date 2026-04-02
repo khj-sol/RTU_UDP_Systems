@@ -233,7 +233,7 @@ def _parse_register_row(row: list, col_map: dict) -> Optional[RegisterRow]:
             if i == actual_addr_idx:
                 continue
             c = str(cell).strip()
-            if not c or len(c) <= 2:
+            if not c or (len(c) <= 2 and c.upper() not in ('SN', 'FW', 'PN')):
                 continue
             # V2: 숫자만 있는 셀은 행번호 — 이름이 아님
             if re.match(r'^\d{1,5}$', c):
