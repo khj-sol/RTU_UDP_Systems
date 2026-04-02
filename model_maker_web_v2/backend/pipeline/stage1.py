@@ -664,7 +664,9 @@ def _scan_pdf_definitions(pages: list, result: dict):
                             break
                     dl = desc.lower()
                     if any(k in dl for k in ['mode', 'standby', 'on-grid', 'fault', 'shutdown',
-                                              'initial', 'off-grid', 'waiting', 'normal']):
+                                              'initial', 'off-grid', 'waiting', 'normal',
+                                              'charge', 'battery', 'running', 'check',
+                                              'derating', 'sleep', 'program']):
                         hex_modes[val] = desc
             if len(hex_modes) >= 3:
                 if not any(d['page'] == page_num and d['type'] == 'mode_table'
@@ -683,7 +685,9 @@ def _scan_pdf_definitions(pages: list, result: dict):
                 desc = m.group(2).strip()[:50]
                 dl = desc.lower()
                 if any(k in dl for k in ['standby', 'fault', 'shutdown', 'running',
-                                          'on-grid', 'off-grid', 'detecting', 'spot']):
+                                          'on-grid', 'off-grid', 'detecting', 'spot',
+                                          'charge', 'battery', 'check', 'derating',
+                                          'sleep', 'waiting', 'initial', 'program']):
                     hex_status[val] = desc
         if len(hex_status) >= 3:
             if not any(d['page'] == page_num and 'Hex' in d.get('name', '')
@@ -698,14 +702,17 @@ def _scan_pdf_definitions(pages: list, result: dict):
         # Goodwe: "0:cWaitMode", "1:cNormalMode", "2:cFaultMode"
         num_status = {}
         for line in lines:
-            m = re.match(r'\s*(\d{1,2})\s*[:：]\s*(.+)', line.strip())
+            # "N: description" 또는 "NN---description" (ESINV)
+            m = re.match(r'\s*(\d{1,2})\s*(?:[:：]|---)\s*(.+)', line.strip())
             if m:
                 val = int(m.group(1))
                 desc = m.group(2).strip()[:50]
                 dl = desc.lower()
                 if any(k in dl for k in ['offline', 'standby', 'faulty', 'running', 'power',
                                           'mode', 'wait', 'normal', 'fault', 'stop',
-                                          'initializ', 'check', 'mpp', 'search', 'close']):
+                                          'initializ', 'check', 'mpp', 'search', 'close',
+                                          'no response', 'volt', 'reactive', 'fixed',
+                                          'disable', 'enable']):
                     num_status[val] = desc
         if len(num_status) >= 3:
             if not any(d['page'] == page_num for d in result['status_defs']):
@@ -786,22 +793,102 @@ def _scan_pdf_definitions(pages: list, result: dict):
                         'type': 'fault_codes', 'values': fault_codes, 'page': page_num,
                     })
 
+        # ── 4b) 테이블 기반: ABB "숫자 | 설명" 상태/알람 테이블 ──
+        # "1 | Checking Grid", "44 | Waiting Start", "45 | MPPT"
+        for tab in p.get('tables', []):
+            cleaned = _clean_table(tab)
+            num_vals = {}
+            for row in cleaned:
+                cells = [str(c).strip() for c in row]
+                if len(cells) >= 2 and cells[0].isdigit() and int(cells[0]) >= 0:
+                    val = int(cells[0])
+                    desc = ''
+                    for c in cells[1:]:
+                        if c and len(c) > 2 and not c.isdigit() and not c.startswith('0x'):
+                            desc = c[:50]
+                            break
+                    if desc:
+                        num_vals[val] = desc
+            if len(num_vals) >= 5:
+                # 상태 vs 알람 판별: 상태 키워드 비율
+                status_kw = sum(1 for d in num_vals.values()
+                               if any(k in d.lower() for k in ['waiting', 'mppt', 'start',
+                                                                 'grid', 'off', 'check']))
+                is_status = status_kw > len(num_vals) * 0.3
+                target = 'status_defs' if is_status else 'alarm_defs'
+                def_type = 'mode_table' if is_status else 'fault_codes'
+                if not any(d['page'] == page_num and d['type'] == def_type
+                           for d in result[target]):
+                    result[target].append({
+                        'address': None, 'name': f'Num Table (P{page_num})',
+                        'type': def_type, 'values': num_vals, 'page': page_num,
+                    })
+
+        # ── 4c) 테이블 기반: Growatt 32bit hex fault code ──
+        # "0x00000002 | Communication error | 0x0002 | String communication abnormal"
+        for tab in p.get('tables', []):
+            cleaned = _clean_table(tab)
+            hex32_faults = {}
+            for row in cleaned:
+                cells = [str(c).strip() for c in row]
+                if not cells:
+                    continue
+                m32 = re.match(r'^0x([0-9A-Fa-f]{4,8})$', cells[0])
+                if m32:
+                    val = int(m32.group(1), 16)
+                    desc = ''
+                    for c in cells[1:]:
+                        if c and len(c) > 2 and not c.startswith('0x') and not c.startswith('\\'):
+                            desc = c[:50]
+                            break
+                    if desc:
+                        hex32_faults[val] = desc
+            if len(hex32_faults) >= 3:
+                if not any(d['page'] == page_num and 'Hex32' in d.get('name', '')
+                           for d in result['alarm_defs']):
+                    result['alarm_defs'].append({
+                        'address': None, 'name': f'Hex32 Fault (P{page_num})',
+                        'type': 'fault_codes', 'values': hex32_faults, 'page': page_num,
+                    })
+
+        # ── 4d) 테이블 기반: EG4 Bit0~31 Fault/Warning 테이블 ──
+        # "0 | Internal comm fault 1 | E000 | Battery comm failure | W000"
+        for tab in p.get('tables', []):
+            cleaned = _clean_table(tab)
+            eg4_faults = {}
+            for row in cleaned:
+                cells = [str(c).strip() for c in row]
+                if len(cells) >= 3 and cells[0].isdigit():
+                    bit_num = int(cells[0])
+                    # Fault description (col 1) + FaultCode (col 2)
+                    desc = cells[1][:40] if cells[1] and cells[1] != 'rsvd' else ''
+                    code = cells[2][:10] if len(cells) > 2 else ''
+                    if desc and 0 <= bit_num <= 31 and (code.startswith('E') or code.startswith('W')):
+                        eg4_faults[bit_num] = f'{desc} ({code})'
+            if len(eg4_faults) >= 3:
+                if not any(d['page'] == page_num and 'EG4' in d.get('name', '')
+                           for d in result['alarm_defs']):
+                    result['alarm_defs'].append({
+                        'address': None, 'name': f'EG4 Fault/Warn (P{page_num})',
+                        'type': 'bitfield', 'values': eg4_faults, 'page': page_num,
+                    })
+
         # ── 5) 테이블 기반: Kstar/Huawei bitfield ──
         # "0 | Bit0 | F00 | Grid Volt Low" — Bit{N} 키워드가 있는 테이블만
         for tab in p.get('tables', []):
             cleaned = _clean_table(tab)
             # 테이블에 "Bit" 키워드가 있는지 먼저 확인
-            has_bit_keyword = any('Bit' in str(c) or 'bit' in str(c)
-                                  for row in cleaned[:3] for c in row)
+            has_bit_keyword = any('Bit' in str(c) or 'bit' in str(c) or 'BIT' in str(c)
+                                  for row in cleaned[:5] for c in row)
             if not has_bit_keyword:
                 continue
             bits = {}
             for row in cleaned:
                 cells = [str(c).strip() for c in row]
                 if len(cells) >= 2:
-                    # "0 | Bit0 | W00 | Fan A Lock" 또는 "Bit0 | F00 | Grid Volt Low"
+                    # "Bit0", "Bit15", "BIT00", "BIT01", "Bi12" 등
                     for ci, c in enumerate(cells[:3]):
-                        m_bit = re.match(r'^Bit\s*(\d{1,2})$', c)
+                        m_bit = re.match(r'^(?:Bit|BIT|Bi)\s*(\d{1,2})$', c)
                         if m_bit:
                             bit_num = int(m_bit.group(1))
                             desc = ''
@@ -824,7 +911,7 @@ def _scan_pdf_definitions(pages: list, result: dict):
         # "Bit00: input overvoltage", "Bit01: input undervoltage"
         bit_defs = {}
         for line in lines:
-            m = re.match(r'\s*Bit\s*(\d{1,2})\s*[:：]\s*(.+)', line.strip())
+            m = re.match(r'\s*(?:Bit|BIT|Bi)\s*(\d{1,2})\s*[:：]\s*(.+)', line.strip())
             if m:
                 bit_num = int(m.group(1))
                 desc = m.group(2).strip()[:50]
@@ -2173,53 +2260,58 @@ def run_stage1(
 
 def _link_definitions_to_registers(categorized: dict, def_tables: dict):
     """정의 테이블을 STATUS/ALARM 레지스터에 연결"""
-    # STATUS 레지스터에 정의 연결
+    # STATUS: h01_field='inverter_status'인 레지스터에 가장 적합한 mode_table 연결
+    status_reg = None
     for reg in categorized.get('STATUS', []):
-        addr = reg.address if isinstance(reg.address, int) else 0
-        defn_lower = reg.definition.lower().replace('_', ' ')
-        comment_lower = (reg.comment or '').lower()
-
+        if getattr(reg, 'h01_field', '') == 'inverter_status':
+            status_reg = reg
+            break
+    if status_reg and not getattr(status_reg, 'value_definitions', None):
+        addr = status_reg.address if isinstance(status_reg.address, int) else 0
+        best_def = None
         for d in def_tables['status_defs']:
-            # 1) 주소 매칭
+            if d['type'] != 'mode_table':
+                continue
+            # 1) 주소 매칭 → 최우선
             if d.get('address') and d['address'] == addr:
-                reg.value_definitions = d['values']
+                best_def = d
                 break
-            # 2) 이름 매칭: comment에 인라인 정의가 있는 경우
-            if d.get('address') == addr and addr > 0:
-                reg.value_definitions = d['values']
-                break
-            # 3) 키워드 매칭: mode/status 레지스터 + 정의 타입 일치
-            if d['type'] == 'mode_table' and not d.get('address'):
-                if any(k in defn_lower for k in ['inverter mode', 'work mode', 'work state',
-                                                   'operating mode', 'running status',
-                                                   '시스템동작상태', 'device status']):
-                    if not getattr(reg, 'value_definitions', None):
-                        reg.value_definitions = d['values']
+            # 2) 가장 적합한 mode_table (status 키워드 포함 + 값 3개 이상)
+            vals = d.get('values', {})
+            if len(vals) >= 3:
+                has_status_kw = any(any(k in str(v).lower() for k in
+                                        ['standby', 'fault', 'running', 'wait', 'off',
+                                         'sleep', 'check', 'mppt', 'normal', 'initial',
+                                         'no response'])
+                                    for v in vals.values())
+                if has_status_kw:
+                    if best_def is None or len(vals) > len(best_def.get('values', {})):
+                        best_def = d
+        if best_def:
+            status_reg.value_definitions = best_def['values']
 
-    # ALARM 레지스터에 정의 연결
-    for reg in categorized.get('ALARM', []):
-        addr = reg.address if isinstance(reg.address, int) else 0
-        defn_lower = reg.definition.lower().replace('_', ' ')
-        comment_lower = (reg.comment or '').lower()
-
+    # ALARM: alarm1 (첫 번째 ALARM) 레지스터에 가장 큰 bitfield/fault_codes 연결
+    alarm_regs = categorized.get('ALARM', [])
+    if alarm_regs and def_tables['alarm_defs']:
+        # bitfield를 우선, 없으면 fault_codes 중 가장 큰 것
+        best_bitfield = None
+        best_fault = None
         for d in def_tables['alarm_defs']:
-            # 1) 주소 매칭
-            if d.get('address') and d['address'] == addr:
-                reg.value_definitions = d['values']
-                break
-            # 2) 이름 키워드 매칭 (Error Code 1 → Error Code Table1)
-            if not d.get('address'):
-                d_name_lower = d['name'].lower()
-                # "Error Code Table1" ↔ "Error Code1"
-                if ('error code' in defn_lower and 'error code' in d_name_lower) or \
-                   ('alarm code' in defn_lower and 'alarm' in d_name_lower) or \
-                   ('dsp alarm' in defn_lower and 'dsp alarm' in d_name_lower) or \
-                   ('dsp error' in defn_lower and 'dsp error' in d_name_lower) or \
-                   ('arm alarm' in defn_lower and 'arm alarm' in d_name_lower) or \
-                   ('fault status' in defn_lower and 'fault' in d_name_lower) or \
-                   ('error message' in defn_lower and 'error' in d_name_lower):
-                    if not getattr(reg, 'value_definitions', None):
-                        reg.value_definitions = d['values']
+            vals = d.get('values', {})
+            if d['type'] == 'bitfield' and len(vals) >= 3:
+                if best_bitfield is None or len(vals) > len(best_bitfield.get('values', {})):
+                    best_bitfield = d
+            elif d['type'] == 'fault_codes' and len(vals) >= 3:
+                if best_fault is None or len(vals) > len(best_fault.get('values', {})):
+                    best_fault = d
+
+        best_alarm_def = best_bitfield or best_fault
+        if best_alarm_def:
+            # alarm1에 연결
+            for reg in alarm_regs:
+                if not getattr(reg, 'value_definitions', None):
+                    reg.value_definitions = best_alarm_def['values']
+                    break  # 첫 번째 ALARM만
 
 
 def _build_der_match_table(categorized: dict) -> List[dict]:
