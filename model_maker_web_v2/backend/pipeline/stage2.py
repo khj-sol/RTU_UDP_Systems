@@ -1,437 +1,308 @@
 # -*- coding: utf-8 -*-
 """
-Stage 2 — MPPT/String 필터링 + H01/DER 매칭 검증 → Stage 2 Excel
+Stage 2 — MPPT/String 필터링 + REVIEW 추천 → Stage 2 Excel (MAPPING_RULES_V2)
 
-Stage 1 Excel에서 실제 인버터 용량에 맞게 MPPT/String 채널을 필터링하고,
-UDP 프로토콜 H01 바디/DER 필드와의 매칭 상태를 검증한다.
+입력: Stage 1 Excel (4시트: 1_INFO, 2_H01, 3_DER, 4_IV)
+출력: Stage 2 Excel (3시트: 1_REGISTER_MAP, 2_REVIEW, 3_SUMMARY)
+
+V2 핵심:
+- 사용자가 MPPT/String/용량 지정 → 해당 채널만 필터링
+- REVIEW 항목에 추천 대안 매핑 제안 (synonym 퍼지 + 주소 근접 레퍼런스)
 """
 import os
 import re
 from datetime import datetime
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 
 from . import (
-    PROJECT_ROOT, UDP_PROTOCOL_DIR,
-    RegisterRow, CATEGORY_COLORS, MATCH_COLORS,
-    load_reference_patterns,
-    to_upper_snake, parse_address, match_synonym, match_synonym_fuzzy,
-    detect_channel_number,
-    load_synonym_db, load_review_history,
+    PROJECT_ROOT, RegisterRow, CATEGORY_COLORS, MATCH_COLORS,
+    H01_DER_OVERLAP_FIELDS, H01_HANDLER_COMPUTED_FIELDS,
+    DER_CONTROL_REGS, DER_MONITOR_REGS,
+    to_upper_snake, parse_address,
+    match_synonym, match_synonym_fuzzy, detect_channel_number,
+    load_synonym_db, load_review_history, load_reference_patterns,
     get_openpyxl, ProgressCallback,
 )
+from .rules import filter_channels_stage2, distribute_alarms
 
 
-# ─── UDP 프로토콜 Excel H01 필드 파싱 ────────────────────────────────────────
+# ─── Stage 1 Excel V2 파서 ─────────────────────────────────────────────────
 
-def _find_udp_excel() -> Optional[str]:
-    """UDP 프로토콜 Excel 자동 탐색"""
-    import glob
-    pattern = os.path.join(UDP_PROTOCOL_DIR, 'Solarize_RTU2Server_UDP_*.xlsx')
-    files = sorted(glob.glob(pattern), reverse=True)
-    return files[0] if files else None
-
-
-def parse_udp_h01_fields(device_type: str = 'inverter') -> List[dict]:
+def read_stage1_excel_v2(excel_path: str) -> dict:
     """
-    UDP 프로토콜 Excel에서 H01 바디 필드 파싱
-    Returns: [{'name': str, 'h01_key': str, 'size': int, 'type': str, 'unit': str}]
+    Stage 1 Excel (4시트 구조) 읽기
+    Returns: {
+        'meta': dict,
+        'info': [RegisterRow],
+        'monitoring': [RegisterRow],
+        'status': [RegisterRow],
+        'alarm': [RegisterRow],
+        'review': [RegisterRow],
+        'h01_match': [dict],  # H01 매칭 테이블
+        'iv_regs': [RegisterRow],
+    }
     """
     openpyxl = get_openpyxl()
-    udp_path = _find_udp_excel()
-    if not udp_path:
-        return _fallback_h01_fields(device_type)
+    wb = openpyxl.load_workbook(excel_path, data_only=True)
 
-    wb = openpyxl.load_workbook(udp_path, data_only=True)
-
-    # 설비 타입별 시트 선택
-    sheet_map = {
-        'inverter': '(P) BODY(인버터)',
-        'relay': '(P) BODY(보호계전기)',
-        'weather': '(P) BODY(환경센서)',
+    result = {
+        'meta': {}, 'info': [], 'monitoring': [], 'status': [],
+        'alarm': [], 'review': [], 'h01_match': [], 'iv_regs': [],
     }
-    target_sheet = sheet_map.get(device_type)
-    if not target_sheet or target_sheet not in wb.sheetnames:
-        # 유사한 시트명 탐색
-        for sn in wb.sheetnames:
-            if device_type in sn.lower() or ('인버터' in sn and device_type == 'inverter'):
-                target_sheet = sn
-                break
-        if target_sheet not in wb.sheetnames:
-            wb.close()
-            return _fallback_h01_fields(device_type)
 
-    ws = wb[target_sheet]
-    fields = []
-    header_row = None
+    # ── 1_INFO 시트: 메타 + INFO/STATUS/ALARM/REVIEW 섹션 파싱 ──
+    if '1_INFO' in wb.sheetnames:
+        ws = wb['1_INFO']
+        current_section = 'META'
+        header = None
 
-    for row in ws.iter_rows(values_only=True):
-        cells = [str(c).strip() if c is not None else '' for c in row]
-        if not header_row:
-            # Name/이름 컬럼이 있는 행을 헤더로
-            for i, c in enumerate(cells):
-                if any(k in c.lower() for k in ['name', '이름', '항목', 'field']):
-                    header_row = cells
-                    break
-            continue
-        if not any(cells):
-            continue
-        # 필드 파싱
-        name = ''
-        size = 0
-        dtype = ''
-        unit = ''
-        for i, c in enumerate(cells):
-            cl = header_row[i].lower() if i < len(header_row) else ''
-            if any(k in cl for k in ['name', '이름', '항목']):
-                name = c
-            elif any(k in cl for k in ['size', '크기', 'byte', 'length']):
-                try:
-                    size = int(c)
-                except (ValueError, TypeError):
-                    pass
-            elif any(k in cl for k in ['type', '타입']):
-                dtype = c
-            elif any(k in cl for k in ['unit', '단위']):
-                unit = c
-
-        if name:
-            h01_key = _name_to_h01_key(name)
-            fields.append({'name': name, 'h01_key': h01_key, 'size': size,
-                           'type': dtype, 'unit': unit})
-
-    wb.close()
-    return fields
-
-
-def _name_to_h01_key(name: str) -> str:
-    """UDP Excel Name → h01_key 변환"""
-    name_lower = name.lower().strip()
-    key_map = {
-        'pv 전압': 'pv_voltage', 'pv전압': 'pv_voltage',
-        'pv 전류': 'pv_current', 'pv전류': 'pv_current',
-        'pv 출력': 'pv_power', 'pv출력': 'pv_power',
-        'r (rs)상 전압': 'r_voltage', 'r상 전압': 'r_voltage', 'r상전압': 'r_voltage',
-        's (st)상 전압': 's_voltage', 's상 전압': 's_voltage', 's상전압': 's_voltage',
-        't (tr)상 전압': 't_voltage', 't상 전압': 't_voltage', 't상전압': 't_voltage',
-        'r상 전류': 'r_current', 'r상전류': 'r_current',
-        's상 전류': 's_current', 's상전류': 's_current',
-        't상 전류': 't_current', 't상전류': 't_current',
-        '인버터 출력': 'ac_power', '유효전력': 'ac_power', 'ac출력': 'ac_power',
-        '역률': 'power_factor', 'power factor': 'power_factor',
-        '주파수': 'frequency', 'frequency': 'frequency',
-        '무효전력': 'reactive_power', 'reactive power': 'reactive_power',
-        '피상전력': 'apparent_power', 'apparent power': 'apparent_power',
-        '일일 발전량': 'daily_energy', '금일발전량': 'daily_energy',
-        '누적 발전량': 'cumulative_energy', '누적발전량': 'cumulative_energy',
-        '상태 정보 1': 'status', '상태정보1': 'status',
-        '상태 정보 2': 'alarm1', '상태정보2': 'alarm1',
-        '상태 정보 3': 'alarm2', '상태정보3': 'alarm2',
-        '상태 정보 4': 'alarm3', '상태정보4': 'alarm3',
-        '인버터 온도': 'temperature', '온도': 'temperature',
-    }
-    for k, v in key_map.items():
-        if k in name_lower:
-            return v
-    # MPPT/String 패턴
-    m = re.search(r'mppt(\d+)', name_lower)
-    if m:
-        n = m.group(1)
-        if '전압' in name_lower or 'voltage' in name_lower:
-            return f'mppt{n}_voltage'
-        if '전류' in name_lower or 'current' in name_lower:
-            return f'mppt{n}_current'
-    m = re.search(r'string(\d+)', name_lower)
-    if m:
-        n = m.group(1)
-        if '전류' in name_lower or 'current' in name_lower:
-            return f'string{n}_current'
-
-    return to_upper_snake(name).lower()
-
-
-def _fallback_h01_fields(device_type: str) -> List[dict]:
-    """UDP Excel 없을 때 기본 H01 필드"""
-    if device_type != 'inverter':
-        return []
-    return [
-        {'name': 'PV 전압', 'h01_key': 'pv_voltage', 'size': 2},
-        {'name': 'PV 전류', 'h01_key': 'pv_current', 'size': 2},
-        {'name': 'PV 출력', 'h01_key': 'pv_power', 'size': 4},
-        {'name': 'R상 전압', 'h01_key': 'r_voltage', 'size': 2},
-        {'name': 'S상 전압', 'h01_key': 's_voltage', 'size': 2},
-        {'name': 'T상 전압', 'h01_key': 't_voltage', 'size': 2},
-        {'name': 'R상 전류', 'h01_key': 'r_current', 'size': 2},
-        {'name': 'S상 전류', 'h01_key': 's_current', 'size': 2},
-        {'name': 'T상 전류', 'h01_key': 't_current', 'size': 2},
-        {'name': '인버터 출력', 'h01_key': 'ac_power', 'size': 4},
-        {'name': '역률', 'h01_key': 'power_factor', 'size': 2},
-        {'name': '주파수', 'h01_key': 'frequency', 'size': 2},
-        {'name': '무효전력', 'h01_key': 'reactive_power', 'size': 4},
-        {'name': '피상전력', 'h01_key': 'apparent_power', 'size': 4},
-        {'name': '일일 발전량', 'h01_key': 'daily_energy', 'size': 4},
-        {'name': '누적 발전량', 'h01_key': 'cumulative_energy', 'size': 8},
-        {'name': '상태 정보 1', 'h01_key': 'status', 'size': 2},
-        {'name': '상태 정보 2', 'h01_key': 'alarm1', 'size': 2},
-        {'name': '상태 정보 3', 'h01_key': 'alarm2', 'size': 2},
-        {'name': '상태 정보 4', 'h01_key': 'alarm3', 'size': 2},
-        {'name': '인버터 온도', 'h01_key': 'temperature', 'size': 2},
-    ]
-
-
-# ─── DER 필드 정의 ──────────────────────────────────────────────────────────
-
-def _get_der_control_fields() -> List[dict]:
-    """DER-AVM 제어 필드"""
-    return [
-        {'name': 'Power Factor Set', 'key': 'power_factor_set'},
-        {'name': 'Action Mode', 'key': 'action_mode'},
-        {'name': 'Reactive Power %', 'key': 'reactive_power_pct'},
-        {'name': 'Active Power %', 'key': 'active_power_pct'},
-        {'name': 'ON/OFF', 'key': 'on_off'},
-    ]
-
-
-def _get_der_monitor_fields() -> List[dict]:
-    """DER-AVM 모니터링 필드"""
-    return [
-        {'name': 'DEA L1 Current', 'key': 'dea_l1_current'},
-        {'name': 'DEA L2 Current', 'key': 'dea_l2_current'},
-        {'name': 'DEA L3 Current', 'key': 'dea_l3_current'},
-        {'name': 'DEA L1 Voltage', 'key': 'dea_l1_voltage'},
-        {'name': 'DEA L2 Voltage', 'key': 'dea_l2_voltage'},
-        {'name': 'DEA L3 Voltage', 'key': 'dea_l3_voltage'},
-        {'name': 'DEA Active Power', 'key': 'dea_active_power'},
-        {'name': 'DEA Reactive Power', 'key': 'dea_reactive_power'},
-        {'name': 'DEA Power Factor', 'key': 'dea_power_factor'},
-        {'name': 'DEA Frequency', 'key': 'dea_frequency'},
-        {'name': 'DEA Status Flag', 'key': 'dea_status_flag'},
-    ]
-
-
-# ─── Stage 1 Excel 읽기 ─────────────────────────────────────────────────────
-
-def read_stage1_excel(path: str) -> dict:
-    """Stage 1 Excel → {meta, registers_by_category}"""
-    openpyxl = get_openpyxl()
-    wb = openpyxl.load_workbook(path, data_only=True)
-
-    # META
-    meta = {}
-    if 'META' in wb.sheetnames:
-        ws = wb['META']
         for row in ws.iter_rows(values_only=True):
             cells = [str(c).strip() if c is not None else '' for c in row]
-            if len(cells) >= 2 and cells[0]:
-                meta[cells[0]] = cells[1]
+            first = cells[0] if cells else ''
 
-    # 카테고리별 레지스터
-    categories = {}
-    for cat in ['INFO', 'MONITORING', 'STATUS', 'ALARM',
-                'DER_CONTROL', 'DER_MONITOR', 'IV_SCAN', 'REVIEW']:
-        if cat not in wb.sheetnames:
-            continue
-        ws = wb[cat]
-        rows = list(ws.iter_rows(values_only=True))
-        if len(rows) < 2:
-            categories[cat] = []
-            continue
-
-        header = [str(c).strip() if c else '' for c in rows[0]]
-        regs = []
-        for row in rows[1:]:
-            cells = [str(c).strip() if c is not None else '' for c in row]
-            if not any(cells):
+            # 섹션 감지
+            if first.startswith('Stage 1'):
                 continue
-            d = {}
-            for i, h in enumerate(header):
-                if i < len(cells):
-                    hl = h.lower()
-                    if 'definition' in hl or 'name' in hl:
-                        d['definition'] = cells[i]
-                    elif 'address' in hl:
-                        d['address_hex'] = cells[i]
-                        d['address'] = parse_address(cells[i]) or 0
-                    elif 'type' in hl:
-                        d['data_type'] = cells[i]
-                    elif 'unit' in hl or 'scale' in hl:
-                        parts = cells[i].split()
-                        d['unit'] = parts[0] if parts else ''
-                        d['scale'] = parts[1] if len(parts) > 1 else ''
-                    elif 'r/w' in hl or 'access' in hl:
-                        d['rw'] = cells[i]
-                    elif 'comment' in hl or 'remark' in hl:
-                        d['comment'] = cells[i]
-                    elif 'h01' in hl and 'field' in hl:
-                        d['h01_field'] = cells[i]
-                    elif 'reg' in hl:
-                        d['regs'] = cells[i]
-                    elif '사유' in h:
-                        d['review_reason'] = cells[i]
-                    elif '제안' in h:
-                        d['review_suggestion'] = cells[i]
-                    elif '판정' in h:
-                        d['user_verdict'] = cells[i]
-            d['category'] = cat
-            regs.append(RegisterRow.from_dict(d))
-        categories[cat] = regs
+            if 'INFO 레지스터' in first:
+                current_section = 'INFO'
+                header = None
+                continue
+            if 'STATUS 레지스터' in first:
+                current_section = 'STATUS'
+                header = None
+                continue
+            if 'ALARM 레지스터' in first:
+                current_section = 'ALARM'
+                header = None
+                continue
+            if 'REVIEW' in first and '개' in first:
+                current_section = 'REVIEW'
+                header = None
+                continue
+
+            if current_section == 'META':
+                if first and cells[1] if len(cells) > 1 else '':
+                    key = first.strip()
+                    val = cells[1].strip() if len(cells) > 1 else ''
+                    # 메타 키 매핑
+                    meta_map = {
+                        '제조사': 'manufacturer', '프로토콜 버전': 'protocol_version',
+                        '설비 타입': 'device_type', 'MPPT': 'max_mppt',
+                        'String': 'max_string', 'IV Scan': 'iv_scan',
+                        'IV Data Points': 'iv_data_points', 'IV Trackers': 'iv_trackers',
+                        'H01 매칭': 'h01_match_str', 'DER 매칭': 'der_match_str',
+                        '추출 레지스터': 'total_extracted', 'REVIEW': 'review_count',
+                    }
+                    if key in meta_map:
+                        result['meta'][meta_map[key]] = val
+            else:
+                # 헤더 행 감지
+                if first == 'No' or first == 'No.':
+                    header = cells
+                    continue
+                if not header or not first:
+                    continue
+
+                # 레지스터 행 파싱
+                reg = _parse_section_row(cells, header, current_section)
+                if reg:
+                    if current_section == 'INFO':
+                        result['info'].append(reg)
+                    elif current_section == 'STATUS':
+                        result['status'].append(reg)
+                    elif current_section == 'ALARM':
+                        result['alarm'].append(reg)
+                    elif current_section == 'REVIEW':
+                        result['review'].append(reg)
+
+    # ── 2_H01 시트: H01 매칭 테이블 + MONITORING 목록 ──
+    if '2_H01' in wb.sheetnames:
+        ws = wb['2_H01']
+        current_section = 'H01_TABLE'
+        header = None
+
+        for row in ws.iter_rows(values_only=True):
+            cells = [str(c).strip() if c is not None else '' for c in row]
+            first = cells[0] if cells else ''
+
+            if first.startswith('H01 모니터링'):
+                continue
+            if 'MONITORING 전체' in first:
+                current_section = 'MONITORING'
+                header = None
+                continue
+
+            if current_section == 'H01_TABLE':
+                if first == 'No':
+                    header = cells
+                    continue
+                if header and first.isdigit():
+                    result['h01_match'].append({
+                        'field': cells[1], 'source': cells[2],
+                        'status': cells[3], 'address': cells[4],
+                        'definition': cells[5], 'note': cells[6] if len(cells) > 6 else '',
+                    })
+            elif current_section == 'MONITORING':
+                if first == 'No':
+                    header = cells
+                    continue
+                if header and first.isdigit():
+                    reg = _parse_section_row(cells, header, 'MONITORING')
+                    if reg:
+                        result['monitoring'].append(reg)
+
+    # ── 4_IV 시트: IV 레지스터 ──
+    if '4_IV' in wb.sheetnames:
+        ws = wb['4_IV']
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            cells = [str(c).strip() if c is not None else '' for c in row]
+            if cells[0] and cells[0].isdigit() and len(cells) >= 4:
+                addr = parse_address(cells[3]) if len(cells) > 3 else None
+                if addr is not None:
+                    result['iv_regs'].append(RegisterRow(
+                        definition=cells[2] if len(cells) > 2 else cells[1],
+                        address=addr, data_type=cells[5] if len(cells) > 5 else 'U16',
+                        category='IV_SCAN',
+                    ))
 
     wb.close()
-    return {'meta': meta, 'categories': categories}
+    return result
 
 
-# ─── MPPT/String 필터링 ─────────────────────────────────────────────────────
-
-def filter_channels(registers: List[RegisterRow],
-                    mppt_count: int,
-                    total_strings: int) -> List[RegisterRow]:
-    """MPPT/String 채널 수에 따라 필터링"""
-    filtered = []
-    for reg in registers:
-        ch = detect_channel_number(reg.definition)
-        if ch:
-            prefix, n = ch
-            if prefix == 'MPPT' and n > mppt_count:
-                continue
-            if prefix == 'STRING' and n > total_strings:
-                continue
-        filtered.append(reg)
-    return filtered
-
-
-# ─── H01/DER 매칭 검증 ──────────────────────────────────────────────────────
-
-def verify_h01_match(all_regs: List[RegisterRow],
-                     h01_fields: List[dict],
-                     synonym_db: dict) -> List[dict]:
-    """
-    H01 필드별 매칭 상태 검증
-    Returns: [{'h01_field': str, 'h01_name': str, 'matched_reg': str, 'match': 'O'|'X'|'-'}]
-    """
-    results = []
-    # 레지스터의 h01_field 인덱스
-    h01_index = {}
-    for reg in all_regs:
-        if reg.h01_field:
-            h01_index.setdefault(reg.h01_field, []).append(reg)
-
-    for field in h01_fields:
-        key = field['h01_key']
-        name = field['name']
-
-        # MPPT/String 패턴
-        m = re.match(r'(mppt|string)(\d+)_(voltage|current|power)', key)
-        if m:
-            # 채널 데이터는 별도 처리 (ALL에서 확인)
-            prefix = m.group(1).upper()
-            n = int(m.group(2))
-            metric = m.group(3).upper()
-            defn_pattern = f'{prefix}{n}_{metric}'
-            found = False
-            for reg in all_regs:
-                if to_upper_snake(reg.definition).endswith(defn_pattern):
-                    found = True
-                    break
-                if reg.h01_field == key:
-                    found = True
-                    break
-            results.append({
-                'h01_field': key, 'h01_name': name,
-                'matched_reg': defn_pattern if found else '',
-                'matched_addr': '',
-                'scale': '',
-                'match': 'O' if found else 'X',
-            })
+def _parse_section_row(cells: list, header: list, category: str) -> Optional[RegisterRow]:
+    """섹션 행 → RegisterRow"""
+    col_map = {}
+    for i, h in enumerate(header):
+        hl = h.lower()
+        if h == 'No' or h == 'No.':
             continue
+        elif 'definition' in hl or 'name' in hl:
+            col_map['definition'] = i
+        elif 'address' in hl:
+            col_map['address'] = i
+        elif 'type' in hl and 'data' not in hl:
+            col_map['type'] = i
+        elif 'unit' in hl or 'scale' in hl:
+            col_map['scale'] = i
+        elif 'r/w' in hl or 'rw' in hl:
+            col_map['rw'] = i
+        elif 'h01' in hl:
+            col_map['h01_field'] = i
+        elif 'comment' in hl or '비고' in hl:
+            col_map['comment'] = i
+        elif '사유' in hl or 'reason' in hl:
+            col_map['review_reason'] = i
+        elif '제안' in hl or 'suggest' in hl:
+            col_map['review_suggestion'] = i
 
-        # 일반 필드
-        matched = h01_index.get(key, [])
-        if matched:
-            reg = matched[0]
-            results.append({
-                'h01_field': key, 'h01_name': name,
-                'matched_reg': reg.definition,
-                'matched_addr': reg.address_hex,
-                'scale': reg.scale,
-                'match': 'O',
-            })
-        else:
-            # synonym_db로 재탐색
-            found_reg = None
-            for reg in all_regs:
-                sm = match_synonym(reg.definition, synonym_db)
-                if sm and sm.get('h01_field') == key:
-                    found_reg = reg
-                    break
-            if found_reg:
-                results.append({
-                    'h01_field': key, 'h01_name': name,
-                    'matched_reg': found_reg.definition,
-                    'matched_addr': found_reg.address_hex,
-                    'scale': found_reg.scale,
-                    'match': 'O',
-                })
-            else:
-                results.append({
-                    'h01_field': key, 'h01_name': name,
-                    'matched_reg': '', 'matched_addr': '',
-                    'scale': '', 'match': 'X',
-                })
+    defn = cells[col_map['definition']] if 'definition' in col_map else ''
+    if not defn:
+        return None
 
-    return results
+    addr_raw = cells[col_map['address']] if 'address' in col_map else ''
+    addr = parse_address(addr_raw)
+
+    return RegisterRow(
+        definition=defn,
+        address=addr if addr is not None else 0,
+        address_hex=addr_raw if addr_raw.startswith('0x') else (f'0x{addr:04X}' if addr else ''),
+        data_type=cells[col_map.get('type', 99)] if col_map.get('type', 99) < len(cells) else 'U16',
+        scale=cells[col_map.get('scale', 99)] if col_map.get('scale', 99) < len(cells) else '',
+        rw=cells[col_map.get('rw', 99)] if col_map.get('rw', 99) < len(cells) else 'RO',
+        h01_field=cells[col_map.get('h01_field', 99)] if col_map.get('h01_field', 99) < len(cells) else '',
+        comment=cells[col_map.get('comment', 99)] if col_map.get('comment', 99) < len(cells) else '',
+        category=category,
+        review_reason=cells[col_map.get('review_reason', 99)] if col_map.get('review_reason', 99) < len(cells) else '',
+        review_suggestion=cells[col_map.get('review_suggestion', 99)] if col_map.get('review_suggestion', 99) < len(cells) else '',
+    )
 
 
-def verify_der_match(all_regs: List[RegisterRow],
-                     synonym_db: dict) -> List[dict]:
+# ─── REVIEW 추천 생성 ──────────────────────────────────────────────────────
+
+def generate_review_alternatives(
+    review_regs: List[RegisterRow],
+    synonym_db: dict,
+    ref_patterns: dict,
+    manufacturer: str,
+) -> List[dict]:
     """
-    DER-AVM 제어/모니터링 매칭 검증
+    REVIEW 항목에 대해 추천 대안 매핑 생성
+    Returns: [{
+        'reg': RegisterRow,
+        'alt1': {'definition': str, 'address': str, 'category': str, 'reason': str} or None,
+        'alt2': {'definition': str, 'address': str, 'category': str, 'reason': str} or None,
+    }]
     """
+    mfr_lower = manufacturer.lower()
+    mfr_ref = {k: v for k, v in ref_patterns.items() if mfr_lower in k.lower()}
+
     results = []
-    der_regs = [r for r in all_regs if r.category in ('DER_CONTROL', 'DER_MONITOR')]
+    for reg in review_regs:
+        alts = []
+        addr = reg.address if isinstance(reg.address, int) else parse_address(reg.address)
 
-    # 제어 필드
-    for field in _get_der_control_fields():
-        found = any(field['key'] in (r.h01_field or '').lower() or
-                    field['key'].replace('_', '') in to_upper_snake(r.definition).lower().replace('_', '')
-                    for r in der_regs)
-        if not found:
-            # 주소 기반
-            from . import DER_CONTROL_REGS
-            for dr in DER_CONTROL_REGS:
-                for r in all_regs:
-                    a = r.address if isinstance(r.address, int) else parse_address(r.address)
-                    if a == dr['addr']:
-                        found = True
+        # 1) synonym_db 퍼지 매칭
+        fuzzy = match_synonym_fuzzy(reg.definition, synonym_db, threshold=0.4)
+        if fuzzy:
+            alts.append({
+                'definition': fuzzy['field'],
+                'address': reg.address_hex,
+                'category': fuzzy['category'],
+                'reason': f'synonym 유사도 {fuzzy["score"]:.0%}',
+            })
+
+        # 2) 주소 근접 레퍼런스 (같은 제조사, ±10 주소)
+        if addr is not None and mfr_ref:
+            for proto, addr_map in mfr_ref.items():
+                for ref_addr, ref_name in addr_map.items():
+                    if abs(ref_addr - addr) <= 10 and ref_addr != addr:
+                        # 이 ref_name의 카테고리 추측
+                        ref_cat = _guess_category(ref_name)
+                        alts.append({
+                            'definition': ref_name,
+                            'address': f'0x{ref_addr:04X}',
+                            'category': ref_cat,
+                            'reason': f'주소 근접 ({proto}, 0x{ref_addr:04X})',
+                        })
                         break
-                if found:
+                if len(alts) >= 2:
                     break
 
-        results.append({
-            'field': field['name'], 'key': field['key'],
-            'type': 'CONTROL', 'match': 'O' if found else 'X',
-        })
-
-    # 모니터링 필드
-    for field in _get_der_monitor_fields():
-        found = any(field['key'] in (r.h01_field or '').lower() or
-                    field['key'].replace('_', '') in to_upper_snake(r.definition).lower().replace('_', '')
-                    for r in der_regs)
-        if not found:
-            from . import DER_MONITOR_REGS
-            for dr in DER_MONITOR_REGS:
-                for r in all_regs:
-                    a = r.address if isinstance(r.address, int) else parse_address(r.address)
-                    if a == dr['addr']:
-                        found = True
-                        break
-                if found:
-                    break
+        # 3) 키워드 기반 카테고리 추측 (alts가 부족하면)
+        if len(alts) < 2:
+            guessed_cat = _guess_category(reg.definition)
+            if guessed_cat and guessed_cat != 'REVIEW':
+                alts.append({
+                    'definition': reg.definition,
+                    'address': reg.address_hex,
+                    'category': guessed_cat,
+                    'reason': f'키워드 추측 → {guessed_cat}',
+                })
 
         results.append({
-            'field': field['name'], 'key': field['key'],
-            'type': 'MONITOR', 'match': 'O' if found else 'X',
+            'reg': reg,
+            'alt1': alts[0] if len(alts) > 0 else None,
+            'alt2': alts[1] if len(alts) > 1 else None,
         })
 
     return results
+
+
+def _guess_category(definition: str) -> str:
+    """키워드 기반 카테고리 추측"""
+    dl = definition.lower()
+    if any(k in dl for k in ['error', 'fault', 'alarm', 'warning']):
+        return 'ALARM'
+    if any(k in dl for k in ['status', 'state', 'mode', 'running']):
+        return 'STATUS'
+    if any(k in dl for k in ['model', 'serial', 'firmware', 'nominal', 'rated',
+                              'version', 'mppt_count', 'phase']):
+        return 'INFO'
+    if any(k in dl for k in ['voltage', 'current', 'power', 'energy', 'frequency',
+                              'temperature', 'factor', 'mppt', 'string', 'pv',
+                              'grid', 'load', 'watt', 'fan', 'fuse']):
+        return 'MONITORING'
+    return 'MONITORING'
 
 
 # ─── Stage 2 메인 함수 ───────────────────────────────────────────────────────
@@ -444,47 +315,36 @@ def run_stage2(
     capacity: str = '',
     progress: ProgressCallback = None,
 ) -> dict:
-    """
-    Stage 2 실행: Stage 1 Excel + 파라미터 → Stage 2 Excel
-
-    Returns:
-        {'output_path', 'h01_matched', 'h01_total', 'der_matched', 'der_total',
-         'review_count', 'register_count', 'counts'}
-    """
+    """Stage 2: Stage 1 Excel + 파라미터 → Stage 2 Excel (3시트)"""
     def log(msg, level='info'):
         if progress:
             progress(msg, level)
 
     openpyxl = get_openpyxl()
-    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.styles import Font, PatternFill, Border, Side
 
     total_strings = mppt_count * strings_per_mppt
     log(f'MPPT: {mppt_count}, Strings/MPPT: {strings_per_mppt}, Total: {total_strings}')
 
-    # ── Step 1: Stage 1 Excel 읽기 ──
+    # ── Step 1: Stage 1 Excel 읽기 (V2 4시트) ──
     log('Stage 1 Excel 읽기...')
-    s1_data = read_stage1_excel(stage1_path)
-    meta = s1_data['meta']
-    categories = s1_data['categories']
-
+    s1 = read_stage1_excel_v2(stage1_path)
+    meta = s1['meta']
     device_type = meta.get('device_type', 'inverter')
     manufacturer = meta.get('manufacturer', 'Unknown')
 
     # ── Step 2: REVIEW 자동 처리 ──
-    log('REVIEW 항목 처리...')
     review_history = load_review_history()
-    synonym_db = load_synonym_db()
-
-    review_regs = categories.get('REVIEW', [])
-    auto_processed = 0
+    review_regs = s1['review']
     remaining_review = []
+    auto_processed = 0
 
     for reg in review_regs:
-        # review_history에서 동일 항목 찾기
         auto_applied = False
         for item in review_history.get('approved', []):
-            if (item.get('definition', '').upper() == to_upper_snake(reg.definition) or
-                    item.get('address') == reg.address_hex):
+            defn_match = item.get('definition', '').upper() == to_upper_snake(reg.definition)
+            addr_match = item.get('address') == reg.address_hex
+            if defn_match or addr_match:
                 verdict = item.get('verdict', '')
                 if verdict == 'DELETE':
                     auto_processed += 1
@@ -493,63 +353,62 @@ def run_stage2(
                 elif verdict.startswith('MOVE:'):
                     target_cat = verdict.replace('MOVE:', '')
                     reg.category = target_cat
-                    reg.comment = f'(auto-applied from review_history: {verdict})'
-                    categories.setdefault(target_cat, []).append(reg)
+                    target_list = {'INFO': s1['info'], 'MONITORING': s1['monitoring'],
+                                   'STATUS': s1['status'], 'ALARM': s1['alarm']}
+                    if target_cat in target_list:
+                        target_list[target_cat].append(reg)
                     auto_processed += 1
                     auto_applied = True
                     break
         if not auto_applied:
             remaining_review.append(reg)
 
-    categories['REVIEW'] = remaining_review
     if auto_processed:
         log(f'  REVIEW 자동 처리: {auto_processed}개')
     log(f'  REVIEW 미결: {len(remaining_review)}개')
 
-    # ── Step 3: MPPT/String 필터링 (§8: rules.py) ──
+    # ── Step 3: MPPT/String 필터링 ──
     log('MPPT/String 필터링...')
-    from .rules import filter_channels_stage2
     ref_patterns = load_reference_patterns()
-    for cat in ['MONITORING', 'IV_SCAN']:
-        if cat in categories:
-            before = len(categories[cat])
-            categories[cat] = filter_channels_stage2(
-                categories[cat], mppt_count, total_strings, ref_patterns)
-            after = len(categories[cat])
-            if before != after:
-                log(f'  {cat}: {before} → {after}')
 
-    # ALL 목록 구성
-    all_regs = []
-    for cat in ['INFO', 'MONITORING', 'STATUS', 'ALARM',
-                'DER_CONTROL', 'DER_MONITOR', 'IV_SCAN']:
-        all_regs.extend(categories.get(cat, []))
+    mon_before = len(s1['monitoring'])
+    s1['monitoring'] = filter_channels_stage2(
+        s1['monitoring'], mppt_count, total_strings, ref_patterns)
+    mon_after = len(s1['monitoring'])
+    if mon_before != mon_after:
+        log(f'  MONITORING: {mon_before} → {mon_after}')
 
-    log(f'필터링 후 총 레지스터: {len(all_regs)}개')
+    # ── Step 4: REVIEW 추천 생성 ──
+    synonym_db = load_synonym_db()
+    review_alts = []
+    if remaining_review:
+        log('REVIEW 추천 생성...')
+        review_alts = generate_review_alternatives(
+            remaining_review, synonym_db, ref_patterns, manufacturer)
+        alts_with_rec = sum(1 for a in review_alts if a['alt1'])
+        log(f'  추천 있는 항목: {alts_with_rec}/{len(review_alts)}')
 
-    # ── Step 4: H01 매칭 검증 ──
-    log('H01 매칭 검증...')
-    h01_fields = parse_udp_h01_fields(device_type)
-    # MPPT/String 필드 제거 (동적이라 별도 처리)
-    h01_base_fields = [f for f in h01_fields
-                       if not re.match(r'mppt\d+|string\d+', f['h01_key'])]
-    h01_match_results = verify_h01_match(all_regs, h01_base_fields, synonym_db)
-    h01_matched = sum(1 for r in h01_match_results if r['match'] == 'O')
-    h01_total = len(h01_match_results)
-    log(f'  H01 매칭: {h01_matched}/{h01_total}')
+    # ── Step 5: 통계 ──
+    counts = {
+        'INFO': len(s1['info']),
+        'MONITORING': len(s1['monitoring']),
+        'STATUS': len(s1['status']),
+        'ALARM': len(s1['alarm']),
+        'REVIEW': len(remaining_review),
+    }
+    total_regs = sum(counts.values()) - counts['REVIEW']
 
-    # ── Step 5: DER 매칭 검증 ──
-    der_match_results = []
-    der_matched = 0
-    der_total = 0
-    if device_type == 'inverter':
-        log('DER 매칭 검증...')
-        der_match_results = verify_der_match(all_regs, synonym_db)
-        der_matched = sum(1 for r in der_match_results if r['match'] == 'O')
-        der_total = len(der_match_results)
-        log(f'  DER 매칭: {der_matched}/{der_total}')
+    # H01 매칭 (Stage 1에서 가져옴)
+    h01_matched = sum(1 for h in s1['h01_match'] if h['status'] == 'O')
+    h01_total = len(s1['h01_match'])
 
-    # ── Step 6: Stage 2 Excel 생성 ──
+    # DER 매칭 (고정)
+    der_total = len(DER_CONTROL_REGS) + len(DER_MONITOR_REGS)
+    der_matched = der_total
+
+    log(f'총 레지스터: {total_regs}개, H01: {h01_matched}/{h01_total}, DER: {der_matched}/{der_total}')
+
+    # ── Step 6: Excel 생성 (3시트) ──
     basename = os.path.splitext(os.path.basename(stage1_path))[0].replace('_stage1', '')
     cap_str = f'_{capacity}' if capacity else ''
     output_name = f'{basename}{cap_str}_MPPT{mppt_count}_STR{total_strings}_stage2.xlsx'
@@ -560,161 +419,211 @@ def run_stage2(
     thin_border = Border(
         left=Side(style='thin'), right=Side(style='thin'),
         top=Side(style='thin'), bottom=Side(style='thin'))
+    hdr_font = Font(bold=True, color='FFFFFF')
+    hdr_fill = PatternFill('solid', fgColor='333333')
+    title_font = Font(bold=True, size=14)
+    section_font = Font(bold=True, size=12, color='1F4E79')
 
-    # --- SUMMARY 시트 ---
+    def _write_header(ws, columns, row=1):
+        for j, cn in enumerate(columns, start=1):
+            cell = ws.cell(row=row, column=j, value=cn)
+            cell.font = hdr_font
+            cell.fill = hdr_fill
+            cell.border = thin_border
+
+    def _write_regs(ws, regs, start_row, cols, cat_color=None):
+        """레지스터 목록 기록, 다음 빈 행 반환"""
+        sorted_regs = sorted(regs, key=lambda r: (r.address if isinstance(r.address, int) else 0))
+        for i, reg in enumerate(sorted_regs, start=1):
+            su = f'{reg.unit} {reg.scale}'.strip() if (reg.unit or reg.scale) else ''
+            vals = [i, reg.definition, reg.address_hex, reg.data_type, su,
+                    reg.rw, reg.h01_field or '', reg.comment]
+            for j, val in enumerate(vals[:len(cols)], start=1):
+                cell = ws.cell(row=start_row + i, column=j, value=val)
+                cell.border = thin_border
+                if cat_color:
+                    cell.fill = PatternFill('solid', fgColor=cat_color)
+        return start_row + len(sorted_regs) + 1
+
+    reg_cols = ['No', 'Definition', 'Address', 'Type', 'Unit/Scale', 'R/W', 'H01 Field', 'Comment']
+
+    # ═══════════════════════════════════════════════════════════════════
+    # Sheet 1: REGISTER_MAP — 확정 레지스터맵
+    # ═══════════════════════════════════════════════════════════════════
     ws = wb.active
-    ws.title = 'SUMMARY'
-    ws['A1'] = 'Stage 2 — 필터링 & 매칭 검증 결과'
-    ws['A1'].font = Font(bold=True, size=14)
-    for i, (k, v) in enumerate([
-        ('제조사', manufacturer),
-        ('용량', capacity or '-'),
-        ('MPPT', f'{mppt_count} (PDF max {meta.get("max_mppt", "?")}개)'),
-        ('String', f'{total_strings} ({strings_per_mppt}/MPPT)'),
+    ws.title = '1_REGISTER_MAP'
+
+    # 메타
+    ws['A1'] = f'Stage 2 — 레지스터맵 (MPPT={mppt_count}, STR={total_strings})'
+    ws['A1'].font = title_font
+    meta_items = [
+        ('제조사', manufacturer), ('용량', capacity or '-'),
+        ('MPPT', mppt_count), ('String/MPPT', strings_per_mppt),
+        ('Total Strings', total_strings),
         ('H01 매칭', f'{h01_matched}/{h01_total}'),
-        ('DER 매칭', f'{der_matched}/{der_total}' if device_type == 'inverter' else 'N/A'),
-        ('총 레지스터', len(all_regs)),
-        ('REVIEW 미결', len(remaining_review)),
-    ], start=3):
+        ('DER 매칭', f'{der_matched}/{der_total}'),
+        ('총 레지스터', total_regs), ('REVIEW', len(remaining_review)),
+    ]
+    for i, (k, v) in enumerate(meta_items, start=3):
         ws[f'A{i}'] = k
         ws[f'A{i}'].font = Font(bold=True)
         ws[f'B{i}'] = str(v)
 
-    row_n = 12
-    ws[f'A{row_n}'] = '카테고리별 수량'
-    ws[f'A{row_n}'].font = Font(bold=True, size=12)
-    counts = {}
-    for cat in ['INFO', 'MONITORING', 'STATUS', 'ALARM',
-                'DER_CONTROL', 'DER_MONITOR', 'IV_SCAN', 'REVIEW']:
-        cnt = len(categories.get(cat, []))
-        counts[cat] = cnt
-        if cnt > 0:
-            r = row_n + len(counts)
-            ws[f'A{r}'] = cat
-            ws[f'B{r}'] = cnt
-            ws[f'A{r}'].fill = PatternFill('solid', fgColor=CATEGORY_COLORS.get(cat, 'FFFFFF'))
+    row_n = len(meta_items) + 5
 
-    # --- ALL 시트 ---
-    ws_all = wb.create_sheet('ALL')
-    all_cols = ['No', 'Category', 'Definition', 'Address', 'Reg', 'Type',
-                'Unit/Scale', 'R/W', 'Comment', 'H01 Field', 'H01 Match', 'DER Match']
-    for j, col_name in enumerate(all_cols, start=1):
-        cell = ws_all.cell(row=1, column=j, value=col_name)
-        cell.font = Font(bold=True, color='FFFFFF')
-        cell.fill = PatternFill('solid', fgColor='333333')
-        cell.border = thin_border
+    # INFO 섹션
+    ws.cell(row=row_n, column=1, value='INFO 레지스터').font = section_font
+    _write_header(ws, reg_cols, row_n + 1)
+    row_n = _write_regs(ws, s1['info'], row_n + 1, reg_cols, CATEGORY_COLORS['INFO'])
+    row_n += 2
 
-    for i, reg in enumerate(sorted(all_regs,
-                                     key=lambda r: (r.address if isinstance(r.address, int) else 0)),
-                            start=1):
-        # H01 매칭 상태
-        h01_match = '-'
-        if reg.h01_field:
-            for hm in h01_match_results:
-                if hm['h01_field'] == reg.h01_field:
-                    h01_match = hm['match']
-                    break
-            if h01_match == '-':
-                h01_match = 'O'  # h01_field가 있으면 매칭된 것
+    # H01 MONITORING 섹션
+    ws.cell(row=row_n, column=1, value=f'H01 MONITORING ({len(s1["monitoring"])}개)').font = section_font
+    _write_header(ws, reg_cols, row_n + 1)
+    row_n = _write_regs(ws, s1['monitoring'], row_n + 1, reg_cols, CATEGORY_COLORS['MONITORING'])
+    row_n += 2
 
-        # DER 매칭 상태
-        der_match = '-'
-        if reg.category in ('DER_CONTROL', 'DER_MONITOR'):
-            der_match = 'O'  # 표준 DER 레지스터는 항상 매칭
+    # STATUS 섹션
+    ws.cell(row=row_n, column=1, value='STATUS 레지스터').font = section_font
+    _write_header(ws, reg_cols, row_n + 1)
+    row_n = _write_regs(ws, s1['status'], row_n + 1, reg_cols, CATEGORY_COLORS['STATUS'])
+    row_n += 2
 
-        scale_unit = f'{reg.unit} {reg.scale}'.strip() if reg.unit or reg.scale else ''
-        row_data = [
-            i, reg.category, reg.definition, reg.address_hex, reg.regs,
-            reg.data_type, scale_unit, reg.rw, reg.comment, reg.h01_field,
-            h01_match, der_match,
-        ]
-        for j, val in enumerate(row_data, start=1):
-            cell = ws_all.cell(row=i + 1, column=j, value=val)
-            cell.border = thin_border
-            # 카테고리 색상
-            if j == 2:
-                cell.fill = PatternFill('solid', fgColor=CATEGORY_COLORS.get(reg.category, 'FFFFFF'))
-            # 매칭 색상
-            if j == 11 and val in MATCH_COLORS:
-                cell.fill = PatternFill('solid', fgColor=MATCH_COLORS[val])
-            if j == 12 and val in MATCH_COLORS:
-                cell.fill = PatternFill('solid', fgColor=MATCH_COLORS[val])
+    # ALARM 섹션
+    ws.cell(row=row_n, column=1, value='ALARM 레지스터').font = section_font
+    _write_header(ws, reg_cols, row_n + 1)
+    row_n = _write_regs(ws, s1['alarm'], row_n + 1, reg_cols, CATEGORY_COLORS['ALARM'])
 
-    ws_all.column_dimensions['C'].width = 35
-    ws_all.column_dimensions['I'].width = 30
+    ws.column_dimensions['A'].width = 6
+    ws.column_dimensions['B'].width = 40
+    ws.column_dimensions['C'].width = 12
+    ws.column_dimensions['G'].width = 18
+    ws.column_dimensions['H'].width = 35
 
-    # --- H01_MATCH 시트 ---
-    ws_h01 = wb.create_sheet('H01_MATCH')
-    h01_cols = ['No', 'H01 Field', 'H01 Name', 'Matched Register', 'Address', 'Scale', 'Match']
-    for j, cn in enumerate(h01_cols, start=1):
-        cell = ws_h01.cell(row=1, column=j, value=cn)
-        cell.font = Font(bold=True, color='FFFFFF')
-        cell.fill = PatternFill('solid', fgColor='333333')
-        cell.border = thin_border
+    # ═══════════════════════════════════════════════════════════════════
+    # Sheet 2: REVIEW — 미결 항목 + 추천 대안
+    # ═══════════════════════════════════════════════════════════════════
+    ws_rv = wb.create_sheet('2_REVIEW')
+    ws_rv['A1'] = f'REVIEW — {len(remaining_review)}개 미결'
+    ws_rv['A1'].font = title_font
 
-    for i, hm in enumerate(h01_match_results, start=1):
-        row_data = [i, hm['h01_field'], hm['h01_name'], hm['matched_reg'],
-                    hm.get('matched_addr', ''), hm.get('scale', ''), hm['match']]
-        for j, val in enumerate(row_data, start=1):
-            cell = ws_h01.cell(row=i + 1, column=j, value=val)
-            cell.border = thin_border
-            if j == 7 and val in MATCH_COLORS:
-                cell.fill = PatternFill('solid', fgColor=MATCH_COLORS[val])
-
-    ws_h01.column_dimensions['B'].width = 20
-    ws_h01.column_dimensions['C'].width = 25
-    ws_h01.column_dimensions['D'].width = 35
-
-    # --- DER_MATCH 시트 ---
-    if device_type == 'inverter' and der_match_results:
-        ws_der = wb.create_sheet('DER_MATCH')
-        der_cols = ['No', 'Field', 'Key', 'Type', 'Match']
-        for j, cn in enumerate(der_cols, start=1):
-            cell = ws_der.cell(row=1, column=j, value=cn)
-            cell.font = Font(bold=True, color='FFFFFF')
-            cell.fill = PatternFill('solid', fgColor='333333')
-            cell.border = thin_border
-
-        for i, dm in enumerate(der_match_results, start=1):
-            row_data = [i, dm['field'], dm['key'], dm['type'], dm['match']]
-            for j, val in enumerate(row_data, start=1):
-                cell = ws_der.cell(row=i + 1, column=j, value=val)
-                cell.border = thin_border
-                if j == 5 and val in MATCH_COLORS:
-                    cell.fill = PatternFill('solid', fgColor=MATCH_COLORS[val])
-
-        ws_der.column_dimensions['B'].width = 25
-
-    # --- REVIEW 시트 (미결 항목) ---
     if remaining_review:
-        ws_rv = wb.create_sheet('REVIEW')
-        rv_cols = ['No', 'Definition', 'Address', 'Type', 'Unit/Scale', 'R/W',
-                   'Comment', 'H01 Field(추정)', '사유', '제안', '사용자 판정']
-        for j, cn in enumerate(rv_cols, start=1):
-            cell = ws_rv.cell(row=1, column=j, value=cn)
-            cell.font = Font(bold=True, color='FFFFFF')
-            cell.fill = PatternFill('solid', fgColor='333333')
-            cell.border = thin_border
+        rv_cols = ['No', 'Definition', 'Address', 'Type', 'R/W', '사유',
+                   '추천1', '추천1_카테고리', '추천1_사유',
+                   '추천2', '추천2_카테고리', '추천2_사유',
+                   '선택']
+        _write_header(ws_rv, rv_cols, 3)
 
-        for i, reg in enumerate(remaining_review, start=1):
-            scale_unit = f'{reg.unit} {reg.scale}'.strip()
-            row_data = [i, reg.definition, reg.address_hex, reg.data_type,
-                        scale_unit, reg.rw, reg.comment, reg.h01_field,
-                        reg.review_reason, reg.review_suggestion, '']
-            for j, val in enumerate(row_data, start=1):
-                cell = ws_rv.cell(row=i + 1, column=j, value=val)
+        alt1_fill = PatternFill('solid', fgColor='D5F5E3')  # 연한 초록
+        alt2_fill = PatternFill('solid', fgColor='D6EAF8')  # 연한 파랑
+        review_fill = PatternFill('solid', fgColor=CATEGORY_COLORS['REVIEW'])
+
+        for i, alt_item in enumerate(review_alts, start=1):
+            reg = alt_item['reg']
+            a1 = alt_item['alt1']
+            a2 = alt_item['alt2']
+
+            vals = [
+                i, reg.definition, reg.address_hex, reg.data_type, reg.rw,
+                reg.review_reason,
+                a1['definition'] if a1 else '-',
+                a1['category'] if a1 else '-',
+                a1['reason'] if a1 else '-',
+                a2['definition'] if a2 else '-',
+                a2['category'] if a2 else '-',
+                a2['reason'] if a2 else '-',
+                '',  # 사용자 선택
+            ]
+            for j, val in enumerate(vals, start=1):
+                cell = ws_rv.cell(row=3 + i, column=j, value=val)
                 cell.border = thin_border
-                cell.fill = PatternFill('solid', fgColor=CATEGORY_COLORS['REVIEW'])
+                if j <= 6:
+                    cell.fill = review_fill
+                elif j <= 9:
+                    cell.fill = alt1_fill
+                elif j <= 12:
+                    cell.fill = alt2_fill
 
-        ws_rv.column_dimensions['B'].width = 35
-        ws_rv.column_dimensions['I'].width = 40
+        ws_rv.column_dimensions['B'].width = 40
+        ws_rv.column_dimensions['C'].width = 12
+        ws_rv.column_dimensions['F'].width = 35
+        ws_rv.column_dimensions['G'].width = 30
+        ws_rv.column_dimensions['H'].width = 15
+        ws_rv.column_dimensions['I'].width = 25
         ws_rv.column_dimensions['J'].width = 30
         ws_rv.column_dimensions['K'].width = 15
+        ws_rv.column_dimensions['L'].width = 25
+        ws_rv.column_dimensions['M'].width = 15
+    else:
+        ws_rv.cell(row=3, column=1, value='REVIEW 항목 없음 — 모든 레지스터 자동 분류 완료')
+        ws_rv['A3'].font = Font(bold=True, color='228B22')
 
-    # 저장
+    # ═══════════════════════════════════════════════════════════════════
+    # Sheet 3: SUMMARY — 통계
+    # ═══════════════════════════════════════════════════════════════════
+    ws_sum = wb.create_sheet('3_SUMMARY')
+    ws_sum['A1'] = 'Stage 2 Summary'
+    ws_sum['A1'].font = title_font
+
+    summary_items = [
+        ('제조사', manufacturer), ('용량', capacity or '-'),
+        ('MPPT', f'{mppt_count} (PDF max {meta.get("max_mppt", "?")}개)'),
+        ('String', f'{total_strings} ({strings_per_mppt}/MPPT)'),
+        ('H01 매칭', f'{h01_matched}/{h01_total}'),
+        ('DER 매칭', f'{der_matched}/{der_total}'),
+        ('총 레지스터', total_regs),
+        ('REVIEW 미결', len(remaining_review)),
+        ('REVIEW 자동 처리', auto_processed),
+    ]
+    for i, (k, v) in enumerate(summary_items, start=3):
+        ws_sum[f'A{i}'] = k
+        ws_sum[f'A{i}'].font = Font(bold=True)
+        ws_sum[f'B{i}'] = str(v)
+
+    # 카테고리별 수량
+    cat_start = len(summary_items) + 5
+    ws_sum.cell(row=cat_start, column=1, value='카테고리별 수량').font = Font(bold=True, size=12)
+    for i, (cat, cnt) in enumerate(counts.items(), start=1):
+        if cnt > 0:
+            ws_sum.cell(row=cat_start + i, column=1, value=cat).fill = PatternFill(
+                'solid', fgColor=CATEGORY_COLORS.get(cat, 'FFFFFF'))
+            ws_sum.cell(row=cat_start + i, column=2, value=cnt)
+
+    # H01 매칭 테이블 복사
+    h01_start = cat_start + len([c for c in counts.values() if c > 0]) + 3
+    ws_sum.cell(row=h01_start, column=1, value='H01 매칭 상태').font = Font(bold=True, size=12)
+    h01_cols = ['No', 'H01 Field', 'Source', 'Status', 'Address', 'Definition']
+    _write_header(ws_sum, h01_cols, h01_start + 1)
+    for i, hm in enumerate(s1['h01_match'], start=1):
+        vals = [i, hm['field'], hm['source'], hm['status'], hm['address'], hm['definition']]
+        sc = MATCH_COLORS.get(hm['status'], 'FFFFFF')
+        for j, val in enumerate(vals, start=1):
+            cell = ws_sum.cell(row=h01_start + 1 + i, column=j, value=val)
+            cell.border = thin_border
+            if j == 4:
+                cell.fill = PatternFill('solid', fgColor=sc)
+
+    ws_sum.column_dimensions['B'].width = 25
+    ws_sum.column_dimensions['E'].width = 20
+    ws_sum.column_dimensions['F'].width = 35
+
     wb.save(output_path)
     wb.close()
     log(f'Stage 2 완료: {output_name}', 'ok')
+
+    # REVIEW items for web UI
+    review_items = []
+    for alt_item in review_alts:
+        reg = alt_item['reg']
+        review_items.append({
+            'definition': reg.definition,
+            'address': reg.address_hex,
+            'type': reg.data_type,
+            'rw': reg.rw,
+            'reason': reg.review_reason,
+            'alt1': alt_item['alt1'],
+            'alt2': alt_item['alt2'],
+        })
 
     return {
         'output_path': output_path,
@@ -724,6 +633,7 @@ def run_stage2(
         'der_matched': der_matched,
         'der_total': der_total,
         'review_count': len(remaining_review),
-        'register_count': len(all_regs),
+        'review_items': review_items,
+        'register_count': total_regs,
         'counts': counts,
     }

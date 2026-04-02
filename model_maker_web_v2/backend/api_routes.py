@@ -174,6 +174,7 @@ async def stage2_run(body: dict):
                 'der_matched': result['der_matched'],
                 'der_total': result['der_total'],
                 'review_count': result['review_count'],
+                'review_items': result.get('review_items', []),
             })
         except Exception as e:
             await ws_manager.send_json(sid, {
