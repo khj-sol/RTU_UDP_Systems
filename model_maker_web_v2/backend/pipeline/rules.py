@@ -96,42 +96,75 @@ ALARM_PRIORITY = [
 
 
 def _alarm_score(reg: RegisterRow) -> int:
-    """알람 레지스터 우선순위 점수 (낮을수록 우선)"""
+    """알람 레지스터 우선순위 — 상태정의(Appendix 비트필드)가 있는 레지스터 우선
+    PDF 정의 순서대로 alarm1/2/3 매칭. 같은 score면 주소순.
+    """
     defn_lower = reg.definition.lower()
-    # 1순위(0): 명확한 에러/폴트 코드 레지스터
+    addr = reg.address if isinstance(reg.address, int) else 0
+
+    # ── 제외 (score 99) ──
+    if addr > 0xFFFF:
+        return 99
+    # Appendix Fault Code 값이 레지스터로 잘못 추출 — 주소가 비정상적으로 작음
+    # Goodwe는 주소 500+ 유효, EKOS SPD는 0x000B=11
+    # Sungrow Appendix: 주소 0~600 범위의 fault code 값
+    if 0 < addr < 2000 and not any(k in defn_lower for k in [
+            'error_code', 'error code', 'error message',
+            'fault code', 'fault/alarm code', 'alarm code',
+            'fault status', 'hw fault', 'sw fault',
+            'dsp alarm', 'dsp error', 'arm alarm',
+            'warning code']):
+        return 99
+    # Work State 값 테이블 항목 (레지스터가 아닌 상태 값)
+    if any(k in defn_lower for k in ['communicate fault', 'alarm run', 'derating run',
+                                      'dispatch run', 'initial standby', 'key stop',
+                                      'emergency stop']) or \
+       (defn_lower.strip() in ('fault', 'stop', 'run', 'standby')):
+        return 99
+    # Fault/Alarm time — 시간 정보, 알람 레지스터 아님
+    if any(k in defn_lower for k in ['fault/alarm time', 'alarm time', 'fault time']):
+        return 99
+
+    # ── 우선순위 ──
+    # 0: 명확한 에러/폴트 코드 (정의 테이블 있음)
     if any(k in defn_lower for k in ['error_code', 'error code', 'fault code',
                                       'fault/alarm code', 'alarm code',
-                                      'sw fault', 'dsp error', 'dsp alarm']):
+                                      'sw fault', 'dsp error', 'dsp alarm',
+                                      'error message']):
         return 0
-    # 2순위(1): HW Fault / PID 알람
+    # 1: HW Fault / PID / 번호 붙은 Alarm (Alarm 1, Alarm 2 — Huawei)
     if any(k in defn_lower for k in ['hw fault', 'hardware fault']):
         return 1
     if 'pid' in defn_lower and 'alarm' in defn_lower:
         return 1
-    # 3순위(2): Grid Status / 통신 폴트
-    if any(k in defn_lower for k in ['grid status', 'grid fault',
-                                      'communicate fault', 'comm fault', 'communication']):
+    import re as _re
+    if _re.search(r'\balarm\s*\d', defn_lower):
+        return 1
+    # 2: Grid Status / ARM alarm
+    if any(k in defn_lower for k in ['grid status', 'grid fault', 'arm alarm', 'arm error']):
         return 2
-    # 4순위(3): 일반 알람/폴트/워닝 키워드
-    if any(k in defn_lower for k in ['alarm', 'fault', 'error', 'warning', 'protection']):
+    # 3: 일반 알람/폴트/워닝
+    if any(k in defn_lower for k in ['alarm', 'fault', 'error', 'warning']):
         return 3
-    # 5순위(9): 키워드 없는 것 (잘못 분류된 경우)
+    # 9: 기타
     return 9
 
 
 def distribute_alarms(alarm_regs: List[RegisterRow]) -> Dict[str, List[RegisterRow]]:
     """
     §2-2: 알람 레지스터를 H01 alarm1/2/3에 배분
-    V2: ALARM_PRIORITY 기반 — 에러코드 > PID 알람 > 통신 폴트 > 일반
+    V2: score 99(제외) 레지스터는 alarm 슬롯에 넣지 않음 → N/A
     """
     # 우선순위 점수로 정렬 (같으면 주소순)
     scored = sorted(alarm_regs,
                     key=lambda r: (_alarm_score(r),
                                    r.address if isinstance(r.address, int) else 0))
+    # score 99 제외 (Appendix 코드값, Work State 값 등)
+    valid = [r for r in scored if _alarm_score(r) < 99]
     result = {'alarm1': [], 'alarm2': [], 'alarm3': [], 'dropped': []}
 
     slots = ['alarm1', 'alarm2', 'alarm3']
-    for i, reg in enumerate(scored):
+    for i, reg in enumerate(valid):
         if i < 3:
             result[slots[i]].append(reg)
         else:
@@ -427,7 +460,7 @@ def classify_register_with_rules(
             return ('EXCLUDE', '')
         return (cat, '')
 
-    # 4) §2-2: STATUS 키워드 (단, Fault/Alarm/Grid Status는 ALARM 우선)
+    # §2-2: STATUS 키워드 (단, Fault/Alarm/Grid Status는 ALARM 우선)
     if any(k in defn_lower for k in ['fault status', 'alarm status', 'fault state',
                                       'grid status']):
         return ('ALARM', '')
