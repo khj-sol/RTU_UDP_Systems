@@ -55,47 +55,6 @@ def extract_pdf_text_and_tables(pdf_path: str) -> List[dict]:
     return pages
 
 
-def _apply_sunspec_definitions(categorized: dict, manufacturer: str, log=None):
-    """SunSpec/SolarEdge 인버터에 외부 정의 데이터 적용"""
-    _SUNSPEC_MAKERS = ('solaredge', 'sunspec')
-    if manufacturer.lower() not in _SUNSPEC_MAKERS:
-        return
-
-    # 정의 파일 로드
-    defs_path = os.path.join(os.path.dirname(__file__), 'solaredge_definitions.json')
-    if not os.path.exists(defs_path):
-        return
-
-    with open(defs_path, encoding='utf-8') as f:
-        defs = json.load(f)
-
-    status_defs = defs.get('status_definitions', {})
-    alarm_codes = defs.get('alarm_codes', {})
-
-    # STATUS: I_Status 레지스터에 정의 적용
-    for reg in categorized.get('STATUS', []):
-        dl = reg.definition.lower()
-        if dl == 'i_status' or 'i status' in dl.replace('_', ' '):
-            if not getattr(reg, 'value_definitions', None):
-                reg.value_definitions = status_defs
-                if log:
-                    log(f'  SunSpec status 정의 적용: {reg.definition} ({len(status_defs)}개)')
-                break
-
-    # ALARM: I_Status_Vendor 레지스터에 정의 적용
-    for reg in categorized.get('ALARM', []):
-        dl = reg.definition.lower()
-        if 'vendor' in dl or 'event' in dl:
-            if not getattr(reg, 'value_definitions', None):
-                reg.value_definitions = alarm_codes
-                if log:
-                    log(f'  SunSpec alarm 정의 적용: {reg.definition} ({len(alarm_codes)}개)')
-                break
-
-    if log:
-        log(f'  SunSpec 정의 적용 완료 (status {len(status_defs)}개, alarm {len(alarm_codes)}개)')
-
-
 def _extract_model_from_pdf(pdf_path: str, manufacturer: str) -> str:
     """PDF 메타데이터/파일명/첫 페이지에서 인버터 모델명 추출"""
     model = ''
@@ -1799,8 +1758,11 @@ def run_stage1(
             meta['pdf_model'] = pdf_model
             log(f'  Model 레지스터 없음 → PDF에서 추출: {pdf_model}')
 
-    # ── SunSpec/SolarEdge: 외부 정의 데이터 적용 ──
-    _apply_sunspec_definitions(categorized, manufacturer, log)
+    # ── SunSpec: 표준 정의 데이터 적용 (SolarEdge, Fronius 등) ──
+    from .sunspec import is_sunspec_pdf, apply_sunspec_definitions
+    if is_sunspec_pdf(registers, manufacturer):
+        apply_sunspec_definitions(categorized, log)
+        log(f'  SunSpec 표준 인버터 감지 → 정의 데이터 자동 적용')
 
     counts = {cat: len(regs) for cat, regs in categorized.items()}
     log('분류 결과:')

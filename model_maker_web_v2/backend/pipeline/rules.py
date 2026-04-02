@@ -13,6 +13,7 @@ from . import (
     match_synonym, match_synonym_fuzzy,
     get_ref_name_by_addr, get_h01_field_from_ref, detect_channel_from_ref,
 )
+from .sunspec import classify_sunspec_register
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -420,6 +421,11 @@ def classify_register_with_rules(
     if should_exclude(reg):
         return ('EXCLUDE', '')
 
+    # §SunSpec: SunSpec 표준 레지스터 분류 (C_*, I_*, M_* 패턴)
+    sunspec_cat = classify_sunspec_register(defn, addr)
+    if sunspec_cat:
+        return (sunspec_cat, '')
+
     # 0) INFO 키워드 최우선 — PDF에서 추출한 이름 기반
     # (레퍼런스 주소 매칭보다 먼저 체크하여 다른 제조사 레퍼런스와 주소 충돌 방지)
     if is_info_register(defn):
@@ -467,12 +473,6 @@ def classify_register_with_rules(
         return (cat, '')
 
     # §2-2: STATUS 키워드 (단, Fault/Alarm/Grid Status는 ALARM 우선)
-    # SunSpec: I_Status_Vendor = error code → ALARM, M_Events = event bitfield → ALARM
-    if any(k in defn_lower for k in ['status_vendor', 'status vendor', 'm_events']):
-        return ('ALARM', '')
-    # SunSpec: I_STATUS_OFF~STANDBY (addr 1~8) = 값 정의, 레지스터 아님 → EXCLUDE
-    if defn_lower.startswith('i_status_') and addr is not None and addr < 20:
-        return ('EXCLUDE', '')
     if any(k in defn_lower for k in ['fault status', 'alarm status', 'fault state',
                                       'grid status']):
         return ('ALARM', '')
