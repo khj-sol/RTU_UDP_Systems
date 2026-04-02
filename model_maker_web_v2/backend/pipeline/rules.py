@@ -250,9 +250,9 @@ _INFO_STOP_MEASUREMENT = re.compile(
 _INFO_MAX_GAP = 50
 
 
-# PDF 섹션 제목 패턴 — "Device information", "Device attributes" 등
+# PDF 섹션 제목 패턴 — "Device information" 등 (Device attributes는 제외 — 운영 레지스터 혼재)
 _INFO_SECTION_RE = re.compile(
-    r'device\s+(?:information|attributes|info)\b|'
+    r'device\s+(?:information|info)\b|'
     r'basic\s+(?:information|parameters)\b|'
     r'inverter\s+information\b|equipment\s+information\b|'
     r'장치\s*정보|기기\s*정보|설비\s*정보',
