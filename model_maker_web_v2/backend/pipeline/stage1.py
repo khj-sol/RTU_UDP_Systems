@@ -1024,16 +1024,21 @@ def assign_h01_field(reg: RegisterRow, synonym_db: dict,
     if ch:
         prefix, n = ch
         if prefix == 'MPPT':
-            if 'voltage' in defn_lower or '전압' in defn_lower:
+            # voltage: Vpv{N}, voltage, 전압
+            if any(k in defn_lower for k in ['voltage', '전압']) or \
+               re.match(r'^vpv\d', defn_lower):
                 return f'mppt{n}_voltage'
-            if 'current' in defn_lower or '전류' in defn_lower:
+            # current: PV{N}Curr, current, 전류
+            if any(k in defn_lower for k in ['current', 'curr', '전류']):
                 return f'mppt{n}_current'
-            if 'power' in defn_lower or '전력' in defn_lower:
+            # power: Ppv{N}, PV{N}Watt, power, 전력
+            if any(k in defn_lower for k in ['power', 'watt', '전력']) or \
+               re.match(r'^ppv\d', defn_lower):
                 return f'mppt{n}_power'
         elif prefix == 'STRING':
-            if 'voltage' in defn_lower or '전압' in defn_lower:
+            if any(k in defn_lower for k in ['voltage', '전압']):
                 return f'string{n}_voltage'
-            if 'current' in defn_lower or '전류' in defn_lower:
+            if any(k in defn_lower for k in ['current', 'curr', '전류']):
                 return f'string{n}_current'
 
     # 1) V2: pv_power / energy 키워드 (synonym/ref보다 먼저 — 정확한 키워드 우선)
