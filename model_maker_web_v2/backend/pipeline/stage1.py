@@ -841,6 +841,12 @@ def run_stage1(
     h01_total = len(h01_match_table)
     log(f'H01 매칭: {h01_matched}/{h01_total}')
 
+    # ── DER 매칭 테이블 생성 ──
+    der_match_table = _build_der_match_table(categorized)
+    der_matched = sum(1 for r in der_match_table if r['status'] == 'O')
+    der_total = len(der_match_table)
+    log(f'DER 매칭: {der_matched}/{der_total}')
+
     output_name = f'test_{basename}_stage1.xlsx'
     output_path = os.path.join(output_dir, output_name)
     log(f'Excel 생성: {output_name}')
@@ -849,95 +855,130 @@ def run_stage1(
     thin_border = Border(
         left=Side(style='thin'), right=Side(style='thin'),
         top=Side(style='thin'), bottom=Side(style='thin'))
+    hdr_font = Font(bold=True, color='FFFFFF')
+    hdr_fill = PatternFill('solid', fgColor='333333')
+    title_font = Font(bold=True, size=14)
+    section_font = Font(bold=True, size=12, color='1F4E79')
 
-    # SUMMARY
+    def _write_header(ws, columns, row=1):
+        for j, col_name in enumerate(columns, start=1):
+            cell = ws.cell(row=row, column=j, value=col_name)
+            cell.font = hdr_font
+            cell.fill = hdr_fill
+            cell.border = thin_border
+
+    # ═══════════════════════════════════════════════════════════════════
+    # Sheet 1: INFO — 인포 매칭 & 메타데이터
+    # ═══════════════════════════════════════════════════════════════════
     ws = wb.active
-    ws.title = 'SUMMARY'
+    ws.title = '1_INFO'
+
+    # 메타데이터 섹션
     ws['A1'] = 'Stage 1 — 레지스터맵 추출 (MAPPING_RULES_V2)'
-    ws['A1'].font = Font(bold=True, size=14)
-    for i, (k, v) in enumerate([
+    ws['A1'].font = title_font
+    meta_items = [
         ('제조사', manufacturer), ('프로토콜 버전', protocol_version),
-        ('설비 타입', device_type), ('MPPT 최대', max_mppt),
-        ('String 최대', max_string), ('IV Scan', 'Yes' if meta['iv_scan'] else 'No'),
+        ('설비 타입', device_type), ('MPPT', max_mppt),
+        ('String', max_string), ('IV Scan', 'Yes' if meta['iv_scan'] else 'No'),
         ('원본 파일', os.path.basename(input_path)), ('추출 일시', meta['extracted_date']),
-        ('매핑 룰', 'V2'), ('H01 매칭', f'{h01_matched}/{h01_total}'),
-    ], start=3):
+        ('H01 매칭', f'{h01_matched}/{h01_total}'),
+        ('DER 매칭', f'{der_matched}/{der_total}'),
+        ('추출 레지스터', meta['total_extracted']),
+        ('REVIEW', counts.get('REVIEW', 0)),
+    ]
+    for i, (k, v) in enumerate(meta_items, start=3):
         ws[f'A{i}'] = k
         ws[f'A{i}'].font = Font(bold=True)
         ws[f'B{i}'] = str(v)
 
-    row_n = 15
-    ws[f'A{row_n}'] = '카테고리별 수량'
-    ws[f'A{row_n}'].font = Font(bold=True, size=12)
-    for i, (cat, cnt) in enumerate(counts.items(), start=1):
-        ws[f'A{row_n + i}'] = cat
-        ws[f'B{row_n + i}'] = cnt
-        ws[f'A{row_n + i}'].fill = PatternFill('solid', fgColor=CATEGORY_COLORS.get(cat, 'FFFFFF'))
+    # INFO 레지스터 섹션
+    info_start = len(meta_items) + 5
+    ws.cell(row=info_start, column=1, value='INFO 레지스터').font = section_font
+    info_cols = ['No', 'Definition', 'Address', 'Type', 'Unit/Scale', 'R/W', 'H01 Field', 'Comment']
+    _write_header(ws, info_cols, info_start + 1)
 
-    # META
-    ws_meta = wb.create_sheet('META')
-    for i, (k, v) in enumerate(meta.items(), start=1):
-        ws_meta[f'A{i}'] = k
-        ws_meta[f'B{i}'] = str(v)
-
-    # 카테고리 시트
-    cols = ['No', 'Definition', 'Address', 'Reg', 'Type', 'Unit/Scale', 'R/W',
-            'Comment', 'H01 Field', 'Category']
-
-    for cat in ['INFO', 'MONITORING', 'STATUS', 'ALARM',
-                'DER_CONTROL', 'DER_MONITOR', 'IV_SCAN', 'REVIEW']:
-        regs = categorized[cat]
-        if not regs and cat not in ('REVIEW',):
-            if device_type != 'inverter' and cat in ('DER_CONTROL', 'DER_MONITOR', 'IV_SCAN'):
-                continue
-            if not regs:
-                continue
-
-        ws_cat = wb.create_sheet(cat)
-        cat_fill = PatternFill('solid', fgColor=CATEGORY_COLORS.get(cat, 'FFFFFF'))
-
-        hdr = cols + (['사유', '제안', '사용자 판정'] if cat == 'REVIEW' else [])
-        for j, col_name in enumerate(hdr, start=1):
-            cell = ws_cat.cell(row=1, column=j, value=col_name)
-            cell.font = Font(bold=True, color='FFFFFF')
-            cell.fill = PatternFill('solid', fgColor='333333')
+    info_regs = sorted(categorized.get('INFO', []),
+                       key=lambda r: (r.address if isinstance(r.address, int) else 0))
+    for i, reg in enumerate(info_regs, start=1):
+        su = f'{reg.unit} {reg.scale}'.strip() if reg.unit or reg.scale else ''
+        vals = [i, reg.definition, reg.address_hex, reg.data_type, su,
+                reg.rw, reg.h01_field or '', reg.comment]
+        for j, val in enumerate(vals, start=1):
+            cell = ws.cell(row=info_start + 1 + i, column=j, value=val)
             cell.border = thin_border
+            cell.fill = PatternFill('solid', fgColor=CATEGORY_COLORS['INFO'])
 
-        for i, reg in enumerate(sorted(regs, key=lambda r: (r.address if isinstance(r.address, int) else 0)),
+    # STATUS 섹션
+    status_start = info_start + len(info_regs) + 4
+    ws.cell(row=status_start, column=1, value='STATUS 레지스터').font = section_font
+    _write_header(ws, info_cols, status_start + 1)
+
+    status_regs = sorted(categorized.get('STATUS', []),
+                         key=lambda r: (r.address if isinstance(r.address, int) else 0))
+    for i, reg in enumerate(status_regs, start=1):
+        su = f'{reg.unit} {reg.scale}'.strip() if reg.unit or reg.scale else ''
+        vals = [i, reg.definition, reg.address_hex, reg.data_type, su,
+                reg.rw, reg.h01_field or '', reg.comment]
+        for j, val in enumerate(vals, start=1):
+            cell = ws.cell(row=status_start + 1 + i, column=j, value=val)
+            cell.border = thin_border
+            cell.fill = PatternFill('solid', fgColor=CATEGORY_COLORS['STATUS'])
+
+    # ALARM 섹션
+    alarm_start = status_start + len(status_regs) + 4
+    ws.cell(row=alarm_start, column=1, value='ALARM 레지스터').font = section_font
+    _write_header(ws, info_cols, alarm_start + 1)
+
+    alarm_regs_sorted = sorted(categorized.get('ALARM', []),
+                               key=lambda r: (r.address if isinstance(r.address, int) else 0))
+    for i, reg in enumerate(alarm_regs_sorted, start=1):
+        su = f'{reg.unit} {reg.scale}'.strip() if reg.unit or reg.scale else ''
+        vals = [i, reg.definition, reg.address_hex, reg.data_type, su,
+                reg.rw, reg.h01_field or '', reg.comment]
+        for j, val in enumerate(vals, start=1):
+            cell = ws.cell(row=alarm_start + 1 + i, column=j, value=val)
+            cell.border = thin_border
+            cell.fill = PatternFill('solid', fgColor=CATEGORY_COLORS['ALARM'])
+
+    # REVIEW 섹션 (있으면)
+    review_regs = categorized.get('REVIEW', [])
+    if review_regs:
+        review_start = alarm_start + len(alarm_regs_sorted) + 4
+        ws.cell(row=review_start, column=1, value=f'REVIEW ({len(review_regs)}개)').font = section_font
+        review_cols = ['No', 'Definition', 'Address', 'Type', 'Unit/Scale', 'R/W', '사유', '제안']
+        _write_header(ws, review_cols, review_start + 1)
+        for i, reg in enumerate(sorted(review_regs, key=lambda r: (r.address if isinstance(r.address, int) else 0)),
                                 start=1):
             su = f'{reg.unit} {reg.scale}'.strip() if reg.unit or reg.scale else ''
-            rd = [i, reg.definition, reg.address_hex, reg.regs, reg.data_type,
-                  su, reg.rw, reg.comment, reg.h01_field, reg.category]
-            if cat == 'REVIEW':
-                rd += [reg.review_reason, reg.review_suggestion, '']
-            for j, val in enumerate(rd, start=1):
-                cell = ws_cat.cell(row=i + 1, column=j, value=val)
+            vals = [i, reg.definition, reg.address_hex, reg.data_type, su,
+                    reg.rw, reg.review_reason, reg.review_suggestion]
+            for j, val in enumerate(vals, start=1):
+                cell = ws.cell(row=review_start + 1 + i, column=j, value=val)
                 cell.border = thin_border
-                if j <= len(cols):
-                    cell.fill = cat_fill
+                cell.fill = PatternFill('solid', fgColor=CATEGORY_COLORS['REVIEW'])
 
-        ws_cat.column_dimensions['B'].width = 35
-        ws_cat.column_dimensions['H'].width = 30
-        if cat == 'REVIEW':
-            ws_cat.column_dimensions['K'].width = 40
-            ws_cat.column_dimensions['L'].width = 30
-            ws_cat.column_dimensions['M'].width = 15
+    ws.column_dimensions['A'].width = 18
+    ws.column_dimensions['B'].width = 40
+    ws.column_dimensions['C'].width = 12
+    ws.column_dimensions['G'].width = 18
+    ws.column_dimensions['H'].width = 35
 
-    # H01_MATCH
-    ws_h01 = wb.create_sheet('H01_MATCH')
+    # ═══════════════════════════════════════════════════════════════════
+    # Sheet 2: H01_MATCH — H01 Body 필드 매칭
+    # ═══════════════════════════════════════════════════════════════════
+    ws_h01 = wb.create_sheet('2_H01')
+    ws_h01['A1'] = f'H01 모니터링 매칭 — {h01_matched}/{h01_total}'
+    ws_h01['A1'].font = title_font
+
     h01_cols = ['No', 'H01 Field', 'Source', 'Status', 'Address', 'Definition', 'Note']
-    for j, col_name in enumerate(h01_cols, start=1):
-        cell = ws_h01.cell(row=1, column=j, value=col_name)
-        cell.font = Font(bold=True, color='FFFFFF')
-        cell.fill = PatternFill('solid', fgColor='333333')
-        cell.border = thin_border
+    _write_header(ws_h01, h01_cols, 3)
 
     for i, rd in enumerate(h01_match_table, start=1):
         vals = [i, rd['field'], rd['source'], rd['status'],
                 rd['address'], rd['definition'], rd['note']]
         sc = MATCH_COLORS.get(rd['status'], 'FFFFFF')
         for j, val in enumerate(vals, start=1):
-            cell = ws_h01.cell(row=i + 1, column=j, value=val)
+            cell = ws_h01.cell(row=3 + i, column=j, value=val)
             cell.border = thin_border
             if j == 4:
                 cell.fill = PatternFill('solid', fgColor=sc)
@@ -946,22 +987,85 @@ def run_stage1(
             elif rd['source'] == 'HANDLER':
                 cell.fill = PatternFill('solid', fgColor='FCE5CD')
 
-    ws_h01.column_dimensions['B'].width = 20
+    # MONITORING 전체 목록
+    mon_start = 3 + len(h01_match_table) + 3
+    ws_h01.cell(row=mon_start, column=1,
+                value=f'MONITORING 전체 ({len(categorized.get("MONITORING", []))}개)').font = section_font
+    mon_cols = ['No', 'Definition', 'Address', 'Type', 'Unit/Scale', 'R/W', 'H01 Field']
+    _write_header(ws_h01, mon_cols, mon_start + 1)
+
+    mon_regs = sorted(categorized.get('MONITORING', []),
+                      key=lambda r: (r.address if isinstance(r.address, int) else 0))
+    for i, reg in enumerate(mon_regs, start=1):
+        su = f'{reg.unit} {reg.scale}'.strip() if reg.unit or reg.scale else ''
+        vals = [i, reg.definition, reg.address_hex, reg.data_type, su,
+                reg.rw, reg.h01_field or '']
+        for j, val in enumerate(vals, start=1):
+            cell = ws_h01.cell(row=mon_start + 1 + i, column=j, value=val)
+            cell.border = thin_border
+            cell.fill = PatternFill('solid', fgColor=CATEGORY_COLORS['MONITORING'])
+
+    ws_h01.column_dimensions['B'].width = 25
     ws_h01.column_dimensions['E'].width = 20
-    ws_h01.column_dimensions['F'].width = 35
+    ws_h01.column_dimensions['F'].width = 40
     ws_h01.column_dimensions['G'].width = 40
 
-    try:
-        target = len([s for s in wb.sheetnames if s in
-                      ['SUMMARY', 'META', 'INFO', 'MONITORING', 'STATUS', 'ALARM']])
-        current = wb.sheetnames.index('H01_MATCH')
-        wb.move_sheet('H01_MATCH', offset=target - current)
-    except (ValueError, IndexError):
-        pass
+    # ═══════════════════════════════════════════════════════════════════
+    # Sheet 3: DER — DER-AVM 매칭
+    # ═══════════════════════════════════════════════════════════════════
+    if device_type == 'inverter':
+        ws_der = wb.create_sheet('3_DER')
+        ws_der['A1'] = f'DER-AVM 매칭 — {der_matched}/{der_total}'
+        ws_der['A1'].font = title_font
+
+        der_cols = ['No', 'Field', 'Type', 'Status', 'Address', 'Scale', 'R/W', 'Description']
+        _write_header(ws_der, der_cols, 3)
+
+        for i, rd in enumerate(der_match_table, start=1):
+            vals = [i, rd['name'], rd['type'], rd['status'],
+                    rd['address'], rd['scale'], rd['rw'], rd['desc']]
+            sc = MATCH_COLORS.get(rd['status'], 'FFFFFF')
+            cat_color = CATEGORY_COLORS['DER_CONTROL'] if rd['group'] == 'CONTROL' else CATEGORY_COLORS['DER_MONITOR']
+            for j, val in enumerate(vals, start=1):
+                cell = ws_der.cell(row=3 + i, column=j, value=val)
+                cell.border = thin_border
+                if j == 4:
+                    cell.fill = PatternFill('solid', fgColor=sc)
+                else:
+                    cell.fill = PatternFill('solid', fgColor=cat_color)
+
+        ws_der.column_dimensions['B'].width = 35
+        ws_der.column_dimensions['E'].width = 15
+        ws_der.column_dimensions['H'].width = 45
+
+    # ═══════════════════════════════════════════════════════════════════
+    # Sheet 4: IV — IV 스캔 매핑 (지원 시)
+    # ═══════════════════════════════════════════════════════════════════
+    if meta['iv_scan'] and categorized.get('IV_SCAN'):
+        ws_iv = wb.create_sheet('4_IV')
+        ws_iv['A1'] = 'IV Scan 매핑'
+        ws_iv['A1'].font = title_font
+
+        iv_cols = ['No', 'Definition', 'Address', 'Type', 'Unit/Scale', 'R/W', 'Comment']
+        _write_header(ws_iv, iv_cols, 3)
+
+        iv_regs = sorted(categorized['IV_SCAN'],
+                         key=lambda r: (r.address if isinstance(r.address, int) else 0))
+        for i, reg in enumerate(iv_regs, start=1):
+            su = f'{reg.unit} {reg.scale}'.strip() if reg.unit or reg.scale else ''
+            vals = [i, reg.definition, reg.address_hex, reg.data_type, su,
+                    reg.rw, reg.comment]
+            for j, val in enumerate(vals, start=1):
+                cell = ws_iv.cell(row=3 + i, column=j, value=val)
+                cell.border = thin_border
+                cell.fill = PatternFill('solid', fgColor=CATEGORY_COLORS['IV_SCAN'])
+
+        ws_iv.column_dimensions['B'].width = 35
+        ws_iv.column_dimensions['G'].width = 30
 
     wb.save(output_path)
     wb.close()
-    log(f'Stage 1 완료: {output_name}', 'ok')
+    log(f'Stage 1 완료: {output_name} ({len(wb.sheetnames) if wb else "?"}시트)', 'ok')
 
     return {
         'output_path': output_path,
@@ -970,4 +1074,25 @@ def run_stage1(
         'meta': meta,
         'review_count': counts.get('REVIEW', 0),
         'h01_match': {'matched': h01_matched, 'total': h01_total, 'table': h01_match_table},
+        'der_match': {'matched': der_matched, 'total': der_total},
     }
+
+
+def _build_der_match_table(categorized: dict) -> List[dict]:
+    """DER-AVM 매칭 테이블 — 고정 주소맵 기반"""
+    rows = []
+    for dr in DER_CONTROL_REGS:
+        rows.append({
+            'name': dr['name'], 'type': dr['type'],
+            'address': f'0x{dr["addr"]:04X}', 'scale': dr.get('scale', ''),
+            'rw': dr['rw'], 'desc': dr['desc'],
+            'status': 'O', 'group': 'CONTROL',
+        })
+    for dr in DER_MONITOR_REGS:
+        rows.append({
+            'name': dr['name'], 'type': dr['type'],
+            'address': f'0x{dr["addr"]:04X}', 'scale': dr.get('scale', ''),
+            'rw': 'RO', 'desc': dr.get('desc', ''),
+            'status': 'O', 'group': 'MONITOR',
+        })
+    return rows
