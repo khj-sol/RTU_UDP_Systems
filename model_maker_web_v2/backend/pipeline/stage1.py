@@ -246,6 +246,16 @@ def _parse_register_row(row: list, col_map: dict) -> Optional[RegisterRow]:
     if not name:
         return None
 
+    # PDF에서 이름+설명이 붙어서 추출된 경우 분리
+    # 패턴: "Inverter Model informationIdentifies the TL..." → 소문자 뒤 대문자+소문자2자 이상
+    # 80자 초과 + 경계 위치가 20~60자 사이일 때만 분리 (짧은 이름의 PDF 줄바꿈과 구분)
+    comment_extra = ''
+    if len(name) > 80:
+        m_split = re.search(r'([a-z])([A-Z][a-z]{2,})', name)
+        if m_split and 15 < m_split.start() < 80:
+            comment_extra = name[m_split.start() + 1:]
+            name = name[:m_split.start() + 1]
+
     dtype = ''
     type_idx = col_map.get('type')
     if type_idx is not None and type_idx < len(row):
@@ -366,7 +376,7 @@ def _parse_register_row(row: list, col_map: dict) -> Optional[RegisterRow]:
         unit=unit,
         scale=scale,
         rw=rw or 'RO',
-        comment=comment,
+        comment=(comment + ' ' + comment_extra).strip() if comment_extra else comment,
     )
 
 
