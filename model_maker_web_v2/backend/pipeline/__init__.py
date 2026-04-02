@@ -279,6 +279,10 @@ STRING_VOLTAGE_RE = re.compile(r'STRING[_\s]*(\d+)[_\s]*(?:INPUT[_\s]*)?VOLTAGE'
 STRING_CURRENT_RE = re.compile(r'STRING[_\s]*(\d+)[_\s]*(?:INPUT[_\s]*)?CURRENT', re.I)
 PV_VOLTAGE_RE = re.compile(r'PV[_\s]*(\d+)[_\s]*(?:INPUT[_\s]*)?VOLTAGE', re.I)
 PV_CURRENT_RE = re.compile(r'PV[_\s]*(\d+)[_\s]*(?:INPUT[_\s]*)?CURRENT', re.I)
+# Kstar: PV{n} String current {m} → String 번호 = (n-1)*strings_per_mppt + m
+PV_STRING_CURRENT_RE = re.compile(r'PV(\d+)\s+String\s+current\s+(\d+)', re.I)
+# Goodwe: Istr{n}/PV String{n} Current
+ISTR_CURRENT_RE = re.compile(r'Istr(\d+)', re.I)
 
 
 def detect_channel_number(definition: str) -> Optional[tuple]:
@@ -288,9 +292,26 @@ def detect_channel_number(definition: str) -> Optional[tuple]:
     IV Point/calibration 패턴은 제외 (IV 데이터, 보정값)
     """
     dl = definition.lower()
-    # V2: IV 데이터/보정값 제외 — H01 MPPT가 아님
+    # V2: IV 데이터/보정값/테스트 제외
     if 'point' in dl or 'calibration' in dl or 'coefficient' in dl:
         return None
+    if 'test' in dl or 'threshold' in dl:
+        return None
+
+    # Kstar: PV{n} String current {m} → STRING
+    m = PV_STRING_CURRENT_RE.search(definition)
+    if m:
+        pv_num = int(m.group(1))
+        str_num = int(m.group(2))
+        # 글로벌 String 번호: (pv-1)*4 + str (Kstar는 MPPT당 4 String)
+        global_str = (pv_num - 1) * 4 + str_num
+        return ('STRING', global_str)
+
+    # Goodwe: Istr{n}
+    m = ISTR_CURRENT_RE.search(definition)
+    if m:
+        return ('STRING', int(m.group(1)))
+
     for pat, prefix in [(MPPT_VOLTAGE_RE, 'MPPT'), (MPPT_CURRENT_RE, 'MPPT'),
                          (MPPT_POWER_RE, 'MPPT'), (PV_VOLTAGE_RE, 'MPPT'),
                          (PV_CURRENT_RE, 'MPPT'),
