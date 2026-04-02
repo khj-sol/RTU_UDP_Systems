@@ -287,6 +287,13 @@ ISTR_CURRENT_RE = re.compile(r'Istr(\d+)', re.I)
 MPPT_ZONE_RE = re.compile(r'MPPT\s+zone\s+(\d+)', re.I)
 # CPS: "DC2 voltage", "DC2 current" (DC{n} = MPPT {n})
 DC_N_VOLTAGE_RE = re.compile(r'\bDC(\d+)\s*(?:voltage|current)', re.I)
+# Growatt/EG4/MUST: "Vpv1", "Vpv2" (V + pv + N = MPPT voltage)
+VPV_N_RE = re.compile(r'\bVpv(\d+)\b', re.I)
+# Growatt/EG4/MUST: "PV1Curr", "PV2Curr" (PV + N + Curr = MPPT current)
+PV_N_CURR_RE = re.compile(r'\bPV(\d+)\s*Curr', re.I)
+# Growatt/EG4/MUST: "Ppv1", "Ppv2", "PV1Watt" (P + pv + N / PV + N + Watt = MPPT power)
+PPV_N_RE = re.compile(r'\bPpv(\d+)\b', re.I)
+PV_N_WATT_RE = re.compile(r'\bPV(\d+)\s*Watt', re.I)
 
 
 def detect_channel_number(definition: str) -> Optional[tuple]:
@@ -323,6 +330,26 @@ def detect_channel_number(definition: str) -> Optional[tuple]:
 
     # CPS: "DC2 voltage/current" (DC{n} = MPPT n)
     m = DC_N_VOLTAGE_RE.search(definition)
+    if m:
+        return ('MPPT', int(m.group(1)))
+
+    # Growatt/EG4: "Vpv1", "Vpv2" → MPPT voltage
+    m = VPV_N_RE.search(definition)
+    if m:
+        return ('MPPT', int(m.group(1)))
+
+    # Growatt: "PV1Curr", "PV2Curr" → MPPT current
+    m = PV_N_CURR_RE.search(definition)
+    if m:
+        return ('MPPT', int(m.group(1)))
+
+    # Growatt/EG4: "Ppv1", "Ppv2" → MPPT power
+    m = PPV_N_RE.search(definition)
+    if m:
+        return ('MPPT', int(m.group(1)))
+
+    # MUST: "PV1Watt", "PV2Watt" → MPPT power
+    m = PV_N_WATT_RE.search(definition)
     if m:
         return ('MPPT', int(m.group(1)))
 
