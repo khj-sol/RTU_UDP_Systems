@@ -598,6 +598,22 @@ def _scan_register_comments(registers: list, result: dict):
                 })
                 continue
 
+        # 1b) comment에 Enum 인라인: "• 0x0002 Reconnecting • 0x0003 Online • 0x0014 Standby"
+        if 'enum' in combined or '0x00' in comment:
+            enum_vals = {}
+            for m in re.finditer(r'0x([0-9A-Fa-f]{2,4})\s+([A-Za-z][\w\s]*?)(?:\n|\(|•|$)', comment):
+                val = int(m.group(1), 16)
+                desc = m.group(2).strip()[:30]
+                if desc:
+                    enum_vals[val] = desc
+            if len(enum_vals) >= 2:
+                target = 'status_defs' if any(k in combined for k in ['mode', 'status', 'state']) else 'alarm_defs'
+                result[target].append({
+                    'address': addr, 'name': f'{defn} (enum)',
+                    'type': 'mode_table', 'values': enum_vals, 'page': -1,
+                })
+                continue
+
         # 2) comment에 테이블 참조: "Table 3.1.4", "See Appendix 3", "Error Code Table 1"
         has_table_ref = bool(re.search(r'Table\s+[\d.]+|Appendix\s+\d|Code\s+Table', comment, re.I))
         if has_table_ref:
@@ -823,6 +839,71 @@ def _scan_pdf_definitions(pages: list, result: dict):
                         'address': None, 'name': f'Num Table (P{page_num})',
                         'type': def_type, 'values': num_vals, 'page': page_num,
                     })
+
+        # ── 4b-2) 테이블 기반: 헤더 "Inverter state" / "Operating mode" 가 있는 Value|Description 테이블 ──
+        # ABB: "Inverter state" 헤더 → 0=Stand By, 1=Checking Grid, 2=Run, 45=MPPT...
+        # Conext: "Operational Mode State" 인라인 Enum
+        for tab in p.get('tables', []):
+            cleaned = _clean_table(tab)
+            if len(cleaned) < 3:
+                continue
+            # 첫 행 또는 두 번째 행이 헤더인지 확인
+            for hi in range(min(2, len(cleaned))):
+                header = ' '.join(str(c).lower() for c in cleaned[hi])
+                if any(k in header for k in ['inverter state', 'inverter mode',
+                                              'operating mode', 'work state',
+                                              'device status']):
+                    # 이 테이블의 데이터 행에서 Value→Description 추출
+                    state_vals = {}
+                    for row in cleaned[hi+1:]:
+                        cells = [str(c).strip() for c in row]
+                        # 첫 번째 숫자 셀 = Value, 첫 번째 비어있지 않은 텍스트 셀 = Description
+                        val_str = ''
+                        desc = ''
+                        for c in cells:
+                            if not val_str and c.isdigit():
+                                val_str = c
+                            elif val_str and c and len(c) > 1 and not c.isdigit():
+                                desc = c[:50]
+                                break
+                        if val_str and desc:
+                            state_vals[int(val_str)] = desc
+                    if len(state_vals) >= 3:
+                        result['status_defs'].append({
+                            'address': None,
+                            'name': f'Inverter State (P{page_num})',
+                            'type': 'mode_table',
+                            'values': state_vals,
+                            'page': page_num,
+                        })
+                    break
+
+        # ── 4b-3) 테이블 셀 기반: Enum 인라인 "• 0x0002 Reconnecting • 0x0003 Online" ──
+        # Conext: Data Range 셀에 Enum 값 나열
+        for tab in p.get('tables', []):
+            cleaned = _clean_table(tab)
+            for row in cleaned:
+                cells = [str(c).strip() for c in row]
+                row_lower = ' '.join(cells).lower()
+                if 'operational mode' not in row_lower and 'inverter state' not in row_lower:
+                    continue
+                # Enum이 있는 셀 찾기
+                for cell_text in cells:
+                    if '0x00' in cell_text and ('enum' in cell_text.lower() or len(cell_text) > 30):
+                        enum_vals = {}
+                        for m_e in re.finditer(r'0x([0-9A-Fa-f]{2,4})\s+([A-Za-z][\w]*)', cell_text):
+                            val = int(m_e.group(1), 16)
+                            desc = m_e.group(2).strip()[:30]
+                            if desc:
+                                enum_vals[val] = desc
+                        if len(enum_vals) >= 2:
+                            result['status_defs'].append({
+                                'address': None,
+                                'name': f'Operational Mode Enum (P{page_num})',
+                                'type': 'mode_table',
+                                'values': enum_vals,
+                                'page': page_num,
+                            })
 
         # ── 4c) 테이블 기반: Growatt 32bit hex fault code ──
         # "0x00000002 | Communication error | 0x0002 | String communication abnormal"
