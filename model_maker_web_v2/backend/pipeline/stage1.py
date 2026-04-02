@@ -883,9 +883,11 @@ def assign_h01_field(reg: RegisterRow, synonym_db: dict,
     # 1) V2: pv_power / energy 키워드 (synonym/ref보다 먼저 — 정확한 키워드 우선)
     if any(k in defn_lower for k in ['total dc power', 'total pv power', 'dc power',
                                       'pv total power', 'pv_total_input_power',
-                                      'input power', 'pac', 'output power',
+                                      'input power', 'output power',
                                       'inverter current output',
-                                      '태양전지 전력', '태양전지전력']):
+                                      'totaldc input', 'totaldcinput',
+                                      '태양전지 전력', '태양전지전력']) or \
+       re.search(r'\bpac\b', defn_lower):
         return 'pv_power'
     defn_nospace = defn_lower.replace(' ', '')
     # cumulative_energy LOW (소수부/Wh/Low Byte) — comment도 체크
