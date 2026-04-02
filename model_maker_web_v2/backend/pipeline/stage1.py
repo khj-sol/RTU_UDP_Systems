@@ -1041,6 +1041,17 @@ def assign_h01_field(reg: RegisterRow, synonym_db: dict,
             if any(k in defn_lower for k in ['current', 'curr', '전류']):
                 return f'string{n}_current'
 
+    # 0-1) Central type: 번호 없는 DC/PV/Input voltage/current → mppt1
+    defn_ns = defn_lower.replace('_', ' ')
+    if re.search(r'\b(i dc|dc)\s*(voltage)', defn_ns) or \
+       re.match(r'^(pv|input)\s+(voltage)', defn_ns):
+        if 'fault' not in defn_lower and 'high' not in defn_lower and 'low' not in defn_lower:
+            return 'mppt1_voltage'
+    if re.search(r'\b(i dc|dc)\s*(current)', defn_ns) or \
+       re.match(r'^(pv|input)\s+(current)', defn_ns):
+        if 'fault' not in defn_lower:
+            return 'mppt1_current'
+
     # 1) V2: pv_power / energy 키워드 (synonym/ref보다 먼저 — 정확한 키워드 우선)
     if any(k in defn_lower for k in ['total dc power', 'total pv power', 'dc power',
                                       'pv total power', 'pv_total_input_power',
@@ -1652,6 +1663,21 @@ def run_stage1(
                 max_mppt = max(max_mppt, n)
             elif prefix == 'STRING':
                 max_string = max(max_string, n)
+
+    # Central type 감지: MPPT 번호 없지만 DC/PV/Input voltage/current가 있으면 MPPT=1
+    if max_mppt == 0:
+        for reg in registers:
+            dl = reg.definition.lower().replace('_', ' ')
+            # DC Voltage/Current (SunSpec I_DC_*, ESINV DC Voltage 1, 일반 DC)
+            # PV Voltage/Current (번호 없음)
+            # Input Voltage/Current
+            if (re.search(r'\b(i dc|dc)\s*(voltage|current)', dl) or
+                re.search(r'^(pv|input)\s+(voltage|current)', dl)):
+                # "PV VoltageHigh Fault" 같은 오감지 제외
+                if 'fault' not in dl and 'high' not in dl and 'low' not in dl:
+                    max_mppt = 1
+                    # mppt1_voltage/current로 매핑 (assign_h01_field에서 처리)
+                    break
 
     # V2: MPPT수 > String수이면 PDF 버그 — MPPT수를 String수로 캡
     if max_string > 0 and max_mppt > max_string:
