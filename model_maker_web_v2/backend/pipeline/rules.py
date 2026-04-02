@@ -199,426 +199,48 @@ def get_string_voltage_rule() -> str:
 # §3. 인버터 정보 필수 추출 항목
 # ═══════════════════════════════════════════════════════════════════════════
 
-# ═══════════════════════════════════════════════════════════════════════════
-# §3. INFO 블록 감지 — 검증된 이름 DB + 앵커(Model/SN) + RO
-# ═══════════════════════════════════════════════════════════════════════════
-#
-# 제너럴 룰:
-#   1. INFO 레지스터는 PDF 앞쪽에 위치 (Device information 섹션)
-#   2. 모두 RO (Read-Only)
-#   3. Model + SN이 앵커 — 하나라도 없으면 표시하여 RTU가 인지
-#   4. 앵커 주변 연속 RO 레지스터 블록이 INFO
-#   5. 검증된 인버터들의 INFO 이름 DB로 유사 이름 매칭
-
-# ── 검증된 INFO 레지스터 이름 DB (5개 인버터에서 축적) ──
-# 그룹별 정규화된 이름 패턴 — 새 인버터에서 유사 이름 자동 매칭
-INFO_KNOWN_NAMES = {
-    'MODEL': [
-        'model', 'device model', 'device model name', 'device type',
-        'device type code', 'type code', 'model id', 'model code',
-        'model name', 'machine model', 'inverter model',
-        'present identified model', 'lcd model setting',
-        '모델', '모델명', '기기모델', '장비모델', '인버터모델', '제품모델',
-    ],
-    'SERIAL_NUMBER': [
-        'sn', 'serial number', 'device serial number', 'device sn',
-        'inverter sn', 'serialnumber',
-        '시리얼', '시리얼번호', '제품번호', '일련번호', '기기번호', '장비번호',
-    ],
-    'PRODUCT_CODE': [
-        'pn', 'product code', 'product number',
-        '제품코드', '품목코드',
-    ],
-    'MAC_ADDRESS': [
-        'plc mac address', 'mac address',
-    ],
-    'FIRMWARE': [
-        'firmware version', 'firmware', 'master firmware version',
-        'slave firmware version', 'software version', 'protocol version',
-        'ems firmware version', 'lcd firmware version',
-        'firmware version of arm', 'dsp version', 'arm version',
-        'dsp1 test version', 'arm1 test version', 'dsp2 version',
-        'dsp2 test version', 'communication version', 'hmi version',
-        '펌웨어', '인버터 버전', '펌웨어 버전', '소프트웨어 버전',
-        '마스터 펌웨어', '슬레이브 펌웨어', '통신 버전', '프로토콜 버전',
-    ],
-    'MPPT_COUNT': [
-        'mppt number', 'number of mppts', 'mppt count', 'number of mppt',
-        'mppt tracker', 'mppt수', 'mppt 수', 'mppt 개수',
-    ],
-    'PV_STRING_COUNT': [
-        'number of pv strings', 'pv string count', 'string count',
-        '스트링 수', '스트링수', 'pv 스트링',
-    ],
-    'RATED_POWER': [
-        'nominal active power', 'rated power', 'nominal power',
-        'maximum active power', 'max active power',
-        'maximum apparent power', 'max apparent power',
-        'rated active power',
-        '정격출력', '인버터 용량', '정격용량', '정격전력', '최대출력',
-        '공칭출력', '공칭전력', '피상전력정격',
-    ],
-    'RATED_VOLTAGE': [
-        'nominal voltage', 'rated voltage',
-        '정격전압', '공칭전압',
-    ],
-    'RATED_FREQUENCY': [
-        'nominal frequency', 'rated frequency',
-        '정격주파수', '공칭주파수',
-    ],
-    'PHASE': [
-        'grid phase number', 'phase number', 'output type', 'phase count',
-        'phase type',
-        '상수', '위상수', '출력타입', '출력유형',
-    ],
+INFO_REQUIRED = {
+    'DEVICE_MODEL':       ['model', 'device model', '모델', 'product model',
+                           'device type code', 'type code', 'device type'],
+    'SERIAL_NUMBER':      ['serial', 'sn', '시리얼', '제품번호', 'serial number'],
+    'MANUFACTURER':       ['manufacturer', 'c_manufacturer'],
+    'FIRMWARE_VERSION':   ['firmware', 'fw version', 'software version', '펌웨어',
+                           'protocol version', 'communication version',
+                           'c_version'],
+    'MPPT_COUNT':         ['mppt count', 'number of mppt', 'mppt tracker', 'mppt수'],
+    'NOMINAL_POWER':      ['nominal power', 'rated power', '정격출력', 'max output',
+                           'nominal active power', 'rated active power',
+                           'nominal reactive power', 'rated reactive power'],
+    'NOMINAL_VOLTAGE':    ['nominal voltage', 'rated voltage', '정격전압'],
+    'NOMINAL_FREQUENCY':  ['nominal frequency', 'rated frequency', '정격주파수'],
+    'GRID_PHASE_NUMBER':  ['phase number', 'phase count', '상수', 'phase type',
+                           'output type'],
+    'TOTAL_RUNNING_TIME': ['total running time', 'running time', '총 가동시간',
+                           'daily running time', '가동시간'],
+    'TOTAL_ENERGY':       ['total power yields', 'total energy', '누적 발전량',
+                           'total generation', 'cumulative energy',
+                           'monthly power yields'],
+    'DAILY_ENERGY':       ['daily power yields', 'daily energy', '일일 발전량',
+                           'today energy', 'daily generation'],
+    'INNER_TEMPERATURE':  ['internal temperature', 'inner temperature', 'module temperature',
+                           '내부 온도', 'inverter temperature', 'cabinet temperature',
+                           'inner_temp'],
+    'APPARENT_POWER':     ['apparent power', '피상전력', 'total apparent power'],
+    'COUNTRY_CODE':       ['present country', 'country code', 'country id', '국가코드'],
+    'INSULATION':         ['insulation resistance', 'array insulation', '절연저항'],
+    'BUS_VOLTAGE':        ['bus voltage', 'dc bus', 'bus volt', '버스전압'],
 }
-
-# 정규화된 이름 → 매칭용 (긴 키워드: 서브스트링, 짧은 키워드: 단어경계)
-_INFO_KNOWN_LONG = set()   # len >= 6: 서브스트링 매칭
-_INFO_KNOWN_SHORT = set()  # len < 6: 완전일치 또는 단어경계 매칭
-_INFO_KNOWN_ALL = set()    # 전체 (완전일치용)
-for _names in INFO_KNOWN_NAMES.values():
-    for _n in _names:
-        norm = _n.lower().replace(' ', '').replace('_', '')
-        _INFO_KNOWN_ALL.add(norm)
-        if len(norm) >= 6:
-            _INFO_KNOWN_LONG.add(norm)
-        else:
-            _INFO_KNOWN_SHORT.add(norm)
-
-# 짧은 키워드용 regex (단어 경계 매칭)
-_INFO_SHORT_RE = re.compile(
-    r'\b(' + '|'.join(re.escape(k) for k in _INFO_KNOWN_SHORT if len(k) >= 2) + r')\b',
-    re.I
-) if _INFO_KNOWN_SHORT else None
-
-
-def is_known_info_name(definition: str) -> bool:
-    """검증된 INFO 이름 DB에서 유사 이름 매칭.
-    - 완전 일치 (정규화)
-    - 긴 키워드 (≥6자): 서브스트링 매칭 — false positive 방지
-    - 짧은 키워드 (<6자): 단어경계 regex 매칭 — 'model'이 'ThermalModel'에 안 걸리도록
-    """
-    defn_norm = definition.lower().replace(' ', '').replace('_', '').replace('-', '')
-    # 1) 완전 일치
-    if defn_norm in _INFO_KNOWN_ALL:
-        return True
-    # 2) 긴 키워드: 서브스트링 매칭 (≥6자만 — 'firmware', 'serialnumber' 등)
-    for known in _INFO_KNOWN_LONG:
-        if known in defn_norm:
-            return True
-    # 3) 짧은 키워드: 단어 경계 매칭 ('model', 'sn', 'pn' 등)
-    if _INFO_SHORT_RE:
-        defn_spaced = definition.replace('_', ' ').replace('-', ' ')
-        if _INFO_SHORT_RE.search(defn_spaced):
-            return True
-    return False
-#
-# 앵커 키워드 (단어 경계 매칭, 제외 필터 적용):
-_MODEL_RE = re.compile(
-    r'\b(model|device\s*type|type\s*code|모델|모델명)\b', re.I)
-_MODEL_EXCLUDE_RE = re.compile(
-    r'meter|replace|target|sub.?device|third|label|lcd|inverter model definition', re.I)
-
-_SN_RE = re.compile(
-    r'\bsn\b|\bserial\b|serialnumber|시리얼|제품번호|시리얼번호', re.I)
-_SN_EXCLUDE_RE = re.compile(
-    r'alarm|clearance|license|board|layout|feature|monitor|third|label|historical|latest', re.I)
-
-# INFO 블록 확장: is_known_info_name() (검증된 이름 DB) 사용
-
-# INFO 블록 확장 시 중단하는 키워드 (운영 데이터 감지 → 블록 종료)
-# INFO 블록 STOP — 일반 카테고리 기반 (특정 인버터 과적합 방지)
-# 일반 카테고리 기반 STOP (특정 인버터 과적합 방지)
-_INFO_BLOCK_STOP = re.compile(
-    # 에너지 (발전량/소비량)
-    r'energy|발전량|소비량|전력량|daily|monthly|yearly|total\s*power|'
-    # 온도/환경
-    r'temperature|temp\b|온도|'
-    # 상태/알람/오류
-    r'alarm|fault|error|warning|status|동작상태|발전유무|'
-    # 측정값 (운영 데이터)
-    r'insulation|절연|bus\s*volt|reactive\s*power|무효전력|real.?time|'
-    # 시간 레지스터
-    r'현재시각|시간|system\s*clock|time\s*stamp|sys\s*(year|month|day|hour|min|sec|weekly)|'
-    # 운영 파라미터
-    r'meter\b|sales|upgrade|subpackage|unique\s*id|country|'
-    # 제어/설정값 (Growatt Vac/Fac, reset, flash, communication address)
-    r'running\s*time|가동시간|mode\b|'
-    r'\bvac\b|\bfac\b|reset|flash\s*start|com\s*address|fail\s*safe|'
-    # 측정 전력 (PV input power, charge/discharge)
-    r'\bppv\d|\bpcharge\b|\bpdischarge\b|\bpinv\b|\bprec\b|slave\s*is\s*busy|'
-    # 목차/문서 구조 (Schneider 등)
-    r'introduction|key\s*points|connection|configuration|logical\s*layer|'
-    r'physical\s*layer|termination|communication\s*param',
-    re.I
-)
-
-# 측정값(voltage/frequency/current): nominal/rated/grid 수식어 있으면 INFO OK
-_INFO_STOP_MEASUREMENT = re.compile(
-    r'(?<!nominal\s)(?<!rated\s)(?<!grid\s)voltage\b|'
-    r'(?<!nominal\s)(?<!rated\s)(?<!grid\s)frequency\b|'
-    r'(?<!nominal\s)(?<!rated\s)current\b',
-    re.I
-)
-
-# INFO 블록 내 기본 최대 주소 간격 (동적 GAP으로 대체 — detect_info_block 내부)
-_INFO_DEFAULT_GAP = 30
-
-
-# PDF 섹션 제목 패턴 — "Device information" 등 (Device attributes는 제외 — 운영 레지스터 혼재)
-# 섹션 제목 패턴 — 줄 시작 또는 섹션 번호 뒤에 와야 함 (본문 레지스터 설명과 구분)
-_INFO_SECTION_RE = re.compile(
-    r'(?:^|\n)\s*(?:\d+\.?\d*\.?\s+)?'  # 줄 시작 + 선택적 섹션 번호 (2.1, 3.2. 등)
-    r'(?:'
-    r'device\s+(?:information|info)\b|'
-    r'basic\s+(?:information|parameters)\b|'
-    r'inverter\s+(?:system\s+)?information\b|equipment\s+information\b|'
-    r'system\s+information\b|'
-    r'장치\s*정보|기기\s*정보|설비\s*정보'
-    r')',
-    re.I | re.MULTILINE
-)
-
-
-def _find_info_section_pages(pages: list) -> list:
-    """PDF 페이지에서 Device Information 섹션이 있는 페이지 번호 반환."""
-    if not pages:
-        return []
-    result = []
-    for p in pages:  # 전체 페이지 탐색 (섹션 제목은 어디든 있을 수 있음)
-        if _INFO_SECTION_RE.search(p.get('text', '')):
-            result.append(p['page'])
-    return result
-
-
-def detect_info_block(registers: list, pages: list = None) -> dict:
-    """INFO 레지스터 블록 감지.
-
-    우선순위:
-    1. PDF 섹션 제목 ("Device information" 등) → 해당 페이지 테이블의 RO 레지스터
-    2. Model/SN 앵커 기반 블록 확장 (섹션 제목 없을 때 fallback)
-
-    Returns: {
-        'info_addrs': set of addresses classified as INFO,
-        'model_found': bool,
-        'sn_found': bool,
-        'model_addr': int or None,
-        'sn_addr': int or None,
-    }
-    """
-    from . import parse_address
-    from .stage1 import extract_registers_from_tables, _detect_table_columns
-
-    # FC 구분 여부 확인
-    has_fc = any(getattr(reg, 'fc', '') for reg in registers)
-
-    # RO 레지스터만 주소순 정렬 (FC 구분 시 FC별로 분리 후 각각 탐색)
-    ro_regs = []
-    for reg in registers:
-        rw = (getattr(reg, 'rw', '') or '').upper()
-        # FC 구분 없는 경우: RO만
-        # FC 구분 있는 경우: 모든 레지스터 (Holding RW에도 INFO 있을 수 있음 — EG4)
-        if not has_fc and rw and rw not in ('RO', 'R', 'READ'):
-            continue
-        addr = reg.address if isinstance(reg.address, int) else parse_address(getattr(reg, 'address_hex', ''))
-        if addr is None:
-            continue
-        ro_regs.append((addr, reg))
-    ro_regs.sort(key=lambda x: x[0])
-
-    if not ro_regs:
-        return {'info_addrs': set(), 'model_found': False, 'sn_found': False,
-                'model_addr': None, 'sn_addr': None}
-
-    # ── 0단계: PDF 섹션 제목 기반 감지 (우선) ──
-    if pages:
-        info_pages = _find_info_section_pages(pages)
-        if info_pages:
-            # 해당 페이지의 첫 번째 테이블에서 레지스터 주소 수집
-            section_addrs = set()
-            for p in pages:
-                if p['page'] in info_pages:
-                    for tab in p.get('tables', []):
-                        regs_from_tab = extract_registers_from_tables([tab])
-                        for r in regs_from_tab:
-                            rw = (getattr(r, 'rw', '') or '').upper()
-                            if rw and rw not in ('RO', 'R', 'READ'):
-                                continue
-                            if r.address and isinstance(r.address, int):
-                                section_addrs.add(r.address)
-            if section_addrs:
-                # 섹션 내에서도 앵커 + STOP 규칙 적용 (섹션에 운영 레지스터도 섞여 있을 수 있음)
-                all_addrs = {a for a, _ in ro_regs}
-                candidate_addrs = sorted(section_addrs & all_addrs)
-                # 앵커 찾기
-                model_addr = None
-                sn_addr = None
-                for addr, reg in ro_regs:
-                    if addr not in candidate_addrs:
-                        continue
-                    defn = reg.definition.replace('_', ' ')
-                    if not model_addr and _MODEL_RE.search(defn) and not _MODEL_EXCLUDE_RE.search(defn):
-                        model_addr = addr
-                    if not sn_addr and _SN_RE.search(defn) and not _SN_EXCLUDE_RE.search(defn):
-                        sn_addr = addr
-                # 앵커부터 STOP까지만 포함
-                anchors_found = [a for a in [model_addr, sn_addr] if a]
-                if anchors_found:
-                    block_start = min(anchors_found)
-                    # 동적 GAP
-                    if len(anchors_found) >= 2:
-                        max_gap = max(int(abs(anchors_found[0] - anchors_found[1]) * 1.5), _INFO_DEFAULT_GAP)
-                    else:
-                        max_gap = _INFO_DEFAULT_GAP
-                    info_addrs = set()
-                    prev = block_start
-                    for addr in candidate_addrs:
-                        if addr < block_start:
-                            continue
-                        reg_at = next((r for a, r in ro_regs if a == addr), None)
-                        if not reg_at:
-                            continue
-                        defn = reg_at.definition.replace('_', ' ')
-                        if addr in anchors_found:
-                            info_addrs.add(addr)
-                            prev = addr
-                            continue
-                        if _INFO_BLOCK_STOP.search(defn) or _INFO_STOP_MEASUREMENT.search(defn):
-                            break
-                        if is_known_info_name(defn) or (addr - prev <= 5):
-                            info_addrs.add(addr)
-                            prev = addr
-                        elif addr - prev > max_gap:
-                            break
-                    return {
-                        'info_addrs': info_addrs,
-                        'model_found': model_addr is not None,
-                        'sn_found': sn_addr is not None,
-                        'model_addr': model_addr,
-                        'sn_addr': sn_addr,
-                    }
-
-    # ── 1단계: 앵커 탐색 (첫 번째 매칭만) — 섹션 제목 없을 때 fallback ──
-    model_anchor = None  # (addr, reg)
-    sn_anchor = None
-    for addr, reg in ro_regs:
-        defn = reg.definition.replace('_', ' ')
-        if not model_anchor and _MODEL_RE.search(defn) and not _MODEL_EXCLUDE_RE.search(defn):
-            model_anchor = (addr, reg)
-        if not sn_anchor and _SN_RE.search(defn) and not _SN_EXCLUDE_RE.search(defn):
-            sn_anchor = (addr, reg)
-        if model_anchor and sn_anchor:
-            break
-
-    model_found = model_anchor is not None
-    sn_found = sn_anchor is not None
-
-    if not model_found and not sn_found:
-        return {'info_addrs': set(), 'model_found': False, 'sn_found': False,
-                'model_addr': None, 'sn_addr': None}
-
-    anchors = [a for a in [model_anchor, sn_anchor] if a]
-    block_start = min(a[0] for a in anchors)
-
-    # 동적 GAP: 앵커 간 거리 기반 (Model↔SN 거리의 1.5배, 최소 30)
-    if len(anchors) >= 2:
-        anchor_dist = abs(anchors[0][0] - anchors[1][0])
-        max_gap = max(int(anchor_dist * 1.5), _INFO_DEFAULT_GAP)
-    else:
-        max_gap = _INFO_DEFAULT_GAP
-
-    # ── 2단계: 앵커부터 전방 확장 ──
-    # block_start 이전 레지스터도 포함 (SN이 Model 앞에 올 수 있음)
-    info_addrs = set()
-    prev_addr = block_start
-
-    for addr, reg in ro_regs:
-        if addr < block_start:
-            # 앵커 직전 레지스터도 포함 (앵커 간 간격 이내)
-            if block_start - addr <= max_gap:
-                defn = reg.definition.replace('_', ' ')
-                if is_known_info_name(defn) and \
-                        not _INFO_BLOCK_STOP.search(defn) and not _INFO_STOP_MEASUREMENT.search(defn):
-                    info_addrs.add(addr)
-            continue
-
-        # 주소 간격 초과 → 블록 종료
-        if addr - prev_addr > max_gap and addr not in {a[0] for a in anchors}:
-            break
-
-        defn = reg.definition.replace('_', ' ')
-
-        # 앵커 주소는 무조건 포함
-        if addr in {a[0] for a in anchors}:
-            info_addrs.add(addr)
-            prev_addr = addr
-            continue
-
-        # 운영 데이터 키워드 → 블록 종료
-        if _INFO_BLOCK_STOP.search(defn) or _INFO_STOP_MEASUREMENT.search(defn):
-            break
-
-        # INFO 키워드 매칭 → 포함 (간격 MAX_GAP 이내)
-        if is_known_info_name(defn):
-            info_addrs.add(addr)
-            prev_addr = addr
-        elif addr - prev_addr <= 5:
-            # 키워드 불일치지만 앵커 근접 → 포함
-            info_addrs.add(addr)
-            prev_addr = addr
-        else:
-            # 키워드 불일치 + 간격 큼 → 블록 종료
-            break
-
-    # ── 3단계: 산재 모드 (scattered) — 블록이 너무 작으면 전체 RO에서 개별 수집 ──
-    # GoodWe 등 INFO가 흩어진 인버터: 블록 ≤ 2개이면 검증된 이름 DB로 전체 탐색
-    if len(info_addrs) <= 2:
-        _SCATTERED_EXCLUDE_RE = re.compile(
-            r'alarm|clearance|license|board|layout|monitor|third|label|'
-            r'meter|replace|target|sub.?device|historical|latest|'
-            r'error|fault|warning',
-            re.I
-        )
-        scattered_addrs = set()
-        for addr, reg in ro_regs:
-            defn = reg.definition.replace('_', ' ')
-            if is_known_info_name(defn) and not _SCATTERED_EXCLUDE_RE.search(defn):
-                scattered_addrs.add(addr)
-        if len(scattered_addrs) > len(info_addrs):
-            info_addrs = scattered_addrs
-            # 앵커 재확인
-            model_anchor = None
-            sn_anchor = None
-            for addr, reg in ro_regs:
-                if addr not in info_addrs:
-                    continue
-                defn = reg.definition.replace('_', ' ')
-                if not model_anchor and _MODEL_RE.search(defn) and not _MODEL_EXCLUDE_RE.search(defn):
-                    model_anchor = (addr, reg)
-                if not sn_anchor and _SN_RE.search(defn) and not _SN_EXCLUDE_RE.search(defn):
-                    sn_anchor = (addr, reg)
-            model_found = model_anchor is not None
-            sn_found = sn_anchor is not None
-
-    return {
-        'info_addrs': info_addrs,
-        'model_found': model_found,
-        'sn_found': sn_found,
-        'model_addr': model_anchor[0] if model_anchor else None,
-        'sn_addr': sn_anchor[0] if sn_anchor else None,
-    }
 
 
 def is_info_register(definition: str) -> bool:
-    """§3: 인버터 정보 레지스터 여부 — detect_info_block 사용 시 호출하지 않음.
-    하위 호환용: 단독 호출 시 키워드 기반 판별."""
-    defn_norm = definition.lower().replace(' ', '').replace('_', '')
-    for k in ['model', 'serial', 'firmware', 'software', 'protocolversion',
-              'mppt', 'ratedpower', 'nominalpower', 'maximumactive',
-              'outputtype', 'devicetype', 'phasenumber']:
-        if k in defn_norm:
-            return True
+    """§3: 인버터 정보 레지스터 여부"""
+    defn_lower = definition.lower()
+    # PDF 줄바꿈 제거 시 공백이 사라질 수 있으므로 공백 제거 버전도 체크
+    defn_nospace = defn_lower.replace(' ', '')
+    for field, keywords in INFO_REQUIRED.items():
+        for k in keywords:
+            if k in defn_lower or k.replace(' ', '') in defn_nospace:
+                return True
     return False
 
 
@@ -784,7 +406,6 @@ def classify_register_with_rules(
     ref_patterns: dict,
     device_type: str = 'inverter',
     all_regs: List[RegisterRow] = None,
-    info_addrs: set = None,
 ) -> tuple:
     """
     §7: STAGE1_RULES에 따른 카테고리 분류
@@ -795,13 +416,14 @@ def classify_register_with_rules(
     defn_upper = to_upper_snake(defn)
     addr = reg.address if isinstance(reg.address, int) else parse_address(reg.address)
 
-    # 0) INFO 블록 — detect_info_block()으로 사전 감지된 주소 (EXCLUDE보다 우선)
-    if info_addrs and addr is not None and addr in info_addrs:
-        return ('INFO', '')
-
     # §6: 제외 항목
     if should_exclude(reg):
         return ('EXCLUDE', '')
+
+    # 0) INFO 키워드 최우선 — PDF에서 추출한 이름 기반
+    # (레퍼런스 주소 매칭보다 먼저 체크하여 다른 제조사 레퍼런스와 주소 충돌 방지)
+    if is_info_register(defn):
+        return ('INFO', '')
 
     # 1) 레퍼런스 패턴 기반 (주소 매칭)
     if addr is not None:
@@ -820,11 +442,21 @@ def classify_register_with_rules(
                     return ('ALARM', '')
                 if any(k in ref_name for k in ['INVERTER_MODE', 'RUNNING_STATUS', 'STATUS']):
                     return ('STATUS', '')
-                # INFO는 키워드(is_info_register)에서만 분류
-                # reference pattern 주소 기반 INFO 분류 제거 — 제조사 간 주소 충돌 방지
+                if any(k in ref_name for k in ['MODEL', 'SERIAL', 'FIRMWARE', 'NOMINAL',
+                                                'MPPT_COUNT', 'PHASE', 'EMS_', 'LCD_',
+                                                'DEVICE_TYPE', 'OUTPUT_TYPE',
+                                                'TOTAL_RUNNING', 'DAILY_RUNNING',
+                                                'INNER_TEMP', 'MODULE_TEMP',
+                                                'APPARENT_POWER', 'COUNTRY',
+                                                'INSULATION', 'BUS_VOLTAGE',
+                                                'TOTAL_ENERGY', 'DAILY_ENERGY',
+                                                'TODAY_ENERGY', 'MONTHLY_ENERGY']):
+                    return ('INFO', '')
                 return ('MONITORING', '')
 
-    # 2) INFO는 detect_info_block()의 info_addrs로만 분류 (step 0에서 처리됨)
+    # 2) §3: INFO 키워드 (synonym_db보다 먼저 — INFO가 MONITORING으로 잘못 분류되는 것 방지)
+    if is_info_register(defn):
+        return ('INFO', '')
 
     # 3) synonym_db 매칭
     syn = match_synonym(defn, synonym_db)
@@ -838,6 +470,9 @@ def classify_register_with_rules(
     # SunSpec: I_Status_Vendor = error code → ALARM, M_Events = event bitfield → ALARM
     if any(k in defn_lower for k in ['status_vendor', 'status vendor', 'm_events']):
         return ('ALARM', '')
+    # SunSpec: I_STATUS_OFF~STANDBY (addr 1~8) = 값 정의, 레지스터 아님 → EXCLUDE
+    if defn_lower.startswith('i_status_') and addr is not None and addr < 20:
+        return ('EXCLUDE', '')
     if any(k in defn_lower for k in ['fault status', 'alarm status', 'fault state',
                                       'grid status']):
         return ('ALARM', '')
