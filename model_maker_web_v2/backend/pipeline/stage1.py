@@ -1063,7 +1063,7 @@ def assign_h01_field(reg: RegisterRow, synonym_db: dict,
                                       'energy produced', 'ac energy', 'ac_energy',
                                       'einv all', 'einv_all',
                                       'eac total', 'eac_total',
-                                      'energy since',
+                                      'energy since', 'energy total',
                                       '누적발전량', '누적 발전량',
                                       'total generation energy',
                                       'high byte of total feed', 'high byte oftotal feed']) or \
@@ -1461,17 +1461,32 @@ def run_stage1(
         # Holding Register (FC03) 섹션 키워드
         _HOLDING_START = [
             'parameter setting address definition', 'parameter setting',
-            'hold register', 'holding register', 'parameter register',
+            'hold register', 'holding register', 'holding reg',
+            'parameter register',
         ]
 
         section_input_start = None   # FC04 Input
         section_holding_start = None  # FC03 Holding
+
+        def _is_section_title(page_text: str, keywords: list) -> bool:
+            """줄 단위로 매칭 — 섹션 제목(짧은 줄)에서만 키워드 감지"""
+            for line in page_text.split('\n'):
+                ll = line.strip().lower()
+                if len(ll) > 80:  # 긴 줄은 설명문 → 건너뜀
+                    continue
+                # "Function N Read/Write ..." 같은 Modbus 함수 설명 제외
+                if ll.startswith('function') or 'unsigned integer' in ll:
+                    continue
+                if any(m in ll for m in keywords):
+                    return True
+            return False
+
         for p in pages:
-            page_text = p['text'].lower()
+            page_text = p['text']
             pnum = p['page']
-            if section_input_start is None and any(m in page_text for m in _INPUT_START):
+            if section_input_start is None and _is_section_title(page_text, _INPUT_START):
                 section_input_start = pnum
-            if section_holding_start is None and any(m in page_text for m in _HOLDING_START):
+            if section_holding_start is None and _is_section_title(page_text, _HOLDING_START):
                 if pnum != section_input_start:
                     section_holding_start = pnum
 
