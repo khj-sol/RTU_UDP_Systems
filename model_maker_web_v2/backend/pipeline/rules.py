@@ -302,6 +302,8 @@ EXCLUDE_KEYWORDS = [
     # V2: Fault 코드 테이블 엔트리 (이름이 짧은 상태 설명)
     'stop bit', 'data bit', 'output overload',
     'pv input configuration',
+    # V2: Fuse 관련 (H01/INFO 불필요)
+    'fuse open', 'fuse check', 'fuse data',
 ]
 
 # 보호 파라미터 주소 범위 (§6: 0x5000~ 보호설정 블록)
