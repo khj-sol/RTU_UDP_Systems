@@ -509,99 +509,153 @@ def scan_definition_tables(pages: list, excel_sheets: dict = None) -> dict:
 
 
 def _scan_pdf_definitions(pages: list, result: dict):
-    """PDF 페이지에서 정의 테이블 탐색"""
+    """PDF 페이지에서 STATUS/ALARM 정의 테이블 탐색 (정밀 버전)"""
     for p in pages:
         text = p.get('text', '')
         page_num = p.get('page', 0)
+        lines = text.split('\n')
 
-        # 페이지 텍스트에서 정의 테이블 헤더 찾기
-        # "Error Code Table1 (0x101E)", "Inverter Mode Table", etc.
-        for line in text.split('\n'):
+        # ── 1) 헤더 기반: "Error Code Table1 (0x101E)" 등 ──
+        for line in lines:
             line_s = line.strip()
             m = _DEF_TABLE_HEADER_RE.search(line_s)
             if not m:
                 continue
-
-            # 레지스터 주소 추출 (있으면)
             addr_hex = m.group(3)
             addr = int(addr_hex, 16) if addr_hex else None
-            header_text = line_s.lower()
+            header_lower = line_s.lower()
+            is_mode = any(k in header_lower for k in ['mode', 'status', 'state', 'running', 'operating'])
+            is_alarm = any(k in header_lower for k in ['error code', 'alarm', 'fault', 'dsp', 'arm'])
 
-            # 정의 타입 판별
-            is_mode = any(k in header_text for k in ['mode', 'status', 'state', 'running', 'operating'])
-            is_alarm = any(k in header_text for k in ['error code', 'alarm', 'fault', 'dsp', 'arm'])
-
-            # 같은 페이지의 테이블에서 값 정의 추출
             for tab in p.get('tables', []):
                 cleaned = _clean_table(tab)
                 values = _extract_value_definitions(cleaned)
-                if not values or len(values) < 2:
-                    continue
+                if values and len(values) >= 2:
+                    def_type = _detect_definition_type(values)
+                    if def_type:
+                        target = 'status_defs' if (is_mode or def_type == 'mode_table') else 'alarm_defs'
+                        result[target].append({
+                            'address': addr, 'name': line_s[:60],
+                            'type': def_type, 'values': values, 'page': page_num,
+                        })
+                        break
 
-                # 값 패턴으로 타입 확인
-                def_type = _detect_definition_type(values)
-                if not def_type:
-                    continue
+        # ── 2) 텍스트 기반: hex 상태값 패턴 ──
+        # Huawei: "0x0000 Standby: initializing", "0x0300 Shutdown: fault"
+        # Solarize: "0x00 Initial mode", "0x01 Standby mode"
+        hex_status = {}
+        for line in lines:
+            m = re.match(r'\s*(0x[0-9A-Fa-f]{2,4})\s+(.+)', line.strip())
+            if m:
+                val = int(m.group(1), 16)
+                desc = m.group(2).strip()[:50]
+                dl = desc.lower()
+                if any(k in dl for k in ['standby', 'mode', 'fault', 'shutdown', 'running',
+                                          'initial', 'off-grid', 'on-grid', 'waiting',
+                                          'detecting', 'checking', 'spot']):
+                    hex_status[val] = desc
+        if len(hex_status) >= 3:
+            if not any(d['page'] == page_num for d in result['status_defs']):
+                result['status_defs'].append({
+                    'address': None, 'name': f'Hex Status (P{page_num})',
+                    'type': 'mode_table', 'values': hex_status, 'page': page_num,
+                })
 
-                entry = {
-                    'address': addr,
-                    'name': line_s[:60],
-                    'type': def_type,
-                    'values': values,
-                    'page': page_num,
-                }
+        # ── 3) 텍스트 기반: "N: description" 패턴 ──
+        # Huawei P158: "0: offline", "1: standby", "3: faulty", "4: running"
+        # Goodwe: "0:cWaitMode", "1:cNormalMode", "2:cFaultMode"
+        num_status = {}
+        for line in lines:
+            m = re.match(r'\s*(\d{1,2})\s*[:：]\s*(.+)', line.strip())
+            if m:
+                val = int(m.group(1))
+                desc = m.group(2).strip()[:50]
+                dl = desc.lower()
+                if any(k in dl for k in ['offline', 'standby', 'faulty', 'running', 'power',
+                                          'mode', 'wait', 'normal', 'fault', 'stop',
+                                          'initializ', 'check', 'mpp', 'search', 'close']):
+                    num_status[val] = desc
+        if len(num_status) >= 3:
+            if not any(d['page'] == page_num for d in result['status_defs']):
+                result['status_defs'].append({
+                    'address': None, 'name': f'Num Status (P{page_num})',
+                    'type': 'mode_table', 'values': num_status, 'page': page_num,
+                })
 
-                if is_mode or def_type == 'mode_table':
-                    result['status_defs'].append(entry)
-                elif is_alarm or def_type in ('bitfield', 'fault_codes'):
-                    result['alarm_defs'].append(entry)
-                break  # 한 헤더에 하나의 테이블만
-
-        # 헤더 없이 테이블 내용으로 직접 탐지 (모드 테이블)
+        # ── 4) 테이블 기반: Sungrow Appendix fault codes ──
+        # "002 | 0x0002 | Grid overvoltage | Fault"
         for tab in p.get('tables', []):
             cleaned = _clean_table(tab)
-            # hex 모드 값 패턴: 0x00, 0x01, 0x03...
-            hex_vals = {}
+            fault_codes = {}
             for row in cleaned:
-                cells = [str(c).strip() for c in row if str(c).strip()]
-                if not cells:
-                    continue
-                m_hex = _HEX_VAL_RE.match(cells[0])
-                if m_hex and len(cells) >= 2:
-                    val = int(m_hex.group(1), 16)
-                    desc = cells[1] if len(cells) > 1 else ''
-                    # mode 키워드 확인
-                    dl = ' '.join(cells).lower()
-                    if any(k in dl for k in ['mode', 'standby', 'on-grid', 'fault', 'shutdown',
-                                              'initial', 'off-grid', 'waiting', 'normal']):
-                        hex_vals[val] = desc
-            if len(hex_vals) >= 3:
-                # 이미 등록된 것과 중복 방지
-                if not any(d['page'] == page_num and d['type'] == 'mode_table'
-                           for d in result['status_defs']):
-                    result['status_defs'].append({
-                        'address': None,
-                        'name': f'Mode Table (P{page_num})',
-                        'type': 'mode_table',
-                        'values': hex_vals,
-                        'page': page_num,
+                cells = [str(c).strip() for c in row]
+                if len(cells) >= 3:
+                    # 숫자(코드) + 0x hex + 설명 + 분류(Fault/Alarm/Warning)
+                    c0, c1 = cells[0], cells[1]
+                    if c0.isdigit() and int(c0) > 0 and c1.startswith('0x'):
+                        desc = cells[2][:50] if len(cells) > 2 else ''
+                        classification = cells[3].lower() if len(cells) > 3 else ''
+                        if any(k in classification for k in ['fault', 'alarm', 'warning', 'protect']):
+                            fault_codes[int(c0)] = f'{desc} ({cells[3]})' if len(cells) > 3 else desc
+            if len(fault_codes) >= 5:
+                if not any(d['page'] == page_num and d['type'] == 'fault_codes'
+                           for d in result['alarm_defs']):
+                    result['alarm_defs'].append({
+                        'address': None, 'name': f'Fault Codes (P{page_num})',
+                        'type': 'fault_codes', 'values': fault_codes, 'page': page_num,
                     })
 
-        # 텍스트에서 인라인 모드 정의 (Goodwe: "0:cWaitMode 1:cNormalMode 2:cFaultMode")
-        for line in text.split('\n'):
-            modes = {}
-            for m_mode in re.finditer(r'(\d)\s*[:：]\s*([a-zA-Z]\w+(?:Mode|mode))', line):
-                modes[int(m_mode.group(1))] = m_mode.group(2)
-            if len(modes) >= 2:
-                if not any(d['page'] == page_num and d['type'] == 'mode_table'
-                           for d in result['status_defs']):
-                    result['status_defs'].append({
-                        'address': None,
-                        'name': f'Inline Mode (P{page_num})',
-                        'type': 'mode_table',
-                        'values': modes,
-                        'page': page_num,
+        # ── 5) 테이블 기반: Kstar/Huawei bitfield ──
+        # "0 | Bit0 | F00 | Grid Volt Low" — Bit{N} 키워드가 있는 테이블만
+        for tab in p.get('tables', []):
+            cleaned = _clean_table(tab)
+            # 테이블에 "Bit" 키워드가 있는지 먼저 확인
+            has_bit_keyword = any('Bit' in str(c) or 'bit' in str(c)
+                                  for row in cleaned[:3] for c in row)
+            if not has_bit_keyword:
+                continue
+            bits = {}
+            for row in cleaned:
+                cells = [str(c).strip() for c in row]
+                if len(cells) >= 2:
+                    # "0 | Bit0 | W00 | Fan A Lock" 또는 "Bit0 | F00 | Grid Volt Low"
+                    for ci, c in enumerate(cells[:3]):
+                        m_bit = re.match(r'^Bit\s*(\d{1,2})$', c)
+                        if m_bit:
+                            bit_num = int(m_bit.group(1))
+                            desc = ''
+                            for dc in reversed(cells[ci+1:]):
+                                if dc and len(dc) > 2 and not dc.isdigit() and not dc.startswith('Bit'):
+                                    desc = dc[:50]
+                                    break
+                            if desc and 0 <= bit_num <= 31:
+                                bits[bit_num] = desc
+                            break
+            if len(bits) >= 3:
+                if not any(d['page'] == page_num and d['type'] == 'bitfield'
+                           for d in result['alarm_defs']):
+                    result['alarm_defs'].append({
+                        'address': None, 'name': f'Bitfield (P{page_num})',
+                        'type': 'bitfield', 'values': bits, 'page': page_num,
                     })
+
+        # ── 6) Huawei 텍스트 기반 bitfield ──
+        # "Bit00: input overvoltage", "Bit01: input undervoltage"
+        bit_defs = {}
+        for line in lines:
+            m = re.match(r'\s*Bit\s*(\d{1,2})\s*[:：]\s*(.+)', line.strip())
+            if m:
+                bit_num = int(m.group(1))
+                desc = m.group(2).strip()[:50]
+                if desc and 0 <= bit_num <= 31:
+                    bit_defs[bit_num] = desc
+        if len(bit_defs) >= 3:
+            if not any(d['page'] == page_num and d['type'] == 'bitfield'
+                       for d in result['alarm_defs']):
+                result['alarm_defs'].append({
+                    'address': None, 'name': f'Bit Defs (P{page_num})',
+                    'type': 'bitfield', 'values': bit_defs, 'page': page_num,
+                })
 
 
 def _scan_excel_definitions(sheets: dict, result: dict):
