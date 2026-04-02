@@ -473,6 +473,253 @@ def extract_registers_from_tables(tables: List[List[list]]) -> List[RegisterRow]
 
 # ─── H01 필드 매핑 ──────────────────────────────────────────────────────────
 
+# ─── 정의 테이블 탐색 (Definition-Based Matching) ────────────────────────
+
+_DEF_TABLE_HEADER_RE = re.compile(
+    r'(?:Error\s*Code\s*Table\s*(\d)?|Alarm\s*(\d)|Fault\s*Code|'
+    r'Inverter\s*Mode\s*Table|Work\s*(?:Mode|State)\s*Table|'
+    r'Running\s*Status|Operating\s*Mode|Device\s*Status|'
+    r'Table\s*3\.1\.\d|DSP\s*(?:alarm|error)|ARM\s*alarm)\s*'
+    r'(?:\(?(?:0x([0-9A-Fa-f]{4}))\)?)?',
+    re.I
+)
+_BIT_DEF_RE = re.compile(r'^(?:Bit\s*)?(\d{1,2})$')
+_HEX_VAL_RE = re.compile(r'^0x([0-9A-Fa-f]{2,4})$')
+_MODE_VAL_RE = re.compile(r'^(\d{1,2})\s*[:：]\s*(.+)')
+
+
+def scan_definition_tables(pages: list, excel_sheets: dict = None) -> dict:
+    """
+    PDF/Excel에서 STATUS/ALARM 정의 테이블 탐색
+    Returns: {
+        'status_defs': [{'address': int, 'name': str, 'type': 'mode_table',
+                         'values': {0: 'Initial', 1: 'Standby', ...}, 'page': N}],
+        'alarm_defs': [{'address': int, 'name': str, 'type': 'bitfield'|'fault_codes',
+                        'values': {0: 'Grid Volt Low', 1: 'Grid Volt High', ...}, 'page': N}],
+    }
+    """
+    result = {'status_defs': [], 'alarm_defs': []}
+
+    if pages:
+        _scan_pdf_definitions(pages, result)
+    if excel_sheets:
+        _scan_excel_definitions(excel_sheets, result)
+
+    return result
+
+
+def _scan_pdf_definitions(pages: list, result: dict):
+    """PDF 페이지에서 정의 테이블 탐색"""
+    for p in pages:
+        text = p.get('text', '')
+        page_num = p.get('page', 0)
+
+        # 페이지 텍스트에서 정의 테이블 헤더 찾기
+        # "Error Code Table1 (0x101E)", "Inverter Mode Table", etc.
+        for line in text.split('\n'):
+            line_s = line.strip()
+            m = _DEF_TABLE_HEADER_RE.search(line_s)
+            if not m:
+                continue
+
+            # 레지스터 주소 추출 (있으면)
+            addr_hex = m.group(3)
+            addr = int(addr_hex, 16) if addr_hex else None
+            header_text = line_s.lower()
+
+            # 정의 타입 판별
+            is_mode = any(k in header_text for k in ['mode', 'status', 'state', 'running', 'operating'])
+            is_alarm = any(k in header_text for k in ['error code', 'alarm', 'fault', 'dsp', 'arm'])
+
+            # 같은 페이지의 테이블에서 값 정의 추출
+            for tab in p.get('tables', []):
+                cleaned = _clean_table(tab)
+                values = _extract_value_definitions(cleaned)
+                if not values or len(values) < 2:
+                    continue
+
+                # 값 패턴으로 타입 확인
+                def_type = _detect_definition_type(values)
+                if not def_type:
+                    continue
+
+                entry = {
+                    'address': addr,
+                    'name': line_s[:60],
+                    'type': def_type,
+                    'values': values,
+                    'page': page_num,
+                }
+
+                if is_mode or def_type == 'mode_table':
+                    result['status_defs'].append(entry)
+                elif is_alarm or def_type in ('bitfield', 'fault_codes'):
+                    result['alarm_defs'].append(entry)
+                break  # 한 헤더에 하나의 테이블만
+
+        # 헤더 없이 테이블 내용으로 직접 탐지 (모드 테이블)
+        for tab in p.get('tables', []):
+            cleaned = _clean_table(tab)
+            # hex 모드 값 패턴: 0x00, 0x01, 0x03...
+            hex_vals = {}
+            for row in cleaned:
+                cells = [str(c).strip() for c in row if str(c).strip()]
+                if not cells:
+                    continue
+                m_hex = _HEX_VAL_RE.match(cells[0])
+                if m_hex and len(cells) >= 2:
+                    val = int(m_hex.group(1), 16)
+                    desc = cells[1] if len(cells) > 1 else ''
+                    # mode 키워드 확인
+                    dl = ' '.join(cells).lower()
+                    if any(k in dl for k in ['mode', 'standby', 'on-grid', 'fault', 'shutdown',
+                                              'initial', 'off-grid', 'waiting', 'normal']):
+                        hex_vals[val] = desc
+            if len(hex_vals) >= 3:
+                # 이미 등록된 것과 중복 방지
+                if not any(d['page'] == page_num and d['type'] == 'mode_table'
+                           for d in result['status_defs']):
+                    result['status_defs'].append({
+                        'address': None,
+                        'name': f'Mode Table (P{page_num})',
+                        'type': 'mode_table',
+                        'values': hex_vals,
+                        'page': page_num,
+                    })
+
+        # 텍스트에서 인라인 모드 정의 (Goodwe: "0:cWaitMode 1:cNormalMode 2:cFaultMode")
+        for line in text.split('\n'):
+            modes = {}
+            for m_mode in re.finditer(r'(\d)\s*[:：]\s*([a-zA-Z]\w+(?:Mode|mode))', line):
+                modes[int(m_mode.group(1))] = m_mode.group(2)
+            if len(modes) >= 2:
+                if not any(d['page'] == page_num and d['type'] == 'mode_table'
+                           for d in result['status_defs']):
+                    result['status_defs'].append({
+                        'address': None,
+                        'name': f'Inline Mode (P{page_num})',
+                        'type': 'mode_table',
+                        'values': modes,
+                        'page': page_num,
+                    })
+
+
+def _scan_excel_definitions(sheets: dict, result: dict):
+    """Excel 시트에서 정의 테이블 탐색 (EKOS 등)"""
+    for key, rows in sheets.items():
+        key_lower = key.lower()
+
+        # EKOS: 데이타형식 F007 → status 정의
+        if '데이타' in key_lower or 'format' in key_lower:
+            in_f007 = False
+            values = {}
+            for row in rows:
+                joined = ' '.join(str(c) for c in row).lower()
+                if 'f007' in joined or '인터터 동작상태' in joined or '인버터 동작상태' in joined:
+                    in_f007 = True
+                    continue
+                if in_f007:
+                    if 'f008' in joined or 'f009' in joined:
+                        break
+                    # "0 : Stop", "8 : MPP" 패턴
+                    for cell in row:
+                        c = str(cell).strip()
+                        m = re.match(r'^(\d+)\s*[:：]\s*(.+)', c)
+                        if m:
+                            values[int(m.group(1))] = m.group(2).strip()
+            if len(values) >= 2:
+                result['status_defs'].append({
+                    'address': None, 'name': 'F007 (EKOS)',
+                    'type': 'mode_table', 'values': values, 'page': 0,
+                })
+
+        # EKOS: Fault MAP → alarm 정의
+        if 'fault' in key_lower:
+            current_group = ''
+            values = {}
+            for row in rows:
+                cells = [str(c).strip() if c else '' for c in row]
+                # 그룹 헤더 (PV, 인버터, 계통, 컨버터)
+                if cells[0] and any(k in cells[0] for k in ['PV', '인버터', '계통', '컨버터']):
+                    if values and current_group:
+                        result['alarm_defs'].append({
+                            'address': None, 'name': f'{current_group} (EKOS)',
+                            'type': 'bitfield', 'values': dict(values), 'page': 0,
+                        })
+                    current_group = cells[0].replace('\n', ' ').strip()[:30]
+                    values = {}
+                    continue
+                # 비트 정의: bit번호 + 설명
+                if len(cells) >= 3 and cells[1].isdigit() and cells[2]:
+                    bit_num = int(cells[1])
+                    desc = cells[2]
+                    if desc:
+                        values[bit_num] = desc
+            if values and current_group:
+                result['alarm_defs'].append({
+                    'address': None, 'name': f'{current_group} (EKOS)',
+                    'type': 'bitfield', 'values': dict(values), 'page': 0,
+                })
+
+
+def _extract_value_definitions(table: list) -> dict:
+    """테이블에서 값 → 설명 매핑 추출"""
+    values = {}
+    for row in table:
+        cells = [str(c).strip() for c in row if str(c).strip()]
+        if not cells or len(cells) < 2:
+            continue
+        # Bit N 패턴
+        m_bit = _BIT_DEF_RE.match(cells[0])
+        if m_bit:
+            bit_num = int(m_bit.group(1))
+            desc = cells[-1] if len(cells) > 1 else ''
+            if desc and len(desc) > 2 and not desc.isdigit():
+                values[bit_num] = desc[:50]
+            continue
+        # 0x hex 값 패턴
+        m_hex = _HEX_VAL_RE.match(cells[0])
+        if m_hex:
+            val = int(m_hex.group(1), 16)
+            desc = cells[1] if len(cells) > 1 else ''
+            if desc and not desc.isdigit():
+                values[val] = desc[:50]
+            continue
+        # 숫자 + 설명
+        if cells[0].isdigit() and len(cells) >= 2:
+            val = int(cells[0])
+            desc = cells[1]
+            if desc and len(desc) > 2 and not desc.isdigit():
+                values[val] = desc[:50]
+    return values
+
+
+def _detect_definition_type(values: dict) -> Optional[str]:
+    """값 패턴으로 정의 타입 추측"""
+    if not values:
+        return None
+    keys = list(values.keys())
+    vals_text = ' '.join(str(v).lower() for v in values.values())
+
+    # mode_table: 값이 적고 (< 15), mode/standby/fault 키워드
+    if len(keys) <= 15 and any(k in vals_text for k in ['mode', 'standby', 'fault', 'grid',
+                                                          'initial', 'shutdown', 'waiting',
+                                                          'normal', 'running', 'stop']):
+        return 'mode_table'
+
+    # bitfield: 키가 0~15 범위, bit 관련 키워드
+    if all(0 <= k <= 31 for k in keys) and any(k in vals_text for k in [
+            'over', 'under', 'abnormal', 'fault', 'lock', 'relay', 'igbt',
+            'voltage', 'current', 'frequency', 'temperature']):
+        return 'bitfield'
+
+    # fault_codes: 키가 크고 (> 15), fault/alarm 분류
+    if any(k > 15 for k in keys) and any(k in vals_text for k in ['fault', 'alarm', 'warning']):
+        return 'fault_codes'
+
+    return None
+
+
 def assign_h01_field(reg: RegisterRow, synonym_db: dict,
                      ref_patterns: dict = None) -> str:
     """레지스터에 대응하는 H01 필드명 추정 (V2)"""

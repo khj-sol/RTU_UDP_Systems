@@ -31,7 +31,7 @@ class RegisterRow:
     __slots__ = ('definition', 'address', 'address_hex', 'data_type', 'regs',
                  'unit', 'scale', 'rw', 'comment', 'category', 'h01_field',
                  'h01_match', 'der_match', 'review_reason', 'review_suggestion',
-                 'user_verdict')
+                 'user_verdict', 'value_definitions')
 
     def __init__(self, **kw):
         for s in self.__slots__:
