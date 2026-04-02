@@ -811,17 +811,8 @@ def build_h01_match_table(categorized: dict, meta: dict) -> List[dict]:
                                       '시스템동작상태', '동작상태']):
                 status_reg = sr
                 break
-    # 상태 정의(값 테이블) 검증
+    # 상태 정의(값 테이블) 검증 — 통상 Appendix에 별도 정의
     status_note = ''
-    if status_reg:
-        comment = (status_reg.comment or '').lower()
-        defn = status_reg.definition.lower()
-        has_mode_def = any(k in comment + defn for k in ['mode table', 'standby', 'on-grid',
-                                                          'fault', 'normal', 'waiting', 'stop',
-                                                          'cwaitmode', 'cnormalmode',
-                                                          'f007', '동작상태'])
-        if not has_mode_def:
-            status_note = '상태 정의 테이블 미확인 — 매핑 검증 필요'
     rows.append(_make_pdf_match_row('status', status_reg, 'Work State 미발견'))
     if status_note and rows[-1]['status'] == 'O':
         rows[-1]['note'] = status_note
