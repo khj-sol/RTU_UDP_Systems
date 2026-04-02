@@ -708,8 +708,8 @@ def validate_code(code: str, mppt: int, total_strings: int,
     if iv_scan:
         checks['class_IVScanCommand'] = 'class IVScanCommand' in code
         checks['class_IVScanStatus'] = 'class IVScanStatus' in code
-    if der_avm:
-        checks['class_DerActionMode'] = 'class DerActionMode' in code
+    # DER-AVM은 모든 인버터 필수
+    checks['class_DerActionMode'] = 'class DerActionMode' in code
     checks['class_DeviceType'] = 'class DeviceType' in code
     checks['class_ErrorCode1'] = 'class ErrorCode1' in code
     checks['InverterMode_to_string'] = 'def to_string' in code
