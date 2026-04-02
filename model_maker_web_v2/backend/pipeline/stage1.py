@@ -264,27 +264,67 @@ def _parse_register_row(row: list, col_map: dict) -> Optional[RegisterRow]:
                      ('BITFIELD16', 'U16'), ('BITFIELD32', 'U32')]:
         dtype = dtype.replace(old, new)
 
+    # 단위 + 스케일 추출 — "0.1V", "0.01A", "kWh" 등에서 분리
+    _SCALE_UNIT_RE = re.compile(r'^([\d.]+)\s*(V|A|W|kW|VA|kVA|VAr|kVAr|Hz|°C|℃|Wh|kWh|MWh|%)$')
+
     unit = ''
+    scale = ''
+
+    # 1) scale 컬럼에서 먼저 시도
+    scale_idx = col_map.get('scale')
+    if scale_idx is not None and scale_idx < len(row):
+        s = str(row[scale_idx]).strip()
+        if s and s not in ('', 'None', '-'):
+            # "0.1V" 형태면 scale+unit 분리
+            m = _SCALE_UNIT_RE.match(s)
+            if m:
+                scale = m.group(1)
+                unit = m.group(2)
+            else:
+                # 숫자만이면 scale
+                try:
+                    float(s)
+                    scale = s
+                except ValueError:
+                    pass
+
+    # 2) unit 컬럼에서 시도
     unit_idx = col_map.get('unit')
     if unit_idx is not None and unit_idx < len(row):
-        m = _UNIT_RE.search(str(row[unit_idx]))
-        if m:
-            unit = m.group(1)
+        u = str(row[unit_idx]).strip()
+        if u and u not in ('', 'None', '-'):
+            # "0.1V", "0.01A" 형태면 분리
+            m = _SCALE_UNIT_RE.match(u)
+            if m:
+                if not scale:
+                    scale = m.group(1)
+                if not unit:
+                    unit = m.group(2)
+            else:
+                # 순수 단위
+                m2 = _UNIT_RE.search(u)
+                if m2 and not unit:
+                    unit = m2.group(1)
+
+    # 3) 이름에서 단위 추출 (fallback)
     if not unit:
         m = _UNIT_RE.search(name)
         if m:
             unit = m.group(1)
 
-    scale = ''
-    scale_idx = col_map.get('scale')
-    if scale_idx is not None and scale_idx < len(row):
-        s = str(row[scale_idx]).strip()
-        if s and s not in ('', 'None', '-'):
-            scale = s
+    # 4) 전체 행에서 "0.1V", "0.01A" 패턴만 탐색 (addr/name 컬럼 제외)
     if not scale:
-        m = _SCALE_RE.search(' '.join(str(c) for c in row))
-        if m:
-            scale = m.group(1)
+        skip_cols = {col_map.get('addr'), col_map.get('name'), actual_addr_idx}
+        for ci, cell in enumerate(row):
+            if ci in skip_cols:
+                continue
+            c = str(cell).strip()
+            m = _SCALE_UNIT_RE.match(c)
+            if m and float(m.group(1)) != 1.0:
+                scale = m.group(1)
+                if not unit:
+                    unit = m.group(2)
+                break
 
     rw = ''
     rw_idx = col_map.get('rw')
