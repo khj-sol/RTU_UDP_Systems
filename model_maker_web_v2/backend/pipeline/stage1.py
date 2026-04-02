@@ -1373,7 +1373,23 @@ def build_h01_match_table(categorized: dict, meta: dict) -> List[dict]:
         for mtype in ['voltage', 'current']:
             field = f'mppt{n}_{mtype}'
             reg = _find_matched_reg(categorized, field)
-            rows.append(_make_pdf_match_row(field, reg))
+            if reg:
+                rows.append(_make_pdf_match_row(field, reg))
+            elif mtype == 'current':
+                # current 없으면 voltage + power로 계산 가능한지 체크
+                has_v = _find_matched_reg(categorized, f'mppt{n}_voltage')
+                has_p = _find_matched_reg(categorized, f'mppt{n}_power')
+                if has_v and has_p:
+                    rows.append({
+                        'field': field, 'source': 'HANDLER', 'status': 'O',
+                        'address': '-', 'definition': '-',
+                        'type': 'U16', 'unit': 'A', 'scale': '',
+                        'note': f'handler 계산: mppt{n}_power / mppt{n}_voltage',
+                    })
+                else:
+                    rows.append(_make_pdf_match_row(field, None))
+            else:
+                rows.append(_make_pdf_match_row(field, None))
 
     for n in range(1, max_string + 1):
         field = f'string{n}_current'
