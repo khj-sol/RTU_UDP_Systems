@@ -414,8 +414,9 @@
       document.getElementById('btn-s3').disabled = false;
       const sumEl = document.getElementById('s3-summary');
       if (sumEl) {
-        sumEl.innerHTML = sumEl.innerHTML.replace(/<br>.*REVIEW.*미결<\/span>/, '')
-                                         .replace(/REVIEW.*미결/, '');
+        sumEl.innerHTML = sumEl.innerHTML
+          .replace(/REVIEW \d+개 미결/, `REVIEW ${total}개 해결`)
+          .replace('color:#fbbf24', 'color:#4ade80');
       }
       appendLog('s2', `REVIEW ${total}개 판정 완료`, 'ok');
 
