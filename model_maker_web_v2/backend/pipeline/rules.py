@@ -265,23 +265,44 @@ INFO_KNOWN_NAMES = {
     ],
 }
 
-# 정규화된 이름 → 빠른 매칭용 세트
-_INFO_KNOWN_NORMS = set()
+# 정규화된 이름 → 매칭용 (긴 키워드: 서브스트링, 짧은 키워드: 단어경계)
+_INFO_KNOWN_LONG = set()   # len >= 6: 서브스트링 매칭
+_INFO_KNOWN_SHORT = set()  # len < 6: 완전일치 또는 단어경계 매칭
+_INFO_KNOWN_ALL = set()    # 전체 (완전일치용)
 for _names in INFO_KNOWN_NAMES.values():
     for _n in _names:
-        _INFO_KNOWN_NORMS.add(_n.lower().replace(' ', '').replace('_', ''))
+        norm = _n.lower().replace(' ', '').replace('_', '')
+        _INFO_KNOWN_ALL.add(norm)
+        if len(norm) >= 6:
+            _INFO_KNOWN_LONG.add(norm)
+        else:
+            _INFO_KNOWN_SHORT.add(norm)
+
+# 짧은 키워드용 regex (단어 경계 매칭)
+_INFO_SHORT_RE = re.compile(
+    r'\b(' + '|'.join(re.escape(k) for k in _INFO_KNOWN_SHORT if len(k) >= 2) + r')\b',
+    re.I
+) if _INFO_KNOWN_SHORT else None
 
 
 def is_known_info_name(definition: str) -> bool:
     """검증된 INFO 이름 DB에서 유사 이름 매칭.
-    정규화(소문자+공백/언더스코어 제거) 후 서브스트링 매칭."""
+    - 완전 일치 (정규화)
+    - 긴 키워드 (≥6자): 서브스트링 매칭 — false positive 방지
+    - 짧은 키워드 (<6자): 단어경계 regex 매칭 — 'model'이 'ThermalModel'에 안 걸리도록
+    """
     defn_norm = definition.lower().replace(' ', '').replace('_', '').replace('-', '')
     # 1) 완전 일치
-    if defn_norm in _INFO_KNOWN_NORMS:
+    if defn_norm in _INFO_KNOWN_ALL:
         return True
-    # 2) 서브스트링 매칭 (정규화된 이름이 정의에 포함)
-    for known in _INFO_KNOWN_NORMS:
-        if len(known) >= 4 and known in defn_norm:
+    # 2) 긴 키워드: 서브스트링 매칭 (≥6자만 — 'firmware', 'serialnumber' 등)
+    for known in _INFO_KNOWN_LONG:
+        if known in defn_norm:
+            return True
+    # 3) 짧은 키워드: 단어 경계 매칭 ('model', 'sn', 'pn' 등)
+    if _INFO_SHORT_RE:
+        defn_spaced = definition.replace('_', ' ').replace('-', ' ')
+        if _INFO_SHORT_RE.search(defn_spaced):
             return True
     return False
 #
@@ -299,17 +320,33 @@ _SN_EXCLUDE_RE = re.compile(
 # INFO 블록 확장: is_known_info_name() (검증된 이름 DB) 사용
 
 # INFO 블록 확장 시 중단하는 키워드 (운영 데이터 감지 → 블록 종료)
+# INFO 블록 STOP — 일반 카테고리 기반 (특정 인버터 과적합 방지)
+# 일반 카테고리 기반 STOP (특정 인버터 과적합 방지)
 _INFO_BLOCK_STOP = re.compile(
-    r'energy|temperature|temp\b|insulation|bus\s*volt|country|'
-    r'running\s*time|meter\b|reactive\s*power|real.?time|'
-    r'alarm|fault|error|warning|status|mode\b|'
-    r'daily|total\s*(power|energy)|monthly|'
-    r'sales\s*area|upgrade|subpackage|unique\s*id|'
-    r'현재시각|시스템동작|발전유무|동작상태|시간|year|month|day|hour|minute|second',
+    # 에너지 (발전량/소비량)
+    r'energy|발전량|소비량|전력량|daily|monthly|yearly|total\s*power|'
+    # 온도/환경
+    r'temperature|temp\b|온도|'
+    # 상태/알람/오류
+    r'alarm|fault|error|warning|status|동작상태|발전유무|'
+    # 측정값 (운영 데이터)
+    r'insulation|절연|bus\s*volt|reactive\s*power|무효전력|real.?time|'
+    # 시간 레지스터
+    r'현재시각|시간|system\s*clock|time\s*stamp|sys\s*(year|month|day|hour|min|sec|weekly)|'
+    # 운영 파라미터
+    r'meter\b|sales|upgrade|subpackage|unique\s*id|country|'
+    # 제어/설정값 (Growatt Vac/Fac, reset, flash, communication address)
+    r'running\s*time|가동시간|mode\b|'
+    r'\bvac\b|\bfac\b|reset|flash\s*start|com\s*address|fail\s*safe|'
+    # 측정 전력 (PV input power, charge/discharge)
+    r'\bppv\d|\bpcharge\b|\bpdischarge\b|\bpinv\b|\bprec\b|slave\s*is\s*busy|'
+    # 목차/문서 구조 (Schneider 등)
+    r'introduction|key\s*points|connection|configuration|logical\s*layer|'
+    r'physical\s*layer|termination|communication\s*param',
     re.I
 )
 
-# voltage/frequency/current는 nominal/rated 앞에 올 때 INFO이므로 별도 체크
+# 측정값(voltage/frequency/current): nominal/rated/grid 수식어 있으면 INFO OK
 _INFO_STOP_MEASUREMENT = re.compile(
     r'(?<!nominal\s)(?<!rated\s)(?<!grid\s)voltage\b|'
     r'(?<!nominal\s)(?<!rated\s)(?<!grid\s)frequency\b|'
@@ -317,9 +354,8 @@ _INFO_STOP_MEASUREMENT = re.compile(
     re.I
 )
 
-# INFO 블록 내 최대 주소 간격
-# 키워드 매칭 시 50, 미매칭 시 25 (detect_info_block에서 분기)
-_INFO_MAX_GAP = 50
+# INFO 블록 내 기본 최대 주소 간격 (동적 GAP으로 대체 — detect_info_block 내부)
+_INFO_DEFAULT_GAP = 30
 
 
 # PDF 섹션 제목 패턴 — "Device information" 등 (Device attributes는 제외 — 운영 레지스터 혼재)
@@ -412,6 +448,11 @@ def detect_info_block(registers: list, pages: list = None) -> dict:
                 anchors_found = [a for a in [model_addr, sn_addr] if a]
                 if anchors_found:
                     block_start = min(anchors_found)
+                    # 동적 GAP
+                    if len(anchors_found) >= 2:
+                        max_gap = max(int(abs(anchors_found[0] - anchors_found[1]) * 1.5), _INFO_DEFAULT_GAP)
+                    else:
+                        max_gap = _INFO_DEFAULT_GAP
                     info_addrs = set()
                     prev = block_start
                     for addr in candidate_addrs:
@@ -430,7 +471,7 @@ def detect_info_block(registers: list, pages: list = None) -> dict:
                         if is_known_info_name(defn) or (addr - prev <= 5):
                             info_addrs.add(addr)
                             prev = addr
-                        elif addr - prev > _INFO_MAX_GAP:
+                        elif addr - prev > max_gap:
                             break
                     return {
                         'info_addrs': info_addrs,
@@ -462,6 +503,13 @@ def detect_info_block(registers: list, pages: list = None) -> dict:
     anchors = [a for a in [model_anchor, sn_anchor] if a]
     block_start = min(a[0] for a in anchors)
 
+    # 동적 GAP: 앵커 간 거리 기반 (Model↔SN 거리의 1.5배, 최소 30)
+    if len(anchors) >= 2:
+        anchor_dist = abs(anchors[0][0] - anchors[1][0])
+        max_gap = max(int(anchor_dist * 1.5), _INFO_DEFAULT_GAP)
+    else:
+        max_gap = _INFO_DEFAULT_GAP
+
     # ── 2단계: 앵커부터 전방 확장 ──
     # block_start 이전 레지스터도 포함 (SN이 Model 앞에 올 수 있음)
     info_addrs = set()
@@ -470,7 +518,7 @@ def detect_info_block(registers: list, pages: list = None) -> dict:
     for addr, reg in ro_regs:
         if addr < block_start:
             # 앵커 직전 레지스터도 포함 (앵커 간 간격 이내)
-            if block_start - addr <= _INFO_MAX_GAP:
+            if block_start - addr <= max_gap:
                 defn = reg.definition.replace('_', ' ')
                 if is_known_info_name(defn) and \
                         not _INFO_BLOCK_STOP.search(defn) and not _INFO_STOP_MEASUREMENT.search(defn):
@@ -478,7 +526,7 @@ def detect_info_block(registers: list, pages: list = None) -> dict:
             continue
 
         # 주소 간격 초과 → 블록 종료
-        if addr - prev_addr > _INFO_MAX_GAP and addr not in {a[0] for a in anchors}:
+        if addr - prev_addr > max_gap and addr not in {a[0] for a in anchors}:
             break
 
         defn = reg.definition.replace('_', ' ')
