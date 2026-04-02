@@ -835,6 +835,9 @@ def classify_register_with_rules(
         return (cat, '')
 
     # §2-2: STATUS 키워드 (단, Fault/Alarm/Grid Status는 ALARM 우선)
+    # SunSpec: I_Status_Vendor = error code → ALARM, M_Events = event bitfield → ALARM
+    if any(k in defn_lower for k in ['status_vendor', 'status vendor', 'm_events']):
+        return ('ALARM', '')
     if any(k in defn_lower for k in ['fault status', 'alarm status', 'fault state',
                                       'grid status']):
         return ('ALARM', '')
