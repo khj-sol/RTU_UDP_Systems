@@ -203,8 +203,10 @@ INFO_REQUIRED = {
     'DEVICE_MODEL':       ['model', 'device model', '모델', 'product model',
                            'device type code', 'type code', 'device type'],
     'SERIAL_NUMBER':      ['serial', 'sn', '시리얼', '제품번호', 'serial number'],
+    'MANUFACTURER':       ['manufacturer', 'c_manufacturer'],
     'FIRMWARE_VERSION':   ['firmware', 'fw version', 'software version', '펌웨어',
-                           'protocol version', 'communication version'],
+                           'protocol version', 'communication version',
+                           'c_version'],
     'MPPT_COUNT':         ['mppt count', 'number of mppt', 'mppt tracker', 'mppt수'],
     'NOMINAL_POWER':      ['nominal power', 'rated power', '정격출력', 'max output',
                            'nominal active power', 'rated active power',
@@ -468,6 +470,9 @@ def classify_register_with_rules(
     # SunSpec: I_Status_Vendor = error code → ALARM, M_Events = event bitfield → ALARM
     if any(k in defn_lower for k in ['status_vendor', 'status vendor', 'm_events']):
         return ('ALARM', '')
+    # SunSpec: I_STATUS_OFF~STANDBY (addr 1~8) = 값 정의, 레지스터 아님 → EXCLUDE
+    if defn_lower.startswith('i_status_') and addr is not None and addr < 20:
+        return ('EXCLUDE', '')
     if any(k in defn_lower for k in ['fault status', 'alarm status', 'fault state',
                                       'grid status']):
         return ('ALARM', '')
