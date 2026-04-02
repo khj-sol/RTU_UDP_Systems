@@ -55,6 +55,40 @@ def extract_pdf_text_and_tables(pdf_path: str) -> List[dict]:
     return pages
 
 
+def _apply_saved_definitions(categorized: dict, manufacturer: str, log=None):
+    """definitions/{manufacturer}_definitions.json에서 정의 로드 (PDF 파싱으로 못 찾은 경우 fallback)"""
+    defs_dir = os.path.join(os.path.dirname(__file__), 'definitions')
+    fname = f'{manufacturer.lower()}_definitions.json'
+    fpath = os.path.join(defs_dir, fname)
+    if not os.path.exists(fpath):
+        return
+
+    with open(fpath, encoding='utf-8') as f:
+        saved = json.load(f)
+
+    status_defs = saved.get('status_definitions', {})
+    alarm_codes = saved.get('alarm_codes', {})
+
+    # STATUS: value_definitions 없는 inverter_status 레지스터에 적용
+    if status_defs:
+        for reg in categorized.get('STATUS', []):
+            if getattr(reg, 'h01_field', '') == 'inverter_status':
+                if not getattr(reg, 'value_definitions', None):
+                    reg.value_definitions = status_defs
+                    if log:
+                        log(f'  정의 파일 적용 (status): {fname} ({len(status_defs)}개)')
+                break
+
+    # ALARM: value_definitions 없는 첫 번째 ALARM에 적용
+    if alarm_codes:
+        for reg in categorized.get('ALARM', []):
+            if not getattr(reg, 'value_definitions', None):
+                reg.value_definitions = alarm_codes
+                if log:
+                    log(f'  정의 파일 적용 (alarm): {fname} ({len(alarm_codes)}개)')
+                break
+
+
 def _extract_model_from_pdf(pdf_path: str, manufacturer: str) -> str:
     """PDF 메타데이터/파일명/첫 페이지에서 인버터 모델명 추출"""
     model = ''
@@ -2037,6 +2071,9 @@ def run_stage1(
             _link_definitions_to_registers(categorized, def_tables)
             log(f'  정의 테이블: status {len(def_tables["status_defs"])}개({st_count}값), '
                 f'alarm {len(def_tables["alarm_defs"])}개({al_count}값)')
+
+    # ── 정의 파일 fallback: definitions/{manufacturer}_definitions.json ──
+    _apply_saved_definitions(categorized, manufacturer, log)
 
     h01_match_table = build_h01_match_table(categorized, meta)
     h01_matched = sum(1 for r in h01_match_table if r['status'] == 'O')
