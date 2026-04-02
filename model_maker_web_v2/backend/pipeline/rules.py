@@ -231,15 +231,23 @@ _INFO_BLOCK_KEYWORDS = re.compile(
 _INFO_BLOCK_STOP = re.compile(
     r'energy|temperature|temp\b|insulation|bus\s*volt|country|'
     r'running\s*time|meter\b|reactive\s*power|real.?time|'
-    r'alarm|fault|error|warning|status|mode\b|frequency\b|'
+    r'alarm|fault|error|warning|status|mode\b|'
     r'daily|total\s*(power|energy)|monthly|'
-    r'sales\s*area|upgrade|subpackage|unique\s*id|'
-    r'current\b(?!.*calibration)|voltage\b(?!.*nominal|.*rated)',
+    r'sales\s*area|upgrade|subpackage|unique\s*id',
     re.I
 )
 
-# INFO 블록 내 최대 주소 간격 (이 이상 벌어지면 블록 종료)
-_INFO_MAX_GAP = 25
+# voltage/frequency/current는 nominal/rated 앞에 올 때 INFO이므로 별도 체크
+_INFO_STOP_MEASUREMENT = re.compile(
+    r'(?<!nominal\s)(?<!rated\s)(?<!grid\s)voltage\b|'
+    r'(?<!nominal\s)(?<!rated\s)(?<!grid\s)frequency\b|'
+    r'(?<!nominal\s)(?<!rated\s)current\b',
+    re.I
+)
+
+# INFO 블록 내 최대 주소 간격
+# 키워드 매칭 시 50, 미매칭 시 25 (detect_info_block에서 분기)
+_INFO_MAX_GAP = 50
 
 
 def detect_info_block(registers: list) -> dict:
@@ -303,7 +311,8 @@ def detect_info_block(registers: list) -> dict:
             # 앵커 직전 레지스터도 포함 (앵커 간 간격 이내)
             if block_start - addr <= _INFO_MAX_GAP:
                 defn = reg.definition.replace('_', ' ')
-                if _INFO_BLOCK_KEYWORDS.search(defn) and not _INFO_BLOCK_STOP.search(defn):
+                if _INFO_BLOCK_KEYWORDS.search(defn) and \
+                        not _INFO_BLOCK_STOP.search(defn) and not _INFO_STOP_MEASUREMENT.search(defn):
                     info_addrs.add(addr)
             continue
 
@@ -320,11 +329,15 @@ def detect_info_block(registers: list) -> dict:
             continue
 
         # 운영 데이터 키워드 → 블록 종료
-        if _INFO_BLOCK_STOP.search(defn):
+        if _INFO_BLOCK_STOP.search(defn) or _INFO_STOP_MEASUREMENT.search(defn):
             break
 
-        # INFO 키워드 매칭 또는 앵커 근접 (간격 ≤ 5)
-        if _INFO_BLOCK_KEYWORDS.search(defn) or (addr - prev_addr <= 5):
+        # INFO 키워드 매칭 → 포함 (간격 MAX_GAP 이내)
+        if _INFO_BLOCK_KEYWORDS.search(defn):
+            info_addrs.add(addr)
+            prev_addr = addr
+        elif addr - prev_addr <= 5:
+            # 키워드 불일치지만 앵커 근접 → 포함
             info_addrs.add(addr)
             prev_addr = addr
         else:
