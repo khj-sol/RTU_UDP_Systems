@@ -384,7 +384,7 @@ def extract_registers_from_tables(tables: List[List[list]]) -> List[RegisterRow]
         table = _clean_table(table)
         first_has_addr = any(
             str(c).strip().startswith('0x') or str(c).strip().startswith('0X') or
-            (re.match(r'^\d{4,5}$', str(c).strip()) and 0 <= int(str(c).strip()) <= 65535)
+            (re.match(r'^\d{3,5}$', str(c).strip()) and 0 <= int(str(c).strip()) <= 65535)
             for c in table[0] if c)
         if first_has_addr:
             data_rows = table
