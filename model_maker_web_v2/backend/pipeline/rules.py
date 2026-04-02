@@ -198,14 +198,82 @@ def get_string_voltage_rule() -> str:
 # ═══════════════════════════════════════════════════════════════════════════
 
 # ═══════════════════════════════════════════════════════════════════════════
-# §3. INFO 블록 감지 — 앵커(Model/SN) 기반 + RO + 위치 규칙
+# §3. INFO 블록 감지 — 검증된 이름 DB + 앵커(Model/SN) + RO
 # ═══════════════════════════════════════════════════════════════════════════
 #
 # 제너럴 룰:
-#   1. INFO 레지스터는 PDF 앞쪽에 위치 (Device attributes 섹션)
+#   1. INFO 레지스터는 PDF 앞쪽에 위치 (Device information 섹션)
 #   2. 모두 RO (Read-Only)
 #   3. Model + SN이 앵커 — 하나라도 없으면 표시하여 RTU가 인지
 #   4. 앵커 주변 연속 RO 레지스터 블록이 INFO
+#   5. 검증된 인버터들의 INFO 이름 DB로 유사 이름 매칭
+
+# ── 검증된 INFO 레지스터 이름 DB (5개 인버터에서 축적) ──
+# 그룹별 정규화된 이름 패턴 — 새 인버터에서 유사 이름 자동 매칭
+INFO_KNOWN_NAMES = {
+    'MODEL': [
+        'model', 'device model', 'device model name', 'device type',
+        'device type code', 'type code', 'model id', 'model code',
+        'model name', 'machine model', 'inverter model', '모델',
+    ],
+    'SERIAL_NUMBER': [
+        'sn', 'serial number', 'device serial number', 'device sn',
+        'inverter sn', '시리얼', '제품번호', 'serialnumber',
+    ],
+    'PRODUCT_CODE': [
+        'pn', 'product code', 'product number',
+    ],
+    'FIRMWARE': [
+        'firmware version', 'firmware', 'master firmware version',
+        'slave firmware version', 'software version', 'protocol version',
+        'ems firmware version', 'lcd firmware version',
+        'firmware version of arm', 'dsp version', 'communication version',
+        '펌웨어',
+    ],
+    'MPPT_COUNT': [
+        'mppt number', 'number of mppts', 'mppt count', 'number of mppt',
+        'mppt tracker', 'mppt수',
+    ],
+    'PV_STRING_COUNT': [
+        'number of pv strings', 'pv string count', 'string count',
+    ],
+    'RATED_POWER': [
+        'nominal active power', 'rated power', 'nominal power',
+        'maximum active power', 'max active power',
+        'maximum apparent power', 'max apparent power',
+        'rated active power', '정격출력',
+    ],
+    'RATED_VOLTAGE': [
+        'nominal voltage', 'rated voltage', '정격전압',
+    ],
+    'RATED_FREQUENCY': [
+        'nominal frequency', 'rated frequency', '정격주파수',
+    ],
+    'PHASE': [
+        'grid phase number', 'phase number', 'output type', 'phase count',
+        'phase type', '상수',
+    ],
+}
+
+# 정규화된 이름 → 빠른 매칭용 세트
+_INFO_KNOWN_NORMS = set()
+for _names in INFO_KNOWN_NAMES.values():
+    for _n in _names:
+        _INFO_KNOWN_NORMS.add(_n.lower().replace(' ', '').replace('_', ''))
+
+
+def is_known_info_name(definition: str) -> bool:
+    """검증된 INFO 이름 DB에서 유사 이름 매칭.
+    정규화(소문자+공백/언더스코어 제거) 후 서브스트링 매칭."""
+    defn_norm = definition.lower().replace(' ', '').replace('_', '').replace('-', '')
+    # 1) 완전 일치
+    if defn_norm in _INFO_KNOWN_NORMS:
+        return True
+    # 2) 서브스트링 매칭 (정규화된 이름이 정의에 포함)
+    for known in _INFO_KNOWN_NORMS:
+        if len(known) >= 4 and known in defn_norm:
+            return True
+    return False
 #
 # 앵커 키워드 (단어 경계 매칭, 제외 필터 적용):
 _MODEL_RE = re.compile(
@@ -218,14 +286,7 @@ _SN_RE = re.compile(
 _SN_EXCLUDE_RE = re.compile(
     r'alarm|clearance|license|board|layout|feature|monitor|third|label|historical|latest', re.I)
 
-# INFO 블록 확장 시 허용되는 키워드 (앵커 이후 연속 RO 레지스터에 적용)
-_INFO_BLOCK_KEYWORDS = re.compile(
-    r'model|sn\b|serial|firmware|software|protocol\s*version|'
-    r'mppt|string|rated|nominal|maximum|max\s*output|'
-    r'apparent|phase|output\s*type|device\s*type|type\s*code|product|'
-    r'pn\b|version|power|정격|모델|펌웨어|시리얼',
-    re.I
-)
+# INFO 블록 확장: is_known_info_name() (검증된 이름 DB) 사용
 
 # INFO 블록 확장 시 중단하는 키워드 (운영 데이터 감지 → 블록 종료)
 _INFO_BLOCK_STOP = re.compile(
@@ -355,7 +416,7 @@ def detect_info_block(registers: list, pages: list = None) -> dict:
                             continue
                         if _INFO_BLOCK_STOP.search(defn) or _INFO_STOP_MEASUREMENT.search(defn):
                             break
-                        if _INFO_BLOCK_KEYWORDS.search(defn) or (addr - prev <= 5):
+                        if is_known_info_name(defn) or (addr - prev <= 5):
                             info_addrs.add(addr)
                             prev = addr
                         elif addr - prev > _INFO_MAX_GAP:
@@ -400,7 +461,7 @@ def detect_info_block(registers: list, pages: list = None) -> dict:
             # 앵커 직전 레지스터도 포함 (앵커 간 간격 이내)
             if block_start - addr <= _INFO_MAX_GAP:
                 defn = reg.definition.replace('_', ' ')
-                if _INFO_BLOCK_KEYWORDS.search(defn) and \
+                if is_known_info_name(defn) and \
                         not _INFO_BLOCK_STOP.search(defn) and not _INFO_STOP_MEASUREMENT.search(defn):
                     info_addrs.add(addr)
             continue
@@ -422,7 +483,7 @@ def detect_info_block(registers: list, pages: list = None) -> dict:
             break
 
         # INFO 키워드 매칭 → 포함 (간격 MAX_GAP 이내)
-        if _INFO_BLOCK_KEYWORDS.search(defn):
+        if is_known_info_name(defn):
             info_addrs.add(addr)
             prev_addr = addr
         elif addr - prev_addr <= 5:
@@ -434,17 +495,8 @@ def detect_info_block(registers: list, pages: list = None) -> dict:
             break
 
     # ── 3단계: 산재 모드 (scattered) — 블록이 너무 작으면 전체 RO에서 개별 수집 ──
-    # GoodWe 등 INFO가 흩어진 인버터: 블록 ≤ 2개이면 strict 키워드로 전체 탐색
+    # GoodWe 등 INFO가 흩어진 인버터: 블록 ≤ 2개이면 검증된 이름 DB로 전체 탐색
     if len(info_addrs) <= 2:
-        _SCATTERED_INFO_RE = re.compile(
-            r'\b(model|device\s*type|type\s*code)\b|'
-            r'\bsn\b|serial|시리얼|'
-            r'firmware\s*version|software\s*version|protocol\s*version|'
-            r'product\s*code|\bpn\b|'
-            r'rated\s*power|nominal\s*power|mppt\s*(count|number)|'
-            r'number\s*of\s*mppt|number\s*of\s*pv|phase\s*number|output\s*type',
-            re.I
-        )
         _SCATTERED_EXCLUDE_RE = re.compile(
             r'alarm|clearance|license|board|layout|monitor|third|label|'
             r'meter|replace|target|sub.?device|historical|latest|'
@@ -454,7 +506,7 @@ def detect_info_block(registers: list, pages: list = None) -> dict:
         scattered_addrs = set()
         for addr, reg in ro_regs:
             defn = reg.definition.replace('_', ' ')
-            if _SCATTERED_INFO_RE.search(defn) and not _SCATTERED_EXCLUDE_RE.search(defn):
+            if is_known_info_name(defn) and not _SCATTERED_EXCLUDE_RE.search(defn):
                 scattered_addrs.add(addr)
         if len(scattered_addrs) > len(info_addrs):
             info_addrs = scattered_addrs
