@@ -214,7 +214,7 @@ _MODEL_EXCLUDE_RE = re.compile(
     r'meter|replace|target|sub.?device|third|label|lcd|inverter model definition', re.I)
 
 _SN_RE = re.compile(
-    r'\bsn\b|\bserial\b|시리얼|제품번호', re.I)
+    r'\bsn\b|\bserial\b|serialnumber|시리얼|제품번호', re.I)
 _SN_EXCLUDE_RE = re.compile(
     r'alarm|clearance|license|board|layout|feature|monitor|third|label|historical|latest', re.I)
 
@@ -432,6 +432,45 @@ def detect_info_block(registers: list, pages: list = None) -> dict:
         else:
             # 키워드 불일치 + 간격 큼 → 블록 종료
             break
+
+    # ── 3단계: 산재 모드 (scattered) — 블록이 너무 작으면 전체 RO에서 개별 수집 ──
+    # GoodWe 등 INFO가 흩어진 인버터: 블록 ≤ 2개이면 strict 키워드로 전체 탐색
+    if len(info_addrs) <= 2:
+        _SCATTERED_INFO_RE = re.compile(
+            r'\b(model|device\s*type|type\s*code)\b|'
+            r'\bsn\b|serial|시리얼|'
+            r'firmware\s*version|software\s*version|protocol\s*version|'
+            r'product\s*code|\bpn\b|'
+            r'rated\s*power|nominal\s*power|mppt\s*(count|number)|'
+            r'number\s*of\s*mppt|number\s*of\s*pv|phase\s*number|output\s*type',
+            re.I
+        )
+        _SCATTERED_EXCLUDE_RE = re.compile(
+            r'alarm|clearance|license|board|layout|monitor|third|label|'
+            r'meter|replace|target|sub.?device|historical|latest|'
+            r'error|fault|warning',
+            re.I
+        )
+        scattered_addrs = set()
+        for addr, reg in ro_regs:
+            defn = reg.definition.replace('_', ' ')
+            if _SCATTERED_INFO_RE.search(defn) and not _SCATTERED_EXCLUDE_RE.search(defn):
+                scattered_addrs.add(addr)
+        if len(scattered_addrs) > len(info_addrs):
+            info_addrs = scattered_addrs
+            # 앵커 재확인
+            model_anchor = None
+            sn_anchor = None
+            for addr, reg in ro_regs:
+                if addr not in info_addrs:
+                    continue
+                defn = reg.definition.replace('_', ' ')
+                if not model_anchor and _MODEL_RE.search(defn) and not _MODEL_EXCLUDE_RE.search(defn):
+                    model_anchor = (addr, reg)
+                if not sn_anchor and _SN_RE.search(defn) and not _SN_EXCLUDE_RE.search(defn):
+                    sn_anchor = (addr, reg)
+            model_found = model_anchor is not None
+            sn_found = sn_anchor is not None
 
     return {
         'info_addrs': info_addrs,
