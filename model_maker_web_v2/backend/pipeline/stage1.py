@@ -92,7 +92,7 @@ def extract_excel_sheets(excel_path: str) -> Dict[str, List[List[str]]]:
 # ─── 레지스터 테이블 행 파싱 ──────────────────────────────────────────────────
 
 _ADDR_RE = re.compile(r'(?:0x|0X)?([0-9A-Fa-f]{4})[Hh]?')
-_TYPE_RE = re.compile(r'\b(U16|S16|U32|S32|I16|I32|INT16|UINT16|INT32|UINT32|FLOAT32|ASCII|STRING|STR|Bitfield16|Bitfield32)\b', re.I)
+_TYPE_RE = re.compile(r'\b(U16|S16|U32|S32|US16|US32|I16|I32|INT16|UINT16|INT32|UINT32|FLOAT32|ASCII|STRING|STR|Bitfield16|Bitfield32)\b', re.I)
 _RW_RE   = re.compile(r'\b(R/?W|RO|WO|Read|Write|R/W)\b', re.I)
 _SCALE_RE = re.compile(r'(?:scale|factor|×|x)\s*[=:]?\s*([\d.]+)', re.I)
 _UNIT_RE = re.compile(r'\b(V|A|W|kW|KW|VA|kVA|KVA|VAr|kVAr|KVar|Hz|°C|℃|Wh|kWh|KWh|Kwh|KWH|MWh|MWH|%)\b')
@@ -260,8 +260,8 @@ def _parse_register_row(row: list, col_map: dict) -> Optional[RegisterRow]:
                 break
     dtype = dtype.upper()
     for old, new in [('INT16', 'S16'), ('UINT16', 'U16'), ('INT32', 'S32'), ('UINT32', 'U32'),
-                     ('I16', 'S16'), ('I32', 'S32'), ('STR', 'STRING'),
-                     ('BITFIELD16', 'U16'), ('BITFIELD32', 'U32')]:
+                     ('I16', 'S16'), ('I32', 'S32'), ('US16', 'U16'), ('US32', 'U32'),
+                     ('STR', 'STRING'), ('BITFIELD16', 'U16'), ('BITFIELD32', 'U32')]:
         dtype = dtype.replace(old, new)
 
     # 단위 + 스케일 추출 — "0.1V", "0.01A", "kWh" 등에서 분리
