@@ -199,18 +199,28 @@ def _parse_register_row(row: list, col_map: dict) -> Optional[RegisterRow]:
     if addr is None:
         return None
 
+    # V2: 주소 컬럼 인덱스 (col_map 또는 fallback에서 설정된 것)
+    actual_addr_idx = col_map.get('addr')
+
     name_idx = col_map.get('name')
     if name_idx is not None and name_idx < len(row):
         name = str(row[name_idx]).strip()
     else:
         name = ''
         for i, cell in enumerate(row):
-            if i == addr_idx:
+            if i == actual_addr_idx:
                 continue
             c = str(cell).strip()
-            if c and not _ADDR_RE.fullmatch(c) and len(c) > 2:
-                name = c
-                break
+            if not c or len(c) <= 2:
+                continue
+            # V2: 숫자만 있는 셀은 행번호 — 이름이 아님
+            if re.match(r'^\d{1,5}$', c):
+                continue
+            # 0x 주소 패턴도 건너뛰기
+            if _ADDR_RE.fullmatch(c):
+                continue
+            name = c
+            break
     if not name:
         return None
 
@@ -749,6 +759,10 @@ def run_stage1(
                 max_mppt = max(max_mppt, n)
             elif prefix == 'STRING':
                 max_string = max(max_string, n)
+
+    # V2: MPPT수 > String수이면 PDF 버그 — MPPT수를 String수로 캡
+    if max_string > 0 and max_mppt > max_string:
+        max_mppt = max_string
 
     iv_scan_supported = detect_iv_scan_support(registers, manufacturer)
 
