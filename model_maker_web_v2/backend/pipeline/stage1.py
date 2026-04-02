@@ -476,23 +476,29 @@ def assign_h01_field(reg: RegisterRow, synonym_db: dict,
 # ─── IV Scan 감지 ──────────────────────────────────────────────────────────
 
 _IV_COMMAND_RE = re.compile(r'i-?v\s*(curve\s*)?scan|IV_CURVE_SCAN', re.I)
-_TRACKER_VOLTAGE_RE = re.compile(r'Tracker\s*(\d+)\s*voltage|IV_TRACKER(\d+)_VOLTAGE', re.I)
-_IV_STRING_CURRENT_RE = re.compile(r'String\s*(\d+)-(\d+)\s*current|IV_STRING(\d+)_(\d+)_CURRENT', re.I)
+# Solarize 형식: Tracker N voltage, String N-M current
+_TRACKER_VOLTAGE_RE = re.compile(
+    r'Tracker\s*(\d+)\s*voltage|IV_TRACKER(\d+)_VOLTAGE(?:_BASE)?|TRACKER_(\d+)_VOLTAGE', re.I)
+_IV_STRING_CURRENT_RE = re.compile(
+    r'String\s*(\d+)-(\d+)\s*current|IV_STRING(\d+)_(\d+)_CURRENT(?:_BASE)?|'
+    r'IV_STRING_(\d+)_(\d+)_CURRENT', re.I)
+# Kstar 형식: PV1 Voltage Point 1, PV1 Current Point 1
+_PV_VOLTAGE_POINT_RE = re.compile(r'PV(\d+)\s+Voltage\s+Point\s+(\d+)', re.I)
+_PV_CURRENT_POINT_RE = re.compile(r'PV(\d+)\s+Current\s+Point\s+(\d+)', re.I)
+# "occupying NNNN registers" 패턴
+_IV_TOTAL_REGS_RE = re.compile(r'occupying\s+(\d+)\s+registers', re.I)
 
 
 def detect_iv_from_pdf(registers: List[RegisterRow], pages: list = None) -> dict:
     """
     PDF에서 IV Scan 지원 여부 및 구조 감지
-    Returns: {
-        'supported': bool,
-        'iv_command_addr': int or None,
-        'data_points': int,
-        'trackers': [{tracker_num, voltage_addr, strings: [{string_num, current_addr}]}],
-    }
+    Solarize 형식: Tracker N voltage (블록), String N-M current (블록)
+    Kstar 형식: PV1 Voltage Point 1~100, PV1 Current Point 1~100 (교차)
     """
-    result = {'supported': False, 'iv_command_addr': None, 'data_points': 0, 'trackers': []}
+    result = {'supported': False, 'iv_command_addr': None, 'data_points': 0,
+              'trackers': [], 'format': 'unknown', 'total_iv_regs': 0}
 
-    # 1) IV Scan 명령 레지스터 (0x600D)
+    # 1) IV Scan 명령 레지스터
     for reg in registers:
         if _IV_COMMAND_RE.search(reg.definition):
             addr = reg.address if isinstance(reg.address, int) else parse_address(reg.address)
@@ -500,8 +506,8 @@ def detect_iv_from_pdf(registers: List[RegisterRow], pages: list = None) -> dict
             result['supported'] = True
             break
 
-    # 2) Tracker/String IV 데이터 레지스터 감지
-    tracker_map = {}  # {tracker_num: {'voltage_addr': addr, 'strings': {str_num: addr}}}
+    # 2-A) Solarize 형식: Tracker/String 블록
+    tracker_map = {}
     for reg in registers:
         addr = reg.address if isinstance(reg.address, int) else parse_address(reg.address)
         if addr is None:
@@ -509,7 +515,7 @@ def detect_iv_from_pdf(registers: List[RegisterRow], pages: list = None) -> dict
 
         m = _TRACKER_VOLTAGE_RE.search(reg.definition)
         if m:
-            tn = int(m.group(1) or m.group(2))
+            tn = int(next(g for g in m.groups() if g))
             tracker_map.setdefault(tn, {'voltage_addr': addr, 'regs': int(reg.regs or '1'), 'strings': {}})
             tracker_map[tn]['voltage_addr'] = addr
             tracker_map[tn]['regs'] = int(reg.regs or '1')
@@ -518,38 +524,86 @@ def detect_iv_from_pdf(registers: List[RegisterRow], pages: list = None) -> dict
 
         m = _IV_STRING_CURRENT_RE.search(reg.definition)
         if m:
-            tn = int(m.group(1) or m.group(3))
-            sn = int(m.group(2) or m.group(4))
+            groups = [g for g in m.groups() if g]
+            if len(groups) >= 2:
+                tn = int(groups[0])
+                sn = int(groups[1])
             tracker_map.setdefault(tn, {'voltage_addr': None, 'regs': 0, 'strings': {}})
             tracker_map[tn]['strings'][sn] = addr
             result['supported'] = True
 
-    # 3) data_points 추정 (Tracker voltage 레지스터 수 또는 주소 간격)
     if tracker_map:
-        # 레지스터 수에서 data_points 추정
+        result['format'] = 'solarize'
         for tn in sorted(tracker_map):
             t = tracker_map[tn]
             if t.get('regs', 0) > 1:
                 result['data_points'] = t['regs']
                 break
-
-        # 주소 간격에서도 추정 (Tracker1 voltage ~ String1-1 current 간격)
+        # String 주소 간격에서 추정
         if result['data_points'] == 0 and 1 in tracker_map:
             t1 = tracker_map[1]
             if t1['voltage_addr'] and t1['strings'].get(1):
                 result['data_points'] = t1['strings'][1] - t1['voltage_addr']
-
-        # Tracker 정보 정리
+        # Tracker 간 주소 간격에서 추정 (T2 - T1) / (1 + strings_per_tracker)
+        if result['data_points'] == 0:
+            sorted_trackers = sorted(tracker_map.keys())
+            if len(sorted_trackers) >= 2:
+                t1_addr = tracker_map[sorted_trackers[0]]['voltage_addr']
+                t2_addr = tracker_map[sorted_trackers[1]]['voltage_addr']
+                if t1_addr and t2_addr:
+                    gap = t2_addr - t1_addr
+                    n_blocks = 1 + len(tracker_map[sorted_trackers[0]].get('strings', {}))
+                    if n_blocks == 1:
+                        n_blocks = 5  # Solarize 기본: 1 tracker + 4 strings
+                    result['data_points'] = gap // n_blocks
         for tn in sorted(tracker_map):
             t = tracker_map[tn]
-            strings = []
-            for sn in sorted(t['strings']):
-                strings.append({'string_num': sn, 'current_addr': t['strings'][sn]})
+            strings = [{'string_num': sn, 'current_addr': t['strings'][sn]}
+                       for sn in sorted(t['strings'])]
             result['trackers'].append({
-                'tracker_num': tn,
-                'voltage_addr': t['voltage_addr'],
-                'strings': strings,
+                'tracker_num': tn, 'voltage_addr': t['voltage_addr'], 'strings': strings,
             })
+        return result
+
+    # 2-B) Kstar 형식: PV{n} Voltage/Current Point {m}
+    pv_map = {}  # {pv_num: {'voltage_addr': addr, 'max_point': n}}
+    for reg in registers:
+        addr = reg.address if isinstance(reg.address, int) else parse_address(reg.address)
+        if addr is None:
+            continue
+        defn = reg.definition
+
+        m = _PV_VOLTAGE_POINT_RE.search(defn)
+        if m:
+            pv_num = int(m.group(1))
+            point = int(m.group(2))
+            pv_map.setdefault(pv_num, {'voltage_addr': None, 'max_point': 0})
+            if point == 1 or pv_map[pv_num]['voltage_addr'] is None:
+                pv_map[pv_num]['voltage_addr'] = addr
+            pv_map[pv_num]['max_point'] = max(pv_map[pv_num]['max_point'], point)
+            result['supported'] = True
+            continue
+
+        # "occupying NNNN registers" 패턴에서 총 레지스터 수 추출
+        m2 = _IV_TOTAL_REGS_RE.search(reg.comment or '')
+        if m2:
+            result['total_iv_regs'] = int(m2.group(1))
+
+    if pv_map:
+        result['format'] = 'kstar'
+        # data_points = max_point (PV1 Voltage Point 100 → 100)
+        max_point = max(pv['max_point'] for pv in pv_map.values())
+        result['data_points'] = max_point
+
+        # Tracker = PV (Kstar에서는 PV = MPPT = Tracker)
+        for pv_num in sorted(pv_map):
+            pv = pv_map[pv_num]
+            result['trackers'].append({
+                'tracker_num': pv_num,
+                'voltage_addr': pv['voltage_addr'],
+                'strings': [],  # Kstar는 PV 단위 (String 분리 없음)
+            })
+        return result
 
     return result
 

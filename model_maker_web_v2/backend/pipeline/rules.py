@@ -481,16 +481,26 @@ def classify_register_with_rules(
             if verdict.startswith('MOVE:'):
                 return (verdict.replace('MOVE:', ''), '')
 
-    # §7: REVIEW — 분류 불가
-    reason = REVIEW_REASONS['unclassifiable']
+    # V2: 분류 불가 → 자동 분류 (REVIEW 최소화)
+    # REVIEW는 H01/IV 매칭에서 진짜 헷갈리는 경우만
 
-    # §7: REVIEW 세분화 — 왜 분류 불가인지
+    # "abnormal" → ALARM
+    if 'abnormal' in defn_lower:
+        return ('ALARM', '')
+
+    # Write 레지스터인데 제어도 모니터링도 아닌 경우 → 제외
     if reg.rw in ('RW', 'WO', 'R/W') and device_type == 'inverter':
-        reason = REVIEW_REASONS['der_unclear']
-    elif any(k in defn_lower for k in ['meter', 'external', '외부', '미터']):
-        reason = REVIEW_REASONS['duplicate_quantity']
+        return ('EXCLUDE', '')
 
-    return ('REVIEW', reason)
+    # 설명문/디버깅/내부 사용 → 제외
+    if any(k in defn_lower for k in ['debugging', 'internal use', 'register for',
+                                      'tens place', 'read keep', 'read input',
+                                      'single write', 'rotational speed',
+                                      'coefficient']):
+        return ('EXCLUDE', '')
+
+    # 나머지 → MONITORING으로 자동 포함
+    return ('MONITORING', '')
 
 
 # ═══════════════════════════════════════════════════════════════════════════
