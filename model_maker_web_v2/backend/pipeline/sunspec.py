@@ -144,11 +144,66 @@ def classify_sunspec_register(definition: str, addr: int = None) -> str:
         if pattern in dl_clean:
             return cat
 
-    # 5) Scale Factor → EXCLUDE (보조값)
+    # 5) SunSpec MPPT DC 레지스터 → MONITORING
+    if dl_clean in ('dca', 'dcv', 'dcw', 'dcwh'):
+        return 'MONITORING'
+
+    # 6) Scale Factor → EXCLUDE (보조값)
     if dl_clean.endswith(SUNSPEC_SCALE_FACTOR_SUFFIX):
         return 'EXCLUDE'
 
     return ''
+
+
+def detect_sunspec_mppt(registers: list) -> dict:
+    """
+    SunSpec Multiple MPPT Extension (ID=160) 블록에서 MPPT별 DCA/DCV/DCW 감지
+
+    SunSpec MPPT 구조:
+    - DCA/DCV/DCW가 같은 이름으로 반복 (주소만 다름)
+    - 반복 간격 = 20 words (Repeating Block Size)
+    - 첫 번째 DCA 주소에서 시작, 20씩 증가
+
+    Returns: {
+        'mppt_count': N,
+        'mppts': [
+            {'n': 1, 'dca_addr': 40140, 'dcv_addr': 40141, 'dcw_addr': 40142},
+            {'n': 2, 'dca_addr': 40160, 'dcv_addr': 40161, 'dcw_addr': 40162},
+            ...
+        ]
+    }
+    """
+    # DCA/DCV/DCW 주소 수집
+    dca_addrs = []
+    dcv_addrs = []
+    dcw_addrs = []
+
+    for reg in registers:
+        dl = reg.definition.strip()
+        addr = reg.address if isinstance(reg.address, int) else 0
+        if dl == 'DCA':
+            dca_addrs.append(addr)
+        elif dl == 'DCV':
+            dcv_addrs.append(addr)
+        elif dl == 'DCW':
+            dcw_addrs.append(addr)
+
+    if not dca_addrs:
+        return {'mppt_count': 0, 'mppts': []}
+
+    # 주소순 정렬
+    dca_addrs.sort()
+    dcv_addrs.sort()
+    dcw_addrs.sort()
+
+    mppts = []
+    for i, dca in enumerate(dca_addrs):
+        n = i + 1
+        dcv = dcv_addrs[i] if i < len(dcv_addrs) else dca + 1
+        dcw = dcw_addrs[i] if i < len(dcw_addrs) else dca + 2
+        mppts.append({'n': n, 'dca_addr': dca, 'dcv_addr': dcv, 'dcw_addr': dcw})
+
+    return {'mppt_count': len(mppts), 'mppts': mppts}
 
 
 def apply_sunspec_definitions(categorized: dict, log=None):
@@ -185,6 +240,26 @@ def apply_sunspec_definitions(categorized: dict, log=None):
                     if log:
                         log(f'  SunSpec alarm 정의 적용: {reg.definition} ({len(alarm_codes)}개)')
                     break
+
+    # MPPT 블록: DCA/DCV/DCW → mppt{N}_current/voltage/power 매핑
+    all_regs = []
+    for cat_regs in categorized.values():
+        all_regs.extend(cat_regs)
+    mppt_info = detect_sunspec_mppt(all_regs)
+    if mppt_info['mppt_count'] > 0:
+        # DCA/DCV/DCW 레지스터에 h01_field 할당
+        for mppt in mppt_info['mppts']:
+            n = mppt['n']
+            for reg in categorized.get('MONITORING', []):
+                addr = reg.address if isinstance(reg.address, int) else 0
+                if addr == mppt['dcv_addr'] and reg.definition.strip() == 'DCV':
+                    reg.h01_field = f'mppt{n}_voltage'
+                elif addr == mppt['dca_addr'] and reg.definition.strip() == 'DCA':
+                    reg.h01_field = f'mppt{n}_current'
+                elif addr == mppt['dcw_addr'] and reg.definition.strip() == 'DCW':
+                    reg.h01_field = f'mppt{n}_power'
+        if log:
+            log(f'  SunSpec MPPT {mppt_info["mppt_count"]}개 감지 (DCA/DCV/DCW 블록)')
 
     if log:
         log(f'  SunSpec 정의 적용 완료')
