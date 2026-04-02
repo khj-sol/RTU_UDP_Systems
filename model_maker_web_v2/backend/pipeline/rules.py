@@ -408,11 +408,16 @@ def detect_info_block(registers: list, pages: list = None) -> dict:
     from . import parse_address
     from .stage1 import extract_registers_from_tables, _detect_table_columns
 
-    # RO 레지스터만 주소순 정렬
+    # FC 구분 여부 확인
+    has_fc = any(getattr(reg, 'fc', '') for reg in registers)
+
+    # RO 레지스터만 주소순 정렬 (FC 구분 시 FC별로 분리 후 각각 탐색)
     ro_regs = []
     for reg in registers:
         rw = (getattr(reg, 'rw', '') or '').upper()
-        if rw and rw not in ('RO', 'R', 'READ'):
+        # FC 구분 없는 경우: RO만
+        # FC 구분 있는 경우: 모든 레지스터 (Holding RW에도 INFO 있을 수 있음 — EG4)
+        if not has_fc and rw and rw not in ('RO', 'R', 'READ'):
             continue
         addr = reg.address if isinstance(reg.address, int) else parse_address(getattr(reg, 'address_hex', ''))
         if addr is None:

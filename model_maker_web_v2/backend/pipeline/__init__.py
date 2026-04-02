@@ -29,7 +29,7 @@ ProgressCallback = Optional[Callable[[str, str], None]]   # (message, level)
 class RegisterRow:
     """단일 레지스터 항목"""
     __slots__ = ('definition', 'address', 'address_hex', 'data_type', 'regs',
-                 'unit', 'scale', 'rw', 'comment', 'category', 'h01_field',
+                 'unit', 'scale', 'rw', 'fc', 'comment', 'category', 'h01_field',
                  'h01_match', 'der_match', 'review_reason', 'review_suggestion',
                  'user_verdict', 'value_definitions')
 
