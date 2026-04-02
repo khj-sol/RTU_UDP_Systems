@@ -269,10 +269,11 @@ def _parse_register_row(row: list, col_map: dict) -> Optional[RegisterRow]:
     # V2: 주소 컬럼 인덱스 (col_map 또는 fallback에서 설정된 것)
     actual_addr_idx = col_map.get('addr')
 
+    name = ''
     name_idx = col_map.get('name')
     if name_idx is not None and name_idx < len(row):
         name = str(row[name_idx]).strip()
-    else:
+    if not name:
         name = ''
         for i, cell in enumerate(row):
             if i == actual_addr_idx:
