@@ -1003,14 +1003,18 @@ def assign_h01_field(reg: RegisterRow, synonym_db: dict,
     if category == 'STATUS':
         defn_nospace_s = defn_lower.replace(' ', '')
         if any(k in defn_lower for k in ['inverter mode', 'work mode', 'work state',
-                                          'operating mode', 'operation state',
+                                          'operating mode', 'operational mode',
+                                          'operation state',
+                                          'operating status', 'working mode',
                                           'running status', 'run mode',
                                           'inverter state', 'inverter status',
-                                          'i status',
+                                          'inverter current', 'i status',
                                           '인버터 모드', '시스템동작상태', '동작상태',
                                           'device status', 'system status']) or \
            any(k in defn_nospace_s for k in ['workmode', 'invworkmode', 'runningmode',
-                                              'sysstatemode']) or \
+                                              'workingmodes', 'workingmode',
+                                              'sysstatemode', 'currentstatus',
+                                              'operatingstatus']) or \
            defn_lower.strip() in ('state', 'running'):
             return 'inverter_status'
         return ''
