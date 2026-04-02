@@ -464,15 +464,7 @@ def classify_register_with_rules(
     if is_info_register(defn):
         return ('INFO', '')
 
-    # 3) synonym_db 매칭
-    syn = match_synonym(defn, synonym_db)
-    if syn:
-        cat = syn['category']
-        if cat in ('DER_CONTROL', 'DER_MONITOR', 'IV_SCAN') and device_type != 'inverter':
-            return ('EXCLUDE', '')
-        return (cat, '')
-
-    # §2-2: STATUS 키워드 (단, Fault/Alarm/Grid Status는 ALARM 우선)
+    # §2-2: STATUS 키워드 — synonym_db보다 우선 (학습 데이터 충돌 방지)
     if any(k in defn_lower for k in ['fault status', 'alarm status', 'fault state',
                                       'grid status']):
         return ('ALARM', '')
@@ -486,10 +478,18 @@ def classify_register_with_rules(
                 return ('STATUS', '')  # 여러 개여도 STATUS
         return ('STATUS', '')
 
-    # 5) §2-2: ALARM 키워드
+    # 5) §2-2: ALARM 키워드 — synonym_db보다 우선
     if any(k in defn_lower for k in ['alarm', 'fault', 'error', 'warning', 'protection flag',
                                       '알람', '고장', '경보', '오류']):
         return ('ALARM', '')
+
+    # 5b) synonym_db 매칭 — STATUS/ALARM 키워드 이후 (학습 데이터 충돌 방지)
+    syn = match_synonym(defn, synonym_db)
+    if syn:
+        cat = syn['category']
+        if cat in ('DER_CONTROL', 'DER_MONITOR', 'IV_SCAN') and device_type != 'inverter':
+            return ('EXCLUDE', '')
+        return (cat, '')
 
     # 6) §5: IV Scan 키워드 (인버터만)
     if device_type == 'inverter':

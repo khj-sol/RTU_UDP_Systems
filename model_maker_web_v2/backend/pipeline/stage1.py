@@ -1856,8 +1856,13 @@ def run_stage1(
             log(f'  레퍼런스 enrichment: 해당 제조사({manufacturer}) 없음')
 
     normalized = 0
+    _STATUS_ALARM_KW = {'status', 'state', 'mode', 'fault', 'alarm', 'error', 'warning'}
     for reg in registers:
         if detect_channel_number(reg.definition):
+            continue
+        # STATUS/ALARM 키워드가 있는 레지스터는 이름 변경 방지 (학습 데이터 충돌 방지)
+        defn_words = set(reg.definition.lower().replace('_', ' ').split())
+        if defn_words & _STATUS_ALARM_KW:
             continue
         syn = match_synonym(reg.definition, synonym_db)
         if syn and syn['field'] != to_upper_snake(reg.definition):
