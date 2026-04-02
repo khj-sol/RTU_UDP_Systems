@@ -216,7 +216,7 @@ def _parse_register_row(row: list, col_map: dict) -> Optional[RegisterRow]:
     addr_raw = ''
 
     def _try_parse_addr(raw: str):
-        raw = raw.strip()
+        raw = raw.strip().rstrip('.')
         if not raw:
             return None
         if raw.startswith('0x') or raw.startswith('0X'):
