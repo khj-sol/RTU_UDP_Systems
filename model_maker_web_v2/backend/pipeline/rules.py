@@ -95,26 +95,43 @@ ALARM_PRIORITY = [
 ]
 
 
+def _alarm_score(reg: RegisterRow) -> int:
+    """알람 레지스터 우선순위 점수 (낮을수록 우선)"""
+    defn_lower = reg.definition.lower()
+    # 1순위(0): 명확한 에러/폴트 코드 레지스터
+    if any(k in defn_lower for k in ['error_code', 'error code', 'fault code',
+                                      'fault/alarm code', 'alarm code']):
+        return 0
+    # 2순위(1): PID 알람
+    if 'pid' in defn_lower and 'alarm' in defn_lower:
+        return 1
+    # 3순위(2): 통신 폴트
+    if any(k in defn_lower for k in ['communicate fault', 'comm fault', 'communication']):
+        return 2
+    # 4순위(3): 일반 알람/폴트/워닝 키워드
+    if any(k in defn_lower for k in ['alarm', 'fault', 'error', 'warning', 'protection']):
+        return 3
+    # 5순위(9): 키워드 없는 것 (잘못 분류된 경우)
+    return 9
+
+
 def distribute_alarms(alarm_regs: List[RegisterRow]) -> Dict[str, List[RegisterRow]]:
     """
     §2-2: 알람 레지스터를 H01 alarm1/2/3에 배분
-    - 1개 → alarm1, 나머지 0
-    - 2개 → alarm1, alarm2, 나머지 0
-    - 3개+ → 중요도순 alarm1 → alarm2 → alarm3
+    V2: ALARM_PRIORITY 기반 — 에러코드 > PID 알람 > 통신 폴트 > 일반
     """
-    sorted_alarms = sorted(alarm_regs,
-                           key=lambda r: r.address if isinstance(r.address, int) else 0)
+    # 우선순위 점수로 정렬 (같으면 주소순)
+    scored = sorted(alarm_regs,
+                    key=lambda r: (_alarm_score(r),
+                                   r.address if isinstance(r.address, int) else 0))
     result = {'alarm1': [], 'alarm2': [], 'alarm3': [], 'dropped': []}
 
-    if len(sorted_alarms) <= 3:
-        slots = ['alarm1', 'alarm2', 'alarm3']
-        for i, reg in enumerate(sorted_alarms):
+    slots = ['alarm1', 'alarm2', 'alarm3']
+    for i, reg in enumerate(scored):
+        if i < 3:
             result[slots[i]].append(reg)
-    else:
-        # 우선순위 기반 배분
-        for i, reg in enumerate(sorted_alarms[:3]):
-            result[f'alarm{i + 1}'].append(reg)
-        result['dropped'] = sorted_alarms[3:]
+        else:
+            result['dropped'].append(reg)
 
     return result
 
@@ -282,6 +299,9 @@ EXCLUDE_KEYWORDS = [
     # V2: 기타 설정값/커브
     'upper u limit', 'lower u limit',
     'key stop', 'dispatch run', 'derating run',
+    # V2: Fault 코드 테이블 엔트리 (이름이 짧은 상태 설명)
+    'stop bit', 'data bit', 'output overload',
+    'pv input configuration',
 ]
 
 # 보호 파라미터 주소 범위 (§6: 0x5000~ 보호설정 블록)

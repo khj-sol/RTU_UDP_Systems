@@ -112,6 +112,7 @@ def _detect_table_columns(header_row: list, data_rows: list = None) -> dict:
             col_map.setdefault('regs', i)
 
     if data_rows and 'addr' not in col_map:
+        # 1순위: 0x 패턴
         for row in data_rows[:5]:
             for i, cell in enumerate(row):
                 if cell and re.match(r'0x[0-9A-Fa-f]{4}', str(cell).strip()):
@@ -119,6 +120,19 @@ def _detect_table_columns(header_row: list, data_rows: list = None) -> dict:
                     break
             if 'addr' in col_map:
                 break
+
+        # 2순위: 4~5자리 decimal (Sungrow 5000+ 등) — 행번호(1~3자리)와 구분
+        if 'addr' not in col_map:
+            col_scores = {}  # {col_idx: count_of_4digit_numbers}
+            for row in data_rows[:10]:
+                for i, cell in enumerate(row):
+                    c = str(cell).strip() if cell else ''
+                    if re.match(r'^\d{4,5}$', c) and 0 <= int(c) <= 65535:
+                        col_scores[i] = col_scores.get(i, 0) + 1
+            if col_scores:
+                best_col = max(col_scores, key=col_scores.get)
+                if col_scores[best_col] >= 2:
+                    col_map['addr'] = best_col
 
     return col_map
 
@@ -156,15 +170,31 @@ def _parse_register_row(row: list, col_map: dict) -> Optional[RegisterRow]:
         addr = _try_parse_addr(addr_raw)
 
     if addr is None:
+        # V2: 4~5자리 숫자 우선 (행번호 1~3자리와 구분)
+        candidates = []
         for i, cell in enumerate(row):
             c = str(cell).strip() if cell else ''
             parsed = _try_parse_addr(c)
             if parsed is not None:
-                addr = parsed
-                addr_raw = c
-                if 'addr' not in col_map:
-                    col_map['addr'] = i
-                break
+                candidates.append((i, c, parsed))
+        if candidates:
+            # 4~5자리 decimal 우선, 없으면 0x 패턴, 최후에 아무거나
+            best = None
+            for i, c, parsed in candidates:
+                if re.match(r'^\d{4,5}$', c):
+                    best = (i, c, parsed)
+                    break
+            if not best:
+                for i, c, parsed in candidates:
+                    if c.startswith('0x') or c.startswith('0X'):
+                        best = (i, c, parsed)
+                        break
+            if not best:
+                best = candidates[0]
+            addr = best[2]
+            addr_raw = best[1]
+            if 'addr' not in col_map:
+                col_map['addr'] = best[0]
 
     if addr is None:
         return None
@@ -290,7 +320,8 @@ _COUNTRY_NAME_RE = re.compile(
     r'Thailand|Vietnam|Philippines|South Africa|UK|USA|Canada|Turkey|Holland|'
     r'Belgium|Austria|Denmark|Sweden|Norway|Finland|Poland|Czech|Hungary|Romania|'
     r'Portugal|Greece|Israel|Chile|Colombia|Peru|Argentina|Egypt|Jordan|Saudi|'
-    r'UAE|Kuwait|Taiwan|Malaysia|Indonesia|Singapore|New Zealand)',
+    r'UAE|Kuwait|Taiwan|Malaysia|Indonesia|Singapore|New Zealand|'
+    r'Oman|Ireland|America|Vorarlberg|AU-WEST|Other\s+\d+Hz|GR\s+IS)',
     re.I
 )
 
@@ -366,53 +397,26 @@ def extract_registers_from_tables(tables: List[List[list]]) -> List[RegisterRow]
 
 def assign_h01_field(reg: RegisterRow, synonym_db: dict,
                      ref_patterns: dict = None) -> str:
-    """레지스터에 대응하는 H01 필드명 추정"""
+    """레지스터에 대응하는 H01 필드명 추정 (V2)"""
+    defn_lower = reg.definition.lower()
+    category = getattr(reg, 'category', '')
+
+    # V2: INFO/ALARM 카테고리는 H01 모니터링 필드가 아님 — 특정 키워드만 매칭
+    if category == 'INFO':
+        # INFO에서 H01과 겹치는 필드만 매핑
+        if any(k in defn_lower for k in ['total energy', 'cumulative energy', 'total power yields']):
+            return 'cumulative_energy'
+        if any(k in defn_lower for k in ['daily energy', 'today energy', 'daily power yields']):
+            return 'daily_energy'
+        if any(k in defn_lower for k in ['inner_temp', 'inner temp', 'internal temp',
+                                          'module temp', 'inverter temp']):
+            return 'temperature'
+        return ''  # 나머지 INFO는 h01_field 없음
+
     # 0) 채널 번호가 있으면 최우선
     ch = detect_channel_number(reg.definition)
     if ch:
         prefix, n = ch
-        defn_lower = reg.definition.lower()
-        if prefix == 'MPPT':
-            if 'voltage' in defn_lower:
-                return f'mppt{n}_voltage'
-            if 'current' in defn_lower:
-                return f'mppt{n}_current'
-            if 'power' in defn_lower:
-                return f'mppt{n}_power'
-        elif prefix == 'STRING':
-            if 'voltage' in defn_lower:
-                return f'string{n}_voltage'
-            if 'current' in defn_lower:
-                return f'string{n}_current'
-
-    # 1) V2: DER 겹침 필드 체크
-    overlap = is_h01_der_overlap(reg)
-    if overlap:
-        return f'DER:{overlap}'
-
-    # 2) synonym_db 정확 매칭
-    syn_match = match_synonym(reg.definition, synonym_db)
-    if syn_match and syn_match.get('h01_field'):
-        return syn_match['h01_field']
-
-    # 3) 주소 기반 레퍼런스
-    if ref_patterns:
-        addr = reg.address if isinstance(reg.address, int) else parse_address(reg.address)
-        if addr is not None:
-            h01 = get_h01_field_from_ref(addr, ref_patterns, synonym_db)
-            if h01:
-                return h01
-
-    # 4) 퍼지 매칭
-    fuzzy = match_synonym_fuzzy(reg.definition, synonym_db)
-    if fuzzy and fuzzy.get('h01_field'):
-        return fuzzy['h01_field']
-
-    # 5) MPPT/String 패턴 (한글)
-    ch = detect_channel_number(reg.definition)
-    if ch:
-        prefix, n = ch
-        defn_lower = reg.definition.lower()
         if prefix == 'MPPT':
             if 'voltage' in defn_lower or '전압' in defn_lower:
                 return f'mppt{n}_voltage'
@@ -426,10 +430,10 @@ def assign_h01_field(reg: RegisterRow, synonym_db: dict,
             if 'current' in defn_lower or '전류' in defn_lower:
                 return f'string{n}_current'
 
-    # 6) V2: pv_power / energy 키워드
-    defn_lower = reg.definition.lower()
+    # 1) V2: pv_power / energy 키워드 (synonym/ref보다 먼저 — 정확한 키워드 우선)
     if any(k in defn_lower for k in ['total dc power', 'total pv power', 'dc power',
-                                      'pv total power', 'input power']):
+                                      'pv total power', 'pv_total_input_power',
+                                      'input power']):
         return 'pv_power'
     if any(k in defn_lower for k in ['total energy', 'cumulative energy', 'total power yields',
                                       'lifetime energy', 'accumulated energy', 'total generation']):
@@ -437,6 +441,24 @@ def assign_h01_field(reg: RegisterRow, synonym_db: dict,
     if any(k in defn_lower for k in ['daily energy', 'today energy', 'daily power yields',
                                       'daily generation']):
         return 'daily_energy'
+
+    # 2) synonym_db 정확 매칭
+    syn_match = match_synonym(reg.definition, synonym_db)
+    if syn_match and syn_match.get('h01_field'):
+        return syn_match['h01_field']
+
+    # 3) 주소 기반 레퍼런스 (같은 제조사만)
+    if ref_patterns:
+        addr = reg.address if isinstance(reg.address, int) else parse_address(reg.address)
+        if addr is not None:
+            h01 = get_h01_field_from_ref(addr, ref_patterns, synonym_db)
+            if h01:
+                return h01
+
+    # 4) 퍼지 매칭
+    fuzzy = match_synonym_fuzzy(reg.definition, synonym_db)
+    if fuzzy and fuzzy.get('h01_field'):
+        return fuzzy['h01_field']
 
     return ''
 
