@@ -26,7 +26,7 @@ from . import (
     get_openpyxl, ProgressCallback,
 )
 from .rules import (
-    classify_register_with_rules, detect_info_block, detect_iv_scan_support,
+    classify_register_with_rules, detect_iv_scan_support,
     get_valid_categories, distribute_alarms, is_h01_der_overlap,
 )
 
@@ -93,7 +93,7 @@ def extract_excel_sheets(excel_path: str) -> Dict[str, List[List[str]]]:
 
 _ADDR_RE = re.compile(r'(?:0x|0X)?([0-9A-Fa-f]{4})[Hh]?')
 _TYPE_RE = re.compile(r'\b(U16|S16|U32|S32|US16|US32|I16|I32|INT16|UINT16|INT32|UINT32|FLOAT32|ASCII|STRING|STR|Bitfield16|Bitfield32)\b', re.I)
-_RW_RE   = re.compile(r'\b(R/?W|RO|RD|WO|WR|Read|Write|R/W)\b', re.I)
+_RW_RE   = re.compile(r'\b(R/?W|RO|WO|Read|Write|R/W)\b', re.I)
 _SCALE_RE = re.compile(r'(?:scale|factor|×|x)\s*[=:]?\s*([\d.]+)', re.I)
 _UNIT_RE = re.compile(r'\b(V|A|W|kW|KW|VA|kVA|KVA|VAr|kVAr|KVar|Hz|°C|℃|Wh|kWh|KWh|Kwh|KWH|MWh|MWH|%)\b')
 
@@ -105,36 +105,32 @@ def _detect_table_columns(header_row: list, data_rows: list = None) -> dict:
         if not cell:
             continue
         cl = str(cell).lower().strip()
-        # PDF 줄바꿈 후 공백이 삽입된 경우 대비: 공백 제거 버전도 체크
-        cl_nospace = cl.replace(' ', '')
         if cl in ('address', 'addr', '주소', 'offset') or \
-           ('addr' in cl and 'register' not in cl and 'reg.' not in cl) or \
-           cl_nospace in ('address', 'addr'):
+           ('addr' in cl and 'register' not in cl and 'reg.' not in cl):
             col_map.setdefault('addr', i)
         elif cl.startswith('reg.') or cl == 'reg.addr':
-            col_map['addr'] = i
+            # EKOS: reg.addr(30041)가 실제 Modbus 주소, ADDRESS는 오프셋
+            # reg.addr을 우선 주소로 사용
+            col_map['addr'] = i  # 덮어쓰기 (ADDRESS보다 우선)
         elif any(k in cl for k in ['name', 'definition', '이름', '항목', 'parameter', 'description',
-                                    'signal name', 'signalname']) or \
-             any(k in cl_nospace for k in ['signalname', 'parametername']):
+                                    'signal name', 'signalname']):
             col_map.setdefault('name', i)
         elif cl == 'field' or cl == '필드':
             col_map.setdefault('name', i)
-        elif any(k in cl for k in ['data type', 'datatype', '데이터', '타입']) or \
-             cl_nospace in ('datatype', 'type', 'format'):
+        elif any(k in cl for k in ['data type', 'datatype', '데이터', '타입']):
             col_map.setdefault('type', i)
         elif cl == 'type' or cl == 'format':
             col_map.setdefault('type', i)
-        elif any(k in cl for k in ['unit', '단위']) or cl_nospace == 'unit':
+        elif any(k in cl for k in ['unit', '단위']):
             col_map.setdefault('unit', i)
-        elif any(k in cl for k in ['scale', '배율', 'factor', 'gain']) or cl_nospace == 'gain':
+        elif any(k in cl for k in ['scale', '배율', 'factor', 'gain']):
             col_map.setdefault('scale', i)
-        elif any(k in cl for k in ['r/w', 'access', '읽기', 'permission', '속성']) or \
-             cl_nospace in ('readandwrite', 'r/w', 'readwrite'):
+        elif any(k in cl for k in ['r/w', 'access', '읽기', 'permission', '속성']):
             col_map.setdefault('rw', i)
-        elif any(k in cl for k in ['remark', 'comment', '비고', 'note', '설명', 'scope']):
+        elif any(k in cl for k in ['remark', 'comment', '비고', 'note', '설명']):
             col_map.setdefault('comment', i)
         elif ('register' in cl and ('number' in cl or 'num' in cl or 'count' in cl)) or \
-             cl_nospace in ('numberofregister', 'numberofreg', 'regs', 'regcount', 'numberofreg'):
+             cl in ('numberofregister', 'numberofreg', 'regs', 'reg count'):
             col_map.setdefault('regs', i)
 
     if data_rows and 'addr' not in col_map:
@@ -168,12 +164,6 @@ def _parse_register_row(row: list, col_map: dict) -> Optional[RegisterRow]:
     if not row:
         return None
 
-    # 원본 보존 + 줄바꿈→공백 버전 둘 다 준비
-    raw_row = [str(c) if c is not None else '' for c in row]
-    # 기본 row: 줄바꿈→공백 (주소/타입/단위 파싱용)
-    row = [re.sub(r'\s*\n\s*', ' ', c).strip() for c in raw_row]
-    _name_extra = ''  # 이름 셀에서 분리된 설명
-
     _RANGE_ADDR_RE = re.compile(r'^(\d{4,5})\s*[-–~]\s*(\d{4,5})$')
     _RANGE_HEX_RE = re.compile(r'^(0x[0-9A-Fa-f]{4})\s*[-–~]\s*(0x[0-9A-Fa-f]{4})$', re.I)
 
@@ -181,7 +171,7 @@ def _parse_register_row(row: list, col_map: dict) -> Optional[RegisterRow]:
     addr_raw = ''
 
     def _try_parse_addr(raw: str):
-        raw = raw.replace('\n', '').replace('\r', '').replace(' ', '').strip()
+        raw = raw.strip()
         if not raw:
             return None
         if raw.startswith('0x') or raw.startswith('0X'):
@@ -256,30 +246,15 @@ def _parse_register_row(row: list, col_map: dict) -> Optional[RegisterRow]:
     if not name:
         return None
 
-    # 이름에 설명이 합쳐진 경우: 원본 셀에서 줄바꿈 기준 첫 줄만 이름으로 사용
-    # (name_col 감지 실패 시 fallback 경로에서도 적용)
-    if not _name_extra:
-        # 원본 raw_row에서 name에 해당하는 셀 찾기
-        for ci, c in enumerate(raw_row):
-            if c and name in re.sub(r'\s*\n\s*', ' ', c) and '\n' in c:
-                lines = c.strip().split('\n')
-                first_line = lines[0].strip()
-                if len(first_line) >= 3 and first_line != name:
-                    _name_extra = ' '.join(l.strip() for l in lines[1:] if l.strip())
-                    name = first_line
-                break
-
     dtype = ''
     type_idx = col_map.get('type')
     if type_idx is not None and type_idx < len(row):
-        # 'ST R' → 'STR' (PDF 줄바꿈으로 공백 삽입)
-        type_cell = str(row[type_idx]).replace(' ', '')
-        m = _TYPE_RE.search(type_cell)
+        m = _TYPE_RE.search(str(row[type_idx]))
         if m:
             dtype = m.group(1).upper()
     if not dtype:
         for cell in row:
-            m = _TYPE_RE.search(str(cell).replace(' ', ''))
+            m = _TYPE_RE.search(str(cell))
             if m:
                 dtype = m.group(1).upper()
                 break
@@ -356,12 +331,12 @@ def _parse_register_row(row: list, col_map: dict) -> Optional[RegisterRow]:
     if rw_idx is not None and rw_idx < len(row):
         m = _RW_RE.search(str(row[rw_idx]))
         if m:
-            rw = m.group(1).upper().replace('READ', 'RO').replace('WRITE', 'WO').replace('RD', 'RO').replace('WR', 'WO')
+            rw = m.group(1).upper().replace('READ', 'RO').replace('WRITE', 'WO')
     if not rw:
         for cell in row:
             m = _RW_RE.search(str(cell))
             if m:
-                rw = m.group(1).upper().replace('READ', 'RO').replace('WRITE', 'WO').replace('RD', 'RO').replace('WR', 'WO')
+                rw = m.group(1).upper().replace('READ', 'RO').replace('WRITE', 'WO')
                 break
 
     comment = ''
@@ -370,9 +345,6 @@ def _parse_register_row(row: list, col_map: dict) -> Optional[RegisterRow]:
         comment = str(row[comment_idx]).strip()
         if comment in ('None', '-'):
             comment = ''
-    # 이름 셀에서 분리된 설명을 comment에 추가
-    if _name_extra:
-        comment = f'{_name_extra} | {comment}'.strip(' |') if comment else _name_extra
 
     regs_val = '1'
     regs_idx = col_map.get('regs')
@@ -459,21 +431,23 @@ def _is_valid_register_name(name: str) -> bool:
         return False
     # V2: 너무 짧은 이름 (3자 이하인데 키워드가 아닌 것)
     if len(stripped) <= 3 and not any(k in stripped_lower for k in
-            ['sn', 'pn', 'pf', 'pv', 'dc', 'ac', 'bus', 'ia', 'ib', 'ic', 'ua', 'ub', 'uc',
-             '모델', '버전', '용량', '전압', '전류', '전력', '온도', '상태']):
+            ['sn', 'pf', 'pv', 'dc', 'ac', 'bus', 'ia', 'ib', 'ic', 'ua', 'ub', 'uc']):
         return False
     return True
 
 
-def extract_registers_from_tables(tables: List[List[list]], fc_list: list = None) -> List[RegisterRow]:
-    """모든 테이블에서 레지스터 행 추출. fc_list가 있으면 각 테이블의 FC(03/04) 태깅."""
+def extract_registers_from_tables(tables: List[List[list]],
+                                   fc_list: List[str] = None) -> List[RegisterRow]:
+    """모든 테이블에서 레지스터 행 추출
+    fc_list: 각 테이블의 FC 값 (예: ['04','04','03','03','',...]). None이면 전부 ''
+    """
     registers = []
-    seen_addr_fc = set()  # (addr, fc) 튜플로 중복 체크 — FC 구분 지원
-    prev_col_map = {}
-    for ti, table in enumerate(tables):
+    seen_addr_fc = set()  # (addr, fc) 튜플로 중복 체크 → FC 다르면 별도 레지스터
+    prev_col_map = {}  # 이전 테이블에서 감지한 col_map 유지
+    for t_idx, table in enumerate(tables):
         if not table or len(table) < 1:
             continue
-        fc = fc_list[ti] if fc_list and ti < len(fc_list) else ''
+        fc = fc_list[t_idx] if fc_list and t_idx < len(fc_list) else ''
         table = _clean_table(table)
         first_has_addr = any(
             str(c).strip().startswith('0x') or str(c).strip().startswith('0X') or
@@ -482,6 +456,7 @@ def extract_registers_from_tables(tables: List[List[list]], fc_list: list = None
         if first_has_addr:
             data_rows = table
             col_map = _detect_table_columns([], data_rows)
+            # 헤더 없는 테이블 — 이전 col_map이 더 풍부하면 사용
             if prev_col_map and len(col_map) < len(prev_col_map):
                 col_map = dict(prev_col_map)
         else:
@@ -491,14 +466,12 @@ def extract_registers_from_tables(tables: List[List[list]], fc_list: list = None
                 prev_col_map = dict(col_map)
         for row in data_rows:
             reg = _parse_register_row(row, col_map)
-            if reg:
-                dedup_key = (reg.address, fc)
-                if dedup_key in seen_addr_fc:
-                    continue
+            if reg and (reg.address, fc) not in seen_addr_fc:
+                # V2: 유효하지 않은 이름 필터 (모델명 테이블, 숫자값 등)
                 if not _is_valid_register_name(reg.definition):
                     continue
                 reg.fc = fc
-                seen_addr_fc.add(dedup_key)
+                seen_addr_fc.add((reg.address, fc))
                 registers.append(reg)
     return registers
 
@@ -1052,108 +1025,6 @@ def assign_h01_field(reg: RegisterRow, synonym_db: dict,
     return ''
 
 
-# ─── Appendix 테이블 추출 (INFO 레지스터에서 참조) ────────────────────────
-
-_APPENDIX_REF_RE = re.compile(r'(?:See\s+)?Appendix\s+(\w+)', re.I)
-
-
-def scan_info_appendix_tables(info_regs: list, pages: list) -> dict:
-    """INFO 레지스터 comment/description에서 Appendix 참조를 찾아 해당 테이블 추출.
-
-    Returns: {appendix_id: {'title': str, 'header': [...], 'rows': [[...]], 'register': str}}
-    """
-    if not pages:
-        return {}
-
-    # 1) INFO 레지스터에서 Appendix 참조 수집
-    appendix_refs = {}  # appendix_id -> register definition
-    for reg in info_regs:
-        comment = getattr(reg, 'comment', '') or ''
-        defn = getattr(reg, 'definition', '') or ''
-        for text in [comment, defn]:
-            m = _APPENDIX_REF_RE.search(text)
-            if m:
-                app_id = m.group(1)
-                appendix_refs[app_id] = reg.definition
-    if not appendix_refs:
-        return {}
-
-    # 2) PDF 페이지에서 Appendix N 테이블 찾기
-    result = {}
-    for app_id, reg_defn in appendix_refs.items():
-        pattern = re.compile(rf'Appendix\s+{re.escape(app_id)}\b', re.I)
-        best_table = None
-        best_page = None
-        for p in pages:
-            if not pattern.search(p['text']):
-                continue
-            # 해당 페이지 테이블 중 데이터 테이블(레지스터맵 아닌 것) 찾기
-            for tab in p.get('tables', []):
-                if len(tab) < 2:
-                    continue
-                header = tab[0]
-                header_str = ' '.join(str(c).lower() for c in header if c)
-                # 레지스터맵 테이블 제외 (Address/Data type 컬럼이 있으면 스킵)
-                if re.search(r'\baddress\b.*\bdata\s*type\b', header_str):
-                    continue
-                # Model/Type code 같은 device info 테이블 감지
-                has_model = any('model' in str(c).lower() for c in header if c)
-                has_type_code = any('type' in str(c).lower() and 'code' in str(c).lower()
-                                    for c in header if c)
-                has_mppt = any('mppt' in str(c).lower() for c in header if c)
-                has_string = any('string' in str(c).lower() for c in header if c)
-                # 최소 2개 특징 컬럼이 있어야 device info 테이블
-                if sum([has_model, has_type_code, has_mppt, has_string]) >= 2:
-                    if best_table is None or len(tab) > len(best_table):
-                        best_table = tab
-                        best_page = p['page']
-
-        if best_table is None:
-            continue
-
-        # 연속 페이지에서 같은 테이블 이어붙이기 (헤더 없는 후속 테이블)
-        header = best_table[0]
-        header_count = len([c for c in header if c])
-        all_rows = list(best_table[1:])
-        for p in pages:
-            if p['page'] <= best_page:
-                continue
-            if p['page'] > best_page + 3:  # 최대 3페이지까지 연속
-                break
-            found_continuation = False
-            for tab in p.get('tables', []):
-                if len(tab) < 1:
-                    continue
-                # 첫 행이 헤더가 아니고 컬럼 수가 비슷하면 연속 테이블
-                first_str = ' '.join(str(c).lower() for c in tab[0] if c)
-                col_count = len([c for c in tab[0] if c])
-                if abs(col_count - header_count) <= 1 and 'model' not in first_str:
-                    all_rows.extend(tab)
-                    found_continuation = True
-                    break
-            if not found_continuation:
-                break
-
-        # 빈 행 / 모델명 없는 행 제거
-        clean_rows = []
-        for row in all_rows:
-            cells = [str(c) if c is not None else '' for c in row]
-            if not any(c.strip() for c in cells):
-                continue
-            clean_rows.append(cells)
-
-        header_cells = [str(c) if c is not None else '' for c in header]
-        result[app_id] = {
-            'title': f'Appendix {app_id}',
-            'header': header_cells,
-            'rows': clean_rows,
-            'register': reg_defn,
-            'page': best_page,
-        }
-
-    return result
-
-
 # ─── IV Scan 감지 ──────────────────────────────────────────────────────────
 
 _IV_COMMAND_RE = re.compile(r'i-?v\s*(curve\s*)?scan|IV_CURVE_SCAN', re.I)
@@ -1490,80 +1361,55 @@ def run_stage1(
 
     log(f'입력 파일 읽기: {os.path.basename(input_path)}')
     all_tables = []
-    pages = None  # PDF만 사용, Excel은 None
 
     if ext == '.pdf':
         pages = extract_pdf_text_and_tables(input_path)
         log(f'  PDF {len(pages)}페이지 추출')
 
-        # 섹션 감지: 2단계 — 구체적 테이블 제목 우선, 일반 키워드 fallback
-        import re as _re
-        # 1순위: 데이터 테이블 제목 (줄 시작, "table N" 또는 섹션 번호 포함)
-        _INPUT_TABLE_RE = _re.compile(
-            r'(?:^|\n)\s*(?:table\s+\d+\s+)?input\s+register\s*(?:mapping|table|list)?',
-            _re.I | _re.MULTILINE)
-        _HOLDING_TABLE_RE = _re.compile(
-            r'(?:^|\n)\s*(?:table\s+\d+\s+)?hold(?:ing)?\s+register\s*(?:mapping|table|list)?',
-            _re.I | _re.MULTILINE)
-        # 2순위: 일반 섹션 키워드 (기존)
-        _INPUT_KEYWORDS = ['input register mapping', 'input (read only)',
-                           'read only register', 'running information variable address',
-                           'running information']
-        _HOLDING_KEYWORDS = ['hold register mapping', 'holding register mapping',
-                             'parameter setting address definition', 'parameter setting']
+        # Input Register (FC04) 섹션 키워드
+        _INPUT_START = [
+            'running information variable address', 'running information',
+            'input register', 'input (read only)', 'read only register',
+            'input reg',
+        ]
+        # Holding Register (FC03) 섹션 키워드
+        _HOLDING_START = [
+            'parameter setting address definition', 'parameter setting',
+            'hold register', 'holding register', 'parameter register',
+        ]
 
-        section_input_start = None
-        section_holding_start = None
-
-        # 1순위: 테이블 제목 패턴 (가장 신뢰)
+        section_input_start = None   # FC04 Input
+        section_holding_start = None  # FC03 Holding
         for p in pages:
+            page_text = p['text'].lower()
             pnum = p['page']
-            if section_input_start is None and _INPUT_TABLE_RE.search(p['text']):
-                # 해당 페이지에 실제 데이터 테이블이 있어야 함
-                has_data = any(len(tab) >= 3 for tab in p.get('tables', []))
-                if has_data:
-                    section_input_start = pnum
-            if section_holding_start is None and _HOLDING_TABLE_RE.search(p['text']):
-                has_data = any(len(tab) >= 3 for tab in p.get('tables', []))
-                if has_data and pnum != section_input_start:
+            if section_input_start is None and any(m in page_text for m in _INPUT_START):
+                section_input_start = pnum
+            if section_holding_start is None and any(m in page_text for m in _HOLDING_START):
+                if pnum != section_input_start:
                     section_holding_start = pnum
 
-        # 2순위: 일반 키워드 (1순위에서 못 찾은 경우만)
-        if section_input_start is None:
-            for p in pages:
-                if any(m in p['text'].lower() for m in _INPUT_KEYWORDS):
-                    has_data = any(len(tab) >= 3 for tab in p.get('tables', []))
-                    if has_data:
-                        section_input_start = p['page']
-                        break
-        if section_holding_start is None:
-            for p in pages:
-                if any(m in p['text'].lower() for m in _HOLDING_KEYWORDS):
-                    has_data = any(len(tab) >= 3 for tab in p.get('tables', []))
-                    if has_data and p['page'] != section_input_start:
-                        section_holding_start = p['page']
-                        break
-
-        # 섹션 순서 결정 (어느 것이 먼저 오는지)
+        # 페이지별 FC 분류 — 섹션 순서에 무관하게 동작
+        # 두 섹션이 모두 감지되면: 먼저 시작하는 섹션 → 나중 섹션 시작 전까지
         tables_input, tables_holding, tables_other = [], [], []
         for p in pages:
             pnum = p['page']
-            if section_input_start and section_holding_start:
-                # 둘 다 감지된 경우 — 페이지 순서로 구분
+            # 어떤 섹션에 속하는지 판정
+            in_input = False
+            in_holding = False
+            if section_input_start is not None and section_holding_start is not None:
                 if section_input_start < section_holding_start:
+                    # Input이 먼저: Input → Holding 시작 전까지
                     in_input = (pnum >= section_input_start and pnum < section_holding_start)
                     in_holding = (pnum >= section_holding_start)
                 else:
+                    # Holding이 먼저: Holding → Input 시작 전까지
                     in_holding = (pnum >= section_holding_start and pnum < section_input_start)
                     in_input = (pnum >= section_input_start)
-            elif section_input_start:
+            elif section_input_start is not None:
                 in_input = (pnum >= section_input_start)
-                in_holding = False
-            elif section_holding_start:
+            elif section_holding_start is not None:
                 in_holding = (pnum >= section_holding_start)
-                in_input = False
-            else:
-                in_input = in_holding = False
 
             for tab in p['tables']:
                 if in_holding:
@@ -1573,7 +1419,7 @@ def run_stage1(
                 else:
                     tables_other.append(tab)
 
-        # FC 태깅된 테이블 리스트 생성
+        # FC 태깅: Input=FC04, Holding=FC03, 기타='' (FC 구분 불가)
         all_tables = []
         fc_list = []
         for tab in tables_input:
@@ -1582,26 +1428,23 @@ def run_stage1(
             all_tables.append(tab); fc_list.append('')
         for tab in tables_holding:
             all_tables.append(tab); fc_list.append('03')
-
-        has_fc = bool(section_input_start and section_holding_start)
         log(f'  Input(FC04): {len(tables_input)}개 (page {section_input_start}~), '
             f'Holding(FC03): {len(tables_holding)}개 (page {section_holding_start}~), '
-            f'기타: {len(tables_other)}개'
-            f'{" — FC 구분 활성" if has_fc else ""}')
+            f'기타: {len(tables_other)}개')
 
     elif ext in ('.xlsx', '.xls'):
-        fc_list = []
         sheets = extract_excel_sheets(input_path)
         log(f'  Excel {len(sheets)}시트 추출')
+        fc_list = []
         for sname, rows in sheets.items():
             if rows:
                 all_tables.append(rows)
-                fc_list.append('')  # Excel은 FC 구분 없음
+                fc_list.append('')  # Excel에서는 FC 구분 불가
     else:
         raise ValueError(f'지원하지 않는 파일 형식: {ext}')
 
     log('레지스터 테이블 파싱...')
-    registers = extract_registers_from_tables(all_tables, fc_list=fc_list if fc_list else None)
+    registers = extract_registers_from_tables(all_tables, fc_list=fc_list)
     log(f'  {len(registers)}개 레지스터 추출 (원본)')
 
     if not registers:
@@ -1622,13 +1465,6 @@ def run_stage1(
                  not in DER_FIXED_ADDRS]
     if before - len(registers):
         log(f'  DER 고정 주소 제외: {before - len(registers)}개')
-
-    # ── INFO 블록 사전 감지 (enrichment 전 — PDF 원본 이름 기준) ──
-    info_block = detect_info_block(registers, pages=pages)
-    info_addrs = info_block['info_addrs']
-    log(f'  INFO 블록: {len(info_addrs)}개 레지스터, '
-        f'Model={"✓" if info_block["model_found"] else "✗ MISSING"}, '
-        f'SN={"✓" if info_block["sn_found"] else "✗ MISSING"}')
 
     if ref_patterns:
         mfr_lower = manufacturer.lower()
@@ -1749,8 +1585,6 @@ def run_stage1(
     else:
         log(f'  IV Scan: No')
 
-    # INFO 블록은 enrichment 전에 감지됨 (info_addrs 이미 설정)
-
     log('카테고리 분류 중 (MAPPING_RULES_V2)...')
     categorized = {cat: [] for cat in
                    ['INFO', 'MONITORING', 'STATUS', 'ALARM',
@@ -1760,7 +1594,7 @@ def run_stage1(
     for reg in registers:
         cat, reason = classify_register_with_rules(
             reg, synonym_db, review_history, ref_patterns,
-            device_type, all_regs=registers, info_addrs=info_addrs)
+            device_type, all_regs=registers)
         if cat == 'EXCLUDE':
             excluded.append(reg)
             continue
@@ -1807,14 +1641,6 @@ def run_stage1(
 
     # ── 정의 테이블 탐색 (참고용 — 레지스터 연결은 추후 정밀도 개선 후) ──
     # def_tables = scan_definition_tables(pages, ...) — 정밀도 개선 시 활성화
-
-    # ── INFO Appendix 테이블 추출 ──
-    info_appendix = {}
-    if pages:
-        info_appendix = scan_info_appendix_tables(
-            categorized.get('INFO', []), pages)
-        for app_id, app in info_appendix.items():
-            log(f'  Appendix {app_id}: {len(app["rows"])}개 모델 (page {app["page"]})')
 
     h01_match_table = build_h01_match_table(categorized, meta)
     h01_matched = sum(1 for r in h01_match_table if r['status'] == 'O')
@@ -1884,8 +1710,7 @@ def run_stage1(
                        key=lambda r: (r.address if isinstance(r.address, int) else 0))
     for i, reg in enumerate(info_regs, start=1):
         su = f'{reg.unit} {reg.scale}'.strip() if reg.unit or reg.scale else ''
-        fc_str = f'0x{reg.fc}' if reg.fc else ''
-        vals = [i, reg.definition, reg.address_hex, fc_str, reg.data_type, su,
+        vals = [i, reg.definition, reg.address_hex, reg.fc or '', reg.data_type, su,
                 reg.rw, reg.h01_field or '', reg.comment]
         for j, val in enumerate(vals, start=1):
             cell = ws.cell(row=info_start + 1 + i, column=j, value=val)
@@ -1901,8 +1726,7 @@ def run_stage1(
                          key=lambda r: (r.address if isinstance(r.address, int) else 0))
     for i, reg in enumerate(status_regs, start=1):
         su = f'{reg.unit} {reg.scale}'.strip() if reg.unit or reg.scale else ''
-        fc_str = f'0x{reg.fc}' if reg.fc else ''
-        vals = [i, reg.definition, reg.address_hex, fc_str, reg.data_type, su,
+        vals = [i, reg.definition, reg.address_hex, reg.fc or '', reg.data_type, su,
                 reg.rw, reg.h01_field or '', reg.comment]
         for j, val in enumerate(vals, start=1):
             cell = ws.cell(row=status_start + 1 + i, column=j, value=val)
@@ -1918,8 +1742,7 @@ def run_stage1(
                                key=lambda r: (r.address if isinstance(r.address, int) else 0))
     for i, reg in enumerate(alarm_regs_sorted, start=1):
         su = f'{reg.unit} {reg.scale}'.strip() if reg.unit or reg.scale else ''
-        fc_str = f'0x{reg.fc}' if reg.fc else ''
-        vals = [i, reg.definition, reg.address_hex, fc_str, reg.data_type, su,
+        vals = [i, reg.definition, reg.address_hex, reg.fc or '', reg.data_type, su,
                 reg.rw, reg.h01_field or '', reg.comment]
         for j, val in enumerate(vals, start=1):
             cell = ws.cell(row=alarm_start + 1 + i, column=j, value=val)
@@ -1931,42 +1754,17 @@ def run_stage1(
     if review_regs:
         review_start = alarm_start + len(alarm_regs_sorted) + 4
         ws.cell(row=review_start, column=1, value=f'REVIEW ({len(review_regs)}개)').font = section_font
-        review_cols = ['No', 'Definition', 'Address', 'Type', 'Unit/Scale', 'R/W', '사유', '제안']
+        review_cols = ['No', 'Definition', 'Address', 'FC', 'Type', 'Unit/Scale', 'R/W', '사유', '제안']
         _write_header(ws, review_cols, review_start + 1)
         for i, reg in enumerate(sorted(review_regs, key=lambda r: (r.address if isinstance(r.address, int) else 0)),
                                 start=1):
             su = f'{reg.unit} {reg.scale}'.strip() if reg.unit or reg.scale else ''
-            vals = [i, reg.definition, reg.address_hex, reg.data_type, su,
+            vals = [i, reg.definition, reg.address_hex, reg.fc or '', reg.data_type, su,
                     reg.rw, reg.review_reason, reg.review_suggestion]
             for j, val in enumerate(vals, start=1):
                 cell = ws.cell(row=review_start + 1 + i, column=j, value=val)
                 cell.border = thin_border
                 cell.fill = PatternFill('solid', fgColor=CATEGORY_COLORS['REVIEW'])
-
-    # ── INFO Appendix 테이블 출력 ──
-    if info_appendix:
-        # 마지막 섹션 이후 위치 계산
-        last_row = ws.max_row + 3
-        appendix_fill = PatternFill('solid', fgColor='D6E4F0')  # 연한 파란색
-        for app_id, app in info_appendix.items():
-            ws.cell(row=last_row, column=1,
-                    value=f'{app["title"]} — {app["register"]}').font = section_font
-            last_row += 1
-            # 헤더
-            for j, col_name in enumerate(app['header'], start=1):
-                cell = ws.cell(row=last_row, column=j, value=col_name)
-                cell.font = hdr_font
-                cell.fill = hdr_fill
-                cell.border = thin_border
-            last_row += 1
-            # 데이터 행
-            for row_data in app['rows']:
-                for j, val in enumerate(row_data, start=1):
-                    cell = ws.cell(row=last_row, column=j, value=val)
-                    cell.border = thin_border
-                    cell.fill = appendix_fill
-                last_row += 1
-            last_row += 2  # 간격
 
     ws.column_dimensions['A'].width = 18
     ws.column_dimensions['B'].width = 40
@@ -2003,14 +1801,14 @@ def run_stage1(
     mon_start = 3 + len(h01_match_table) + 3
     ws_h01.cell(row=mon_start, column=1,
                 value=f'MONITORING 전체 ({len(categorized.get("MONITORING", []))}개)').font = section_font
-    mon_cols = ['No', 'Definition', 'Address', 'Type', 'Unit/Scale', 'R/W', 'H01 Field']
+    mon_cols = ['No', 'Definition', 'Address', 'FC', 'Type', 'Unit/Scale', 'R/W', 'H01 Field']
     _write_header(ws_h01, mon_cols, mon_start + 1)
 
     mon_regs = sorted(categorized.get('MONITORING', []),
                       key=lambda r: (r.address if isinstance(r.address, int) else 0))
     for i, reg in enumerate(mon_regs, start=1):
         su = f'{reg.unit} {reg.scale}'.strip() if reg.unit or reg.scale else ''
-        vals = [i, reg.definition, reg.address_hex, reg.data_type, su,
+        vals = [i, reg.definition, reg.address_hex, reg.fc or '', reg.data_type, su,
                 reg.rw, reg.h01_field or '']
         for j, val in enumerate(vals, start=1):
             cell = ws_h01.cell(row=mon_start + 1 + i, column=j, value=val)
@@ -2141,7 +1939,6 @@ def run_stage1(
         'h01_match': {'matched': h01_matched, 'total': h01_total, 'table': h01_match_table},
         'der_match': {'matched': der_matched, 'total': der_total},
         'iv_info': iv_info,
-        'info_appendix': info_appendix,
     }
 
 
