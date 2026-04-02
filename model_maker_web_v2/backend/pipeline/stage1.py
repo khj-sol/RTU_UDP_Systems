@@ -436,14 +436,18 @@ def _is_valid_register_name(name: str) -> bool:
     return True
 
 
-def extract_registers_from_tables(tables: List[List[list]]) -> List[RegisterRow]:
-    """모든 테이블에서 레지스터 행 추출"""
+def extract_registers_from_tables(tables: List[List[list]],
+                                   fc_list: List[str] = None) -> List[RegisterRow]:
+    """모든 테이블에서 레지스터 행 추출
+    fc_list: 각 테이블의 FC 값 (예: ['04','04','03','03','',...]). None이면 전부 ''
+    """
     registers = []
-    seen_addrs = set()
+    seen_addr_fc = set()  # (addr, fc) 튜플로 중복 체크 → FC 다르면 별도 레지스터
     prev_col_map = {}  # 이전 테이블에서 감지한 col_map 유지
-    for table in tables:
+    for t_idx, table in enumerate(tables):
         if not table or len(table) < 1:
             continue
+        fc = fc_list[t_idx] if fc_list and t_idx < len(fc_list) else ''
         table = _clean_table(table)
         first_has_addr = any(
             str(c).strip().startswith('0x') or str(c).strip().startswith('0X') or
@@ -462,11 +466,12 @@ def extract_registers_from_tables(tables: List[List[list]]) -> List[RegisterRow]
                 prev_col_map = dict(col_map)
         for row in data_rows:
             reg = _parse_register_row(row, col_map)
-            if reg and reg.address not in seen_addrs:
+            if reg and (reg.address, fc) not in seen_addr_fc:
                 # V2: 유효하지 않은 이름 필터 (모델명 테이블, 숫자값 등)
                 if not _is_valid_register_name(reg.definition):
                     continue
-                seen_addrs.add(reg.address)
+                reg.fc = fc
+                seen_addr_fc.add((reg.address, fc))
                 registers.append(reg)
     return registers
 
@@ -1361,50 +1366,85 @@ def run_stage1(
         pages = extract_pdf_text_and_tables(input_path)
         log(f'  PDF {len(pages)}페이지 추출')
 
-        _3X_START = ['running information variable address', 'running information']
-        _4X_START = ['parameter setting address definition', 'parameter setting']
+        # Input Register (FC04) 섹션 키워드
+        _INPUT_START = [
+            'running information variable address', 'running information',
+            'input register', 'input (read only)', 'read only register',
+            'input reg',
+        ]
+        # Holding Register (FC03) 섹션 키워드
+        _HOLDING_START = [
+            'parameter setting address definition', 'parameter setting',
+            'hold register', 'holding register', 'parameter register',
+        ]
 
-        section_3x_start = None
-        section_4x_start = None
+        section_input_start = None   # FC04 Input
+        section_holding_start = None  # FC03 Holding
         for p in pages:
             page_text = p['text'].lower()
             pnum = p['page']
-            if section_3x_start is None and any(m in page_text for m in _3X_START):
-                section_3x_start = pnum
-            if section_4x_start is None and any(m in page_text for m in _4X_START):
-                if pnum != section_3x_start:
-                    section_4x_start = pnum
+            if section_input_start is None and any(m in page_text for m in _INPUT_START):
+                section_input_start = pnum
+            if section_holding_start is None and any(m in page_text for m in _HOLDING_START):
+                if pnum != section_input_start:
+                    section_holding_start = pnum
 
-        tables_3x, tables_4x, tables_other = [], [], []
+        # 페이지별 FC 분류 — 섹션 순서에 무관하게 동작
+        # 두 섹션이 모두 감지되면: 먼저 시작하는 섹션 → 나중 섹션 시작 전까지
+        tables_input, tables_holding, tables_other = [], [], []
         for p in pages:
             pnum = p['page']
-            in_3x = (section_3x_start is not None and pnum >= section_3x_start and
-                     (section_4x_start is None or pnum < section_4x_start))
-            in_4x = (section_4x_start is not None and pnum >= section_4x_start)
+            # 어떤 섹션에 속하는지 판정
+            in_input = False
+            in_holding = False
+            if section_input_start is not None and section_holding_start is not None:
+                if section_input_start < section_holding_start:
+                    # Input이 먼저: Input → Holding 시작 전까지
+                    in_input = (pnum >= section_input_start and pnum < section_holding_start)
+                    in_holding = (pnum >= section_holding_start)
+                else:
+                    # Holding이 먼저: Holding → Input 시작 전까지
+                    in_holding = (pnum >= section_holding_start and pnum < section_input_start)
+                    in_input = (pnum >= section_input_start)
+            elif section_input_start is not None:
+                in_input = (pnum >= section_input_start)
+            elif section_holding_start is not None:
+                in_holding = (pnum >= section_holding_start)
+
             for tab in p['tables']:
-                if in_4x:
-                    tables_4x.append(tab)
-                elif in_3x:
-                    tables_3x.append(tab)
+                if in_holding:
+                    tables_holding.append(tab)
+                elif in_input:
+                    tables_input.append(tab)
                 else:
                     tables_other.append(tab)
 
-        all_tables = tables_3x + tables_other + tables_4x
-        log(f'  3X(Read-Only): {len(tables_3x)}개 (page {section_3x_start}~), '
-            f'4X(Holding): {len(tables_4x)}개 (page {section_4x_start}~), '
+        # FC 태깅: Input=FC04, Holding=FC03, 기타='' (FC 구분 불가)
+        all_tables = []
+        fc_list = []
+        for tab in tables_input:
+            all_tables.append(tab); fc_list.append('04')
+        for tab in tables_other:
+            all_tables.append(tab); fc_list.append('')
+        for tab in tables_holding:
+            all_tables.append(tab); fc_list.append('03')
+        log(f'  Input(FC04): {len(tables_input)}개 (page {section_input_start}~), '
+            f'Holding(FC03): {len(tables_holding)}개 (page {section_holding_start}~), '
             f'기타: {len(tables_other)}개')
 
     elif ext in ('.xlsx', '.xls'):
         sheets = extract_excel_sheets(input_path)
         log(f'  Excel {len(sheets)}시트 추출')
+        fc_list = []
         for sname, rows in sheets.items():
             if rows:
                 all_tables.append(rows)
+                fc_list.append('')  # Excel에서는 FC 구분 불가
     else:
         raise ValueError(f'지원하지 않는 파일 형식: {ext}')
 
     log('레지스터 테이블 파싱...')
-    registers = extract_registers_from_tables(all_tables)
+    registers = extract_registers_from_tables(all_tables, fc_list=fc_list)
     log(f'  {len(registers)}개 레지스터 추출 (원본)')
 
     if not registers:
@@ -1663,14 +1703,14 @@ def run_stage1(
     # INFO 레지스터 섹션
     info_start = len(meta_items) + 5
     ws.cell(row=info_start, column=1, value='INFO 레지스터').font = section_font
-    info_cols = ['No', 'Definition', 'Address', 'Type', 'Unit/Scale', 'R/W', 'H01 Field', 'Comment']
+    info_cols = ['No', 'Definition', 'Address', 'FC', 'Type', 'Unit/Scale', 'R/W', 'H01 Field', 'Comment']
     _write_header(ws, info_cols, info_start + 1)
 
     info_regs = sorted(categorized.get('INFO', []),
                        key=lambda r: (r.address if isinstance(r.address, int) else 0))
     for i, reg in enumerate(info_regs, start=1):
         su = f'{reg.unit} {reg.scale}'.strip() if reg.unit or reg.scale else ''
-        vals = [i, reg.definition, reg.address_hex, reg.data_type, su,
+        vals = [i, reg.definition, reg.address_hex, reg.fc or '', reg.data_type, su,
                 reg.rw, reg.h01_field or '', reg.comment]
         for j, val in enumerate(vals, start=1):
             cell = ws.cell(row=info_start + 1 + i, column=j, value=val)
@@ -1686,7 +1726,7 @@ def run_stage1(
                          key=lambda r: (r.address if isinstance(r.address, int) else 0))
     for i, reg in enumerate(status_regs, start=1):
         su = f'{reg.unit} {reg.scale}'.strip() if reg.unit or reg.scale else ''
-        vals = [i, reg.definition, reg.address_hex, reg.data_type, su,
+        vals = [i, reg.definition, reg.address_hex, reg.fc or '', reg.data_type, su,
                 reg.rw, reg.h01_field or '', reg.comment]
         for j, val in enumerate(vals, start=1):
             cell = ws.cell(row=status_start + 1 + i, column=j, value=val)
@@ -1702,7 +1742,7 @@ def run_stage1(
                                key=lambda r: (r.address if isinstance(r.address, int) else 0))
     for i, reg in enumerate(alarm_regs_sorted, start=1):
         su = f'{reg.unit} {reg.scale}'.strip() if reg.unit or reg.scale else ''
-        vals = [i, reg.definition, reg.address_hex, reg.data_type, su,
+        vals = [i, reg.definition, reg.address_hex, reg.fc or '', reg.data_type, su,
                 reg.rw, reg.h01_field or '', reg.comment]
         for j, val in enumerate(vals, start=1):
             cell = ws.cell(row=alarm_start + 1 + i, column=j, value=val)
@@ -1714,12 +1754,12 @@ def run_stage1(
     if review_regs:
         review_start = alarm_start + len(alarm_regs_sorted) + 4
         ws.cell(row=review_start, column=1, value=f'REVIEW ({len(review_regs)}개)').font = section_font
-        review_cols = ['No', 'Definition', 'Address', 'Type', 'Unit/Scale', 'R/W', '사유', '제안']
+        review_cols = ['No', 'Definition', 'Address', 'FC', 'Type', 'Unit/Scale', 'R/W', '사유', '제안']
         _write_header(ws, review_cols, review_start + 1)
         for i, reg in enumerate(sorted(review_regs, key=lambda r: (r.address if isinstance(r.address, int) else 0)),
                                 start=1):
             su = f'{reg.unit} {reg.scale}'.strip() if reg.unit or reg.scale else ''
-            vals = [i, reg.definition, reg.address_hex, reg.data_type, su,
+            vals = [i, reg.definition, reg.address_hex, reg.fc or '', reg.data_type, su,
                     reg.rw, reg.review_reason, reg.review_suggestion]
             for j, val in enumerate(vals, start=1):
                 cell = ws.cell(row=review_start + 1 + i, column=j, value=val)
@@ -1761,14 +1801,14 @@ def run_stage1(
     mon_start = 3 + len(h01_match_table) + 3
     ws_h01.cell(row=mon_start, column=1,
                 value=f'MONITORING 전체 ({len(categorized.get("MONITORING", []))}개)').font = section_font
-    mon_cols = ['No', 'Definition', 'Address', 'Type', 'Unit/Scale', 'R/W', 'H01 Field']
+    mon_cols = ['No', 'Definition', 'Address', 'FC', 'Type', 'Unit/Scale', 'R/W', 'H01 Field']
     _write_header(ws_h01, mon_cols, mon_start + 1)
 
     mon_regs = sorted(categorized.get('MONITORING', []),
                       key=lambda r: (r.address if isinstance(r.address, int) else 0))
     for i, reg in enumerate(mon_regs, start=1):
         su = f'{reg.unit} {reg.scale}'.strip() if reg.unit or reg.scale else ''
-        vals = [i, reg.definition, reg.address_hex, reg.data_type, su,
+        vals = [i, reg.definition, reg.address_hex, reg.fc or '', reg.data_type, su,
                 reg.rw, reg.h01_field or '']
         for j, val in enumerate(vals, start=1):
             cell = ws_h01.cell(row=mon_start + 1 + i, column=j, value=val)
