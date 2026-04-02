@@ -473,6 +473,87 @@ def assign_h01_field(reg: RegisterRow, synonym_db: dict,
     return ''
 
 
+# ─── IV Scan 감지 ──────────────────────────────────────────────────────────
+
+_IV_COMMAND_RE = re.compile(r'i-?v\s*(curve\s*)?scan|IV_CURVE_SCAN', re.I)
+_TRACKER_VOLTAGE_RE = re.compile(r'Tracker\s*(\d+)\s*voltage|IV_TRACKER(\d+)_VOLTAGE', re.I)
+_IV_STRING_CURRENT_RE = re.compile(r'String\s*(\d+)-(\d+)\s*current|IV_STRING(\d+)_(\d+)_CURRENT', re.I)
+
+
+def detect_iv_from_pdf(registers: List[RegisterRow], pages: list = None) -> dict:
+    """
+    PDF에서 IV Scan 지원 여부 및 구조 감지
+    Returns: {
+        'supported': bool,
+        'iv_command_addr': int or None,
+        'data_points': int,
+        'trackers': [{tracker_num, voltage_addr, strings: [{string_num, current_addr}]}],
+    }
+    """
+    result = {'supported': False, 'iv_command_addr': None, 'data_points': 0, 'trackers': []}
+
+    # 1) IV Scan 명령 레지스터 (0x600D)
+    for reg in registers:
+        if _IV_COMMAND_RE.search(reg.definition):
+            addr = reg.address if isinstance(reg.address, int) else parse_address(reg.address)
+            result['iv_command_addr'] = addr
+            result['supported'] = True
+            break
+
+    # 2) Tracker/String IV 데이터 레지스터 감지
+    tracker_map = {}  # {tracker_num: {'voltage_addr': addr, 'strings': {str_num: addr}}}
+    for reg in registers:
+        addr = reg.address if isinstance(reg.address, int) else parse_address(reg.address)
+        if addr is None:
+            continue
+
+        m = _TRACKER_VOLTAGE_RE.search(reg.definition)
+        if m:
+            tn = int(m.group(1) or m.group(2))
+            tracker_map.setdefault(tn, {'voltage_addr': addr, 'regs': int(reg.regs or '1'), 'strings': {}})
+            tracker_map[tn]['voltage_addr'] = addr
+            tracker_map[tn]['regs'] = int(reg.regs or '1')
+            result['supported'] = True
+            continue
+
+        m = _IV_STRING_CURRENT_RE.search(reg.definition)
+        if m:
+            tn = int(m.group(1) or m.group(3))
+            sn = int(m.group(2) or m.group(4))
+            tracker_map.setdefault(tn, {'voltage_addr': None, 'regs': 0, 'strings': {}})
+            tracker_map[tn]['strings'][sn] = addr
+            result['supported'] = True
+
+    # 3) data_points 추정 (Tracker voltage 레지스터 수 또는 주소 간격)
+    if tracker_map:
+        # 레지스터 수에서 data_points 추정
+        for tn in sorted(tracker_map):
+            t = tracker_map[tn]
+            if t.get('regs', 0) > 1:
+                result['data_points'] = t['regs']
+                break
+
+        # 주소 간격에서도 추정 (Tracker1 voltage ~ String1-1 current 간격)
+        if result['data_points'] == 0 and 1 in tracker_map:
+            t1 = tracker_map[1]
+            if t1['voltage_addr'] and t1['strings'].get(1):
+                result['data_points'] = t1['strings'][1] - t1['voltage_addr']
+
+        # Tracker 정보 정리
+        for tn in sorted(tracker_map):
+            t = tracker_map[tn]
+            strings = []
+            for sn in sorted(t['strings']):
+                strings.append({'string_num': sn, 'current_addr': t['strings'][sn]})
+            result['trackers'].append({
+                'tracker_num': tn,
+                'voltage_addr': t['voltage_addr'],
+                'strings': strings,
+            })
+
+    return result
+
+
 # ─── H01 매칭 상태 표 ──────────────────────────────────────────────────────
 
 def build_h01_match_table(categorized: dict, meta: dict) -> List[dict]:
@@ -766,6 +847,15 @@ def run_stage1(
 
     iv_scan_supported = detect_iv_scan_support(registers, manufacturer)
 
+    # V2: IV Scan 상세 감지 (Tracker/String/data_points)
+    iv_info = detect_iv_from_pdf(registers)
+    if iv_info['supported']:
+        iv_scan_supported = True
+    # IV command는 DER 고정 주소(0x600D)에서 제거되므로, 지원 시 고정값 삽입
+    if iv_scan_supported and not iv_info.get('iv_command_addr'):
+        iv_info['iv_command_addr'] = 0x600D
+        iv_info['supported'] = True
+
     meta = {
         'manufacturer': manufacturer,
         'protocol_version': protocol_version,
@@ -773,6 +863,9 @@ def run_stage1(
         'max_mppt': max_mppt,
         'max_string': max_string,
         'iv_scan': iv_scan_supported and device_type == 'inverter',
+        'iv_data_points': iv_info.get('data_points', 0),
+        'iv_trackers': len(iv_info.get('trackers', [])),
+        'iv_command_addr': f'0x{iv_info["iv_command_addr"]:04X}' if iv_info.get('iv_command_addr') else '-',
         'source_file': os.path.basename(input_path),
         'extracted_date': datetime.now().strftime('%Y-%m-%d %H:%M'),
         'total_extracted': len(registers),
@@ -780,7 +873,11 @@ def run_stage1(
     }
 
     log(f'  제조사: {manufacturer}, MPPT: {max_mppt}, String: {max_string}')
-    log(f'  IV Scan: {"Yes" if meta["iv_scan"] else "No"}')
+    if meta['iv_scan']:
+        log(f'  IV Scan: Yes (command={meta["iv_command_addr"]}, '
+            f'trackers={meta["iv_trackers"]}, data_points={meta["iv_data_points"]})')
+    else:
+        log(f'  IV Scan: No')
 
     log('카테고리 분류 중 (MAPPING_RULES_V2)...')
     categorized = {cat: [] for cat in
@@ -879,7 +976,10 @@ def run_stage1(
     meta_items = [
         ('제조사', manufacturer), ('프로토콜 버전', protocol_version),
         ('설비 타입', device_type), ('MPPT', max_mppt),
-        ('String', max_string), ('IV Scan', 'Yes' if meta['iv_scan'] else 'No'),
+        ('String', max_string),
+        ('IV Scan', 'Yes' if meta['iv_scan'] else 'No'),
+        ('IV Data Points', meta.get('iv_data_points', 0) if meta['iv_scan'] else '-'),
+        ('IV Trackers', meta.get('iv_trackers', 0) if meta['iv_scan'] else '-'),
         ('원본 파일', os.path.basename(input_path)), ('추출 일시', meta['extracted_date']),
         ('H01 매칭', f'{h01_matched}/{h01_total}'),
         ('DER 매칭', f'{der_matched}/{der_total}'),
@@ -1041,31 +1141,84 @@ def run_stage1(
     # ═══════════════════════════════════════════════════════════════════
     # Sheet 4: IV — IV 스캔 매핑 (지원 시)
     # ═══════════════════════════════════════════════════════════════════
-    if meta['iv_scan'] and categorized.get('IV_SCAN'):
+    if meta['iv_scan'] and iv_info.get('supported'):
         ws_iv = wb.create_sheet('4_IV')
-        ws_iv['A1'] = 'IV Scan 매핑'
+        ws_iv['A1'] = f'IV Scan 매핑 — data_points={iv_info["data_points"]}'
         ws_iv['A1'].font = title_font
 
-        iv_cols = ['No', 'Definition', 'Address', 'Type', 'Unit/Scale', 'R/W', 'Comment']
-        _write_header(ws_iv, iv_cols, 3)
+        iv_fill = PatternFill('solid', fgColor=CATEGORY_COLORS['IV_SCAN'])
+        ctrl_fill = PatternFill('solid', fgColor='D9D2E9')
 
-        iv_regs = sorted(categorized['IV_SCAN'],
-                         key=lambda r: (r.address if isinstance(r.address, int) else 0))
-        for i, reg in enumerate(iv_regs, start=1):
-            su = f'{reg.unit} {reg.scale}'.strip() if reg.unit or reg.scale else ''
-            vals = [i, reg.definition, reg.address_hex, reg.data_type, su,
-                    reg.rw, reg.comment]
+        # IV 메타 정보
+        iv_meta = [
+            ('IV Scan Command', meta.get('iv_command_addr', '-')),
+            ('Data Points', iv_info['data_points']),
+            ('Trackers', len(iv_info['trackers'])),
+            ('Strings/Tracker', max(len(t['strings']) for t in iv_info['trackers']) if iv_info['trackers'] else 0),
+        ]
+        for i, (k, v) in enumerate(iv_meta, start=3):
+            ws_iv[f'A{i}'] = k
+            ws_iv[f'A{i}'].font = Font(bold=True)
+            ws_iv[f'B{i}'] = str(v)
+
+        # IV Command 레지스터
+        cmd_start = len(iv_meta) + 5
+        ws_iv.cell(row=cmd_start, column=1, value='IV Scan Command').font = section_font
+        cmd_cols = ['Name', 'Address', 'Type', 'R/W', 'Description']
+        _write_header(ws_iv, cmd_cols, cmd_start + 1)
+        cmd_addr = iv_info.get('iv_command_addr')
+        cmd_vals = ['IV_CURVE_SCAN', f'0x{cmd_addr:04X}' if cmd_addr else '-', 'U16', 'RW',
+                    'W: 0=Stop, 1=Start / R: 0=Idle, 1=Running, 2=Finished']
+        for j, val in enumerate(cmd_vals, start=1):
+            cell = ws_iv.cell(row=cmd_start + 2, column=j, value=val)
+            cell.border = thin_border
+            cell.fill = ctrl_fill
+
+        # Tracker/String 매핑 테이블
+        map_start = cmd_start + 5
+        ws_iv.cell(row=map_start, column=1, value='IV Data 레지스터 매핑').font = section_font
+        map_cols = ['No', 'Type', 'Name', 'Address', 'Regs', 'Data Type', 'Scale']
+        _write_header(ws_iv, map_cols, map_start + 1)
+
+        row_idx = map_start + 2
+        reg_no = 1
+        for tracker in iv_info['trackers']:
+            tn = tracker['tracker_num']
+            va = tracker['voltage_addr']
+            # Tracker voltage
+            vals = [reg_no, 'Tracker Voltage', f'Tracker {tn} voltage',
+                    f'0x{va:04X}' if va else '-', iv_info['data_points'], 'U16', '0.1V']
             for j, val in enumerate(vals, start=1):
-                cell = ws_iv.cell(row=3 + i, column=j, value=val)
+                cell = ws_iv.cell(row=row_idx, column=j, value=val)
                 cell.border = thin_border
-                cell.fill = PatternFill('solid', fgColor=CATEGORY_COLORS['IV_SCAN'])
+                cell.fill = PatternFill('solid', fgColor='D5F5E3')  # 연한 초록
+            row_idx += 1
+            reg_no += 1
 
-        ws_iv.column_dimensions['B'].width = 35
-        ws_iv.column_dimensions['G'].width = 30
+            # String currents
+            for sc in tracker['strings']:
+                sn = sc['string_num']
+                sa = sc['current_addr']
+                vals = [reg_no, 'String Current', f'String {tn}-{sn} current',
+                        f'0x{sa:04X}', iv_info['data_points'], 'S16', '0.01A']
+                for j, val in enumerate(vals, start=1):
+                    cell = ws_iv.cell(row=row_idx, column=j, value=val)
+                    cell.border = thin_border
+                    cell.fill = iv_fill
+                row_idx += 1
+                reg_no += 1
+
+        ws_iv.column_dimensions['A'].width = 6
+        ws_iv.column_dimensions['B'].width = 18
+        ws_iv.column_dimensions['C'].width = 25
+        ws_iv.column_dimensions['D'].width = 12
+        ws_iv.column_dimensions['E'].width = 10
 
     wb.save(output_path)
     wb.close()
-    log(f'Stage 1 완료: {output_name} ({len(wb.sheetnames) if wb else "?"}시트)', 'ok')
+
+    sheet_count = 3 + (1 if meta['iv_scan'] and iv_info.get('supported') else 0)
+    log(f'Stage 1 완료: {output_name} ({sheet_count}시트)', 'ok')
 
     return {
         'output_path': output_path,
@@ -1075,6 +1228,7 @@ def run_stage1(
         'review_count': counts.get('REVIEW', 0),
         'h01_match': {'matched': h01_matched, 'total': h01_total, 'table': h01_match_table},
         'der_match': {'matched': der_matched, 'total': der_total},
+        'iv_info': iv_info,
     }
 
 
