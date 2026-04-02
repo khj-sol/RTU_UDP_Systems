@@ -215,6 +215,7 @@ INFO_KNOWN_NAMES = {
         'model', 'device model', 'device model name', 'device type',
         'device type code', 'type code', 'model id', 'model code',
         'model name', 'machine model', 'inverter model',
+        'present identified model', 'lcd model setting',
         '모델', '모델명', '기기모델', '장비모델', '인버터모델', '제품모델',
     ],
     'SERIAL_NUMBER': [
@@ -226,11 +227,16 @@ INFO_KNOWN_NAMES = {
         'pn', 'product code', 'product number',
         '제품코드', '품목코드',
     ],
+    'MAC_ADDRESS': [
+        'plc mac address', 'mac address',
+    ],
     'FIRMWARE': [
         'firmware version', 'firmware', 'master firmware version',
         'slave firmware version', 'software version', 'protocol version',
         'ems firmware version', 'lcd firmware version',
-        'firmware version of arm', 'dsp version', 'communication version',
+        'firmware version of arm', 'dsp version', 'arm version',
+        'dsp1 test version', 'arm1 test version', 'dsp2 version',
+        'dsp2 test version', 'communication version', 'hmi version',
         '펌웨어', '인버터 버전', '펌웨어 버전', '소프트웨어 버전',
         '마스터 펌웨어', '슬레이브 펌웨어', '통신 버전', '프로토콜 버전',
     ],
@@ -362,7 +368,8 @@ _INFO_DEFAULT_GAP = 30
 _INFO_SECTION_RE = re.compile(
     r'device\s+(?:information|info)\b|'
     r'basic\s+(?:information|parameters)\b|'
-    r'inverter\s+information\b|equipment\s+information\b|'
+    r'inverter\s+(?:\w+\s+)?information\b|equipment\s+information\b|'
+    r'system\s+information\b|'
     r'장치\s*정보|기기\s*정보|설비\s*정보',
     re.I
 )
@@ -373,7 +380,7 @@ def _find_info_section_pages(pages: list) -> list:
     if not pages:
         return []
     result = []
-    for p in pages[:25]:  # 앞 25페이지만 탐색
+    for p in pages:  # 전체 페이지 탐색 (섹션 제목은 어디든 있을 수 있음)
         if _INFO_SECTION_RE.search(p.get('text', '')):
             result.append(p['page'])
     return result
