@@ -106,11 +106,11 @@ DER_MONITOR_REGS = [
 # ─── 유틸리티 ─────────────────────────────────────────────────────────────────
 
 def to_upper_snake(name: str) -> str:
-    """필드명 → UPPER_SNAKE_CASE"""
+    """필드명 → UPPER_SNAKE_CASE (한글 보존)"""
     s = re.sub(r'[()（）\[\]【】]', '', str(name))
     s = re.sub(r'[\s\-./·:]+', '_', s)
     s = re.sub(r'([a-z])([A-Z])', r'\1_\2', s)
-    s = re.sub(r'[^A-Za-z0-9_]', '', s)
+    s = re.sub(r'[^A-Za-z0-9_\uAC00-\uD7A3\u3131-\u3163\u3165-\u318E]', '', s)
     s = re.sub(r'_+', '_', s).strip('_')
     result = s.upper()
     if result and result[0].isdigit():

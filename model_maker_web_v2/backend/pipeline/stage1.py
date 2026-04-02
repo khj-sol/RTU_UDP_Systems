@@ -56,17 +56,35 @@ def extract_pdf_text_and_tables(pdf_path: str) -> List[dict]:
 
 
 def extract_excel_sheets(excel_path: str) -> Dict[str, List[List[str]]]:
-    """openpyxl로 Excel 시트별 행 추출"""
+    """openpyxl로 Excel 시트별 행 추출 — 헤더 반복 시 섹션별 분리"""
     openpyxl = get_openpyxl()
     wb = openpyxl.load_workbook(excel_path, data_only=True)
     result = {}
+    # 헤더 감지 키워드
+    _header_keywords = {'fc', 'address', 'addr', 'parameter', 'name', 'definition',
+                        'unit', 'r/w', 'type', '속성', '주소', '이름'}
     for name in wb.sheetnames:
         ws = wb[name]
-        rows = []
+        sections = []
+        current_section = []
         for row in ws.iter_rows(values_only=True):
-            if any(c is not None for c in row):
-                rows.append([str(c) if c is not None else '' for c in row])
-        result[name] = rows
+            if not any(c is not None for c in row):
+                continue
+            cells = [str(c) if c is not None else '' for c in row]
+            # 헤더 행 감지 (3개 이상 키워드 매칭)
+            cell_lower = [c.lower().strip() for c in cells if c.strip()]
+            header_hits = sum(1 for c in cell_lower if any(k in c for k in _header_keywords))
+            if header_hits >= 3 and current_section:
+                # 이전 섹션 저장, 새 섹션 시작
+                sections.append(current_section)
+                current_section = []
+            current_section.append(cells)
+        if current_section:
+            sections.append(current_section)
+        # 각 섹션을 별도 테이블로
+        for i, sec in enumerate(sections):
+            key = f'{name}_{i}' if len(sections) > 1 else name
+            result[key] = sec
     wb.close()
     return result
 
@@ -88,8 +106,12 @@ def _detect_table_columns(header_row: list, data_rows: list = None) -> dict:
             continue
         cl = str(cell).lower().strip()
         if cl in ('address', 'addr', '주소', 'offset') or \
-           ('addr' in cl and 'register' not in cl):
+           ('addr' in cl and 'register' not in cl and 'reg.' not in cl):
             col_map.setdefault('addr', i)
+        elif cl.startswith('reg.') or cl == 'reg.addr':
+            # EKOS: reg.addr(30041)가 실제 Modbus 주소, ADDRESS는 오프셋
+            # reg.addr을 우선 주소로 사용
+            col_map['addr'] = i  # 덮어쓰기 (ADDRESS보다 우선)
         elif any(k in cl for k in ['name', 'definition', '이름', '항목', 'parameter', 'description',
                                     'signal name', 'signalname']):
             col_map.setdefault('name', i)
@@ -103,7 +125,7 @@ def _detect_table_columns(header_row: list, data_rows: list = None) -> dict:
             col_map.setdefault('unit', i)
         elif any(k in cl for k in ['scale', '배율', 'factor', 'gain']):
             col_map.setdefault('scale', i)
-        elif any(k in cl for k in ['r/w', 'access', '읽기', 'permission']):
+        elif any(k in cl for k in ['r/w', 'access', '읽기', 'permission', '속성']):
             col_map.setdefault('rw', i)
         elif any(k in cl for k in ['remark', 'comment', '비고', 'note', '설명']):
             col_map.setdefault('comment', i)
@@ -414,9 +436,11 @@ def assign_h01_field(reg: RegisterRow, synonym_db: dict,
     # V2: INFO/ALARM 카테고리는 H01 모니터링 필드가 아님 — 특정 키워드만 매칭
     if category == 'INFO':
         # INFO에서 H01과 겹치는 필드만 매핑
-        if any(k in defn_lower for k in ['total energy', 'cumulative energy', 'total power yields']):
+        if any(k in defn_lower for k in ['total energy', 'cumulative energy', 'total power yields',
+                                          '누적발전량', '누적 발전량']):
             return 'cumulative_energy'
-        if any(k in defn_lower for k in ['daily energy', 'today energy', 'daily power yields']):
+        if any(k in defn_lower for k in ['daily energy', 'today energy', 'daily power yields',
+                                          '일발전량', '일 발전량', '금일발전량']):
             return 'daily_energy'
         if any(k in defn_lower for k in ['inner_temp', 'inner temp', 'internal temp',
                                           'module temp', 'inverter temp']):
@@ -444,17 +468,20 @@ def assign_h01_field(reg: RegisterRow, synonym_db: dict,
     if any(k in defn_lower for k in ['total dc power', 'total pv power', 'dc power',
                                       'pv total power', 'pv_total_input_power',
                                       'input power', 'pac', 'output power',
-                                      'inverter current output']):
+                                      'inverter current output',
+                                      '태양전지 전력', '태양전지전력']):
         return 'pv_power'
     defn_nospace = defn_lower.replace(' ', '')
     if any(k in defn_lower for k in ['total energy', 'cumulative energy', 'total power yields',
                                       'lifetime energy', 'accumulated energy', 'total generation',
-                                      'total power generation', 'total powergeneration']) or \
+                                      'total power generation', 'total powergeneration',
+                                      '누적발전량', '누적 발전량']) or \
        any(k in defn_nospace for k in ['accumulatedpower', 'accumulatedenergy',
                                         'totalpowergeneration']):
         return 'cumulative_energy'
     if any(k in defn_lower for k in ['daily energy', 'today energy', 'daily power yields',
-                                      'daily generation']):
+                                      'daily generation', '일발전량', '일 발전량',
+                                      '금일발전량', '금일 발전량']):
         return 'daily_energy'
 
     # 2) synonym_db 정확 매칭
