@@ -144,23 +144,45 @@ def get_string_voltage_rule() -> str:
 # ═══════════════════════════════════════════════════════════════════════════
 
 INFO_REQUIRED = {
-    'DEVICE_MODEL':       ['model', 'device model', '모델', 'product model'],
-    'SERIAL_NUMBER':      ['serial', 'sn', '시리얼', '제품번호'],
-    'FIRMWARE_VERSION':   ['firmware', 'fw version', 'software version', '펌웨어'],
+    'DEVICE_MODEL':       ['model', 'device model', '모델', 'product model',
+                           'device type code', 'type code', 'device type'],
+    'SERIAL_NUMBER':      ['serial', 'sn', '시리얼', '제품번호', 'serial number'],
+    'FIRMWARE_VERSION':   ['firmware', 'fw version', 'software version', '펌웨어',
+                           'protocol version', 'communication version'],
     'MPPT_COUNT':         ['mppt count', 'number of mppt', 'mppt tracker', 'mppt수'],
-    'NOMINAL_POWER':      ['nominal power', 'rated power', '정격출력', 'max output'],
+    'NOMINAL_POWER':      ['nominal power', 'rated power', '정격출력', 'max output',
+                           'nominal active power', 'rated active power',
+                           'nominal reactive power', 'rated reactive power'],
     'NOMINAL_VOLTAGE':    ['nominal voltage', 'rated voltage', '정격전압'],
     'NOMINAL_FREQUENCY':  ['nominal frequency', 'rated frequency', '정격주파수'],
-    'GRID_PHASE_NUMBER':  ['phase number', 'phase count', '상수', 'phase type'],
+    'GRID_PHASE_NUMBER':  ['phase number', 'phase count', '상수', 'phase type',
+                           'output type'],
+    'TOTAL_RUNNING_TIME': ['total running time', 'running time', '총 가동시간',
+                           'daily running time', '가동시간'],
+    'TOTAL_ENERGY':       ['total power yields', 'total energy', '누적 발전량',
+                           'total generation', 'cumulative energy',
+                           'monthly power yields'],
+    'DAILY_ENERGY':       ['daily power yields', 'daily energy', '일일 발전량',
+                           'today energy', 'daily generation'],
+    'INNER_TEMPERATURE':  ['internal temperature', 'inner temperature', 'module temperature',
+                           '내부 온도', 'inverter temperature', 'cabinet temperature',
+                           'inner_temp'],
+    'APPARENT_POWER':     ['apparent power', '피상전력', 'total apparent power'],
+    'COUNTRY_CODE':       ['present country', 'country code', 'country id', '국가코드'],
+    'INSULATION':         ['insulation resistance', 'array insulation', '절연저항'],
+    'BUS_VOLTAGE':        ['bus voltage', 'dc bus', 'bus volt', '버스전압'],
 }
 
 
 def is_info_register(definition: str) -> bool:
     """§3: 인버터 정보 레지스터 여부"""
     defn_lower = definition.lower()
+    # PDF 줄바꿈 제거 시 공백이 사라질 수 있으므로 공백 제거 버전도 체크
+    defn_nospace = defn_lower.replace(' ', '')
     for field, keywords in INFO_REQUIRED.items():
-        if any(k in defn_lower for k in keywords):
-            return True
+        for k in keywords:
+            if k in defn_lower or k.replace(' ', '') in defn_nospace:
+                return True
     return False
 
 
@@ -315,6 +337,11 @@ def classify_register_with_rules(
     if should_exclude(reg):
         return ('EXCLUDE', '')
 
+    # 0) INFO 키워드 최우선 — PDF에서 추출한 이름 기반
+    # (레퍼런스 주소 매칭보다 먼저 체크하여 다른 제조사 레퍼런스와 주소 충돌 방지)
+    if is_info_register(defn):
+        return ('INFO', '')
+
     # 1) 레퍼런스 패턴 기반 (주소 매칭)
     if addr is not None:
         for proto, addr_map in ref_patterns.items():
@@ -333,21 +360,28 @@ def classify_register_with_rules(
                 if any(k in ref_name for k in ['INVERTER_MODE', 'RUNNING_STATUS', 'STATUS']):
                     return ('STATUS', '')
                 if any(k in ref_name for k in ['MODEL', 'SERIAL', 'FIRMWARE', 'NOMINAL',
-                                                'MPPT_COUNT', 'PHASE', 'EMS_', 'LCD_']):
+                                                'MPPT_COUNT', 'PHASE', 'EMS_', 'LCD_',
+                                                'DEVICE_TYPE', 'OUTPUT_TYPE',
+                                                'TOTAL_RUNNING', 'DAILY_RUNNING',
+                                                'INNER_TEMP', 'MODULE_TEMP',
+                                                'APPARENT_POWER', 'COUNTRY',
+                                                'INSULATION', 'BUS_VOLTAGE',
+                                                'TOTAL_ENERGY', 'DAILY_ENERGY',
+                                                'TODAY_ENERGY', 'MONTHLY_ENERGY']):
                     return ('INFO', '')
                 return ('MONITORING', '')
 
-    # 2) synonym_db 매칭
+    # 2) §3: INFO 키워드 (synonym_db보다 먼저 — INFO가 MONITORING으로 잘못 분류되는 것 방지)
+    if is_info_register(defn):
+        return ('INFO', '')
+
+    # 3) synonym_db 매칭
     syn = match_synonym(defn, synonym_db)
     if syn:
         cat = syn['category']
         if cat in ('DER_CONTROL', 'DER_MONITOR', 'IV_SCAN') and device_type != 'inverter':
             return ('EXCLUDE', '')
         return (cat, '')
-
-    # 3) §3: INFO 키워드
-    if is_info_register(defn):
-        return ('INFO', '')
 
     # 4) §2-2: STATUS 키워드
     if any(k in defn_lower for k in ['status', 'state', 'mode', 'running',

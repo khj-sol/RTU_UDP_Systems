@@ -128,31 +128,47 @@ def _parse_register_row(row: list, col_map: dict) -> Optional[RegisterRow]:
         return None
 
     # 주소 추출 — 0x 패턴 (0x0~0xFFFF) 또는 decimal (0~65535)
+    # 범위 주소 "5004 - 5005", "5004-5005", "5004~5005" → 시작 주소 사용
+    _RANGE_ADDR_RE = re.compile(r'^(\d{4,5})\s*[-–~]\s*(\d{4,5})$')
+    _RANGE_HEX_RE = re.compile(r'^(0x[0-9A-Fa-f]{4})\s*[-–~]\s*(0x[0-9A-Fa-f]{4})$', re.I)
+
     addr = None
     addr_raw = ''
+
+    def _try_parse_addr(raw: str):
+        """주소 문자열 파싱 (단일 또는 범위)"""
+        raw = raw.strip()
+        if not raw:
+            return None
+        # 0x hex
+        if raw.startswith('0x') or raw.startswith('0X'):
+            return parse_address(raw)
+        # hex 범위 "0x1388 - 0x1389"
+        m = _RANGE_HEX_RE.match(raw)
+        if m:
+            return parse_address(m.group(1))
+        # 단일 decimal "5000"
+        if re.match(r'^\d{1,5}$', raw) and 0 <= int(raw) <= 65535:
+            return int(raw)
+        # decimal 범위 "5004 - 5005"
+        m = _RANGE_ADDR_RE.match(raw)
+        if m:
+            return int(m.group(1))
+        return None
 
     # 1) col_map['addr'] 위치에서 시도
     addr_idx = col_map.get('addr')
     if addr_idx is not None and addr_idx < len(row):
         addr_raw = str(row[addr_idx]).strip() if row[addr_idx] else ''
-        if addr_raw.startswith('0x') or addr_raw.startswith('0X'):
-            addr = parse_address(addr_raw)
-        elif re.match(r'^\d{1,5}$', addr_raw) and 0 <= int(addr_raw) <= 65535:
-            addr = int(addr_raw)
+        addr = _try_parse_addr(addr_raw)
 
     # 2) 실패하면 0x 패턴이 있는 아무 셀에서 찾기
     if addr is None:
         for i, cell in enumerate(row):
             c = str(cell).strip() if cell else ''
-            if c.startswith('0x') or c.startswith('0X'):
-                addr = parse_address(c)
-                if addr is not None:
-                    addr_raw = c
-                    if 'addr' not in col_map:
-                        col_map['addr'] = i
-                    break
-            elif re.match(r'^\d{4,5}$', c) and 0 <= int(c) <= 65535:
-                addr = int(c)
+            parsed = _try_parse_addr(c)
+            if parsed is not None:
+                addr = parsed
                 addr_raw = c
                 if 'addr' not in col_map:
                     col_map['addr'] = i
@@ -378,7 +394,16 @@ def classify_register(reg: RegisterRow, synonym_db: dict,
     # 3) 키워드 기반 분류
     # INFO
     if any(k in defn_lower for k in ['model', 'serial', 'firmware', 'rated', 'nominal',
-                                      'version', '모델', '시리얼', '펌웨어', '정격']):
+                                      'version', '모델', '시리얼', '펌웨어', '정격',
+                                      'device type code', 'type code', 'output type',
+                                      'total running time', 'daily running time',
+                                      'internal temperature', 'inner temperature',
+                                      'apparent power', 'present country', 'country code',
+                                      'insulation resistance', 'bus voltage',
+                                      'total power yields', 'daily power yields',
+                                      'monthly power yields', 'total energy',
+                                      'daily energy', 'today energy',
+                                      'nominal reactive', 'nominal active']):
         return 'INFO'
 
     # STATUS
@@ -543,8 +568,65 @@ def run_stage1(
     if ext == '.pdf':
         pages = extract_pdf_text_and_tables(input_path)
         log(f'  PDF {len(pages)}페이지 추출')
+
+        # ── 3X(Read-Only) / 4X(Holding) 섹션 감지 ──
+        # 3X = Input Register (FC04, read-only, running information)
+        # 4X = Holding Register (FC03/06/10, R/W, parameter setting)
+        # 같은 레지스터 번호(5000+)를 사용하므로 섹션별로 분리 필요
+        #
+        # 전략: 페이지를 순회하며 "현재 섹션" 상태를 추적
+        # 3X 섹션 시작 마커를 만나면 → 이후 페이지는 3X
+        # 4X 섹션 시작 마커를 만나면 → 이후 페이지는 4X
+        # (단, 같은 페이지에 두 마커 모두 있으면 섹션 전환 시점)
+        _3X_START = [
+            'running information variable address',
+            'running information',
+        ]
+        _4X_START = [
+            'parameter setting address definition',
+            'parameter setting',
+        ]
+
+        # 1단계: 3X/4X 섹션 시작 페이지 감지
+        section_3x_start = None
+        section_4x_start = None
         for p in pages:
-            all_tables.extend(p['tables'])
+            page_text = p['text'].lower()
+            pnum = p['page']
+            if section_3x_start is None and any(m in page_text for m in _3X_START):
+                section_3x_start = pnum
+            if section_4x_start is None and any(m in page_text for m in _4X_START):
+                # 3X와 같은 페이지면 건너뛰기 (개요 페이지)
+                if pnum != section_3x_start:
+                    section_4x_start = pnum
+
+        tables_3x = []
+        tables_4x = []
+        tables_other = []
+
+        for p in pages:
+            pnum = p['page']
+            in_3x = (section_3x_start is not None and pnum >= section_3x_start and
+                     (section_4x_start is None or pnum < section_4x_start))
+            in_4x = (section_4x_start is not None and pnum >= section_4x_start)
+
+            for tab in p['tables']:
+                if in_4x:
+                    tables_4x.append(tab)
+                elif in_3x:
+                    tables_3x.append(tab)
+                else:
+                    tables_other.append(tab)
+
+        # 3X 우선: 3X 테이블 먼저, 그 다음 기타, 4X는 마지막
+        # extract_registers_from_tables의 seen_addrs에 의해
+        # 3X에서 먼저 추출된 주소는 4X에서 무시됨
+        all_tables = tables_3x + tables_other + tables_4x
+
+        log(f'  3X(Read-Only) 테이블: {len(tables_3x)}개 (page {section_3x_start}~), '
+            f'4X(Holding) 테이블: {len(tables_4x)}개 (page {section_4x_start}~), '
+            f'기타: {len(tables_other)}개')
+
     elif ext in ('.xlsx', '.xls'):
         sheets = extract_excel_sheets(input_path)
         log(f'  Excel {len(sheets)}시트 추출')
@@ -562,7 +644,10 @@ def run_stage1(
     if not registers:
         raise ValueError('레지스터를 찾지 못했습니다. PDF/Excel 형식을 확인해주세요.')
 
-    # ── Step 2.5: DER 고정 주소 제외 + synonym_db 이름 정규화 ──
+    # ── Step 2.5: 제조사 조기 감지 + DER 고정 주소 제외 + 이름 정규화 ──
+    manufacturer = basename.split('_')[0].split(' ')[0]
+    log(f'  제조사 (파일명 기반): {manufacturer}')
+
     # DER-AVM 레지스터는 고정 주소맵으로 삽입하므로 PDF 파싱 결과에서 제거
     DER_FIXED_ADDRS = set()
     for dr in DER_CONTROL_REGS:
@@ -578,24 +663,34 @@ def run_stage1(
     if der_removed:
         log(f'  DER 고정 주소 제외: {der_removed}개 (고정 주소맵으로 대체)')
 
-    # 레퍼런스 기반 enrichment (레퍼런스가 있을 때만)
+    # 레퍼런스 기반 enrichment (같은 제조사 레퍼런스만 사용)
     if ref_patterns:
-        enriched = 0
-        for reg in registers:
-            addr = reg.address if isinstance(reg.address, int) else parse_address(reg.address)
-            if addr is None:
-                continue
-            ref_name = get_ref_name_by_addr(addr, ref_patterns)
-            if ref_name:
-                original = reg.definition
-                reg.definition = ref_name
-                if reg.comment and original != ref_name:
-                    reg.comment = f'{original} | {reg.comment}'
-                elif original != ref_name:
-                    reg.comment = original
-                enriched += 1
-        if enriched:
-            log(f'  레퍼런스 enrichment: {enriched}/{len(registers)}개')
+        # 제조사명으로 해당 레퍼런스만 필터
+        mfr_lower = manufacturer.lower()
+        matched_ref = {k: v for k, v in ref_patterns.items() if mfr_lower in k.lower()}
+        if matched_ref:
+            enriched = 0
+            for reg in registers:
+                addr = reg.address if isinstance(reg.address, int) else parse_address(reg.address)
+                if addr is None:
+                    continue
+                ref_name = None
+                for proto, addr_map in matched_ref.items():
+                    if addr in addr_map:
+                        ref_name = addr_map[addr]
+                        break
+                if ref_name:
+                    original = reg.definition
+                    reg.definition = ref_name
+                    if reg.comment and original != ref_name:
+                        reg.comment = f'{original} | {reg.comment}'
+                    elif original != ref_name:
+                        reg.comment = original
+                    enriched += 1
+            if enriched:
+                log(f'  레퍼런스 enrichment: {enriched}/{len(registers)}개 ({list(matched_ref.keys())})')
+        else:
+            log(f'  레퍼런스 enrichment: 해당 제조사({manufacturer}) 레퍼런스 없음 — 스킵')
 
     # synonym_db 기반 이름 정규화 (레퍼런스 없어도 동작)
     # 단, 채널 번호가 있는 레지스터(MPPT1, STRING2 등)는 정규화하지 않음
