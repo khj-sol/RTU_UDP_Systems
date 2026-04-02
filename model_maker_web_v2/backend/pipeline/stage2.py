@@ -50,6 +50,13 @@ def read_stage1_excel_v2(excel_path: str) -> dict:
         'alarm': [], 'review': [], 'h01_match': [], 'iv_regs': [],
     }
 
+    # 구 형식 호환 (SUMMARY/META/INFO/MONITORING/... 개별 시트)
+    is_v2_format = '1_INFO' in wb.sheetnames
+    if not is_v2_format:
+        result = _read_stage1_legacy(wb)
+        wb.close()
+        return result
+
     # ── 1_INFO 시트: 메타 + INFO/STATUS/ALARM/REVIEW 섹션 파싱 ──
     if '1_INFO' in wb.sheetnames:
         ws = wb['1_INFO']
@@ -166,6 +173,64 @@ def read_stage1_excel_v2(excel_path: str) -> dict:
                     ))
 
     wb.close()
+    return result
+
+
+def _read_stage1_legacy(wb) -> dict:
+    """구 형식 Stage 1 Excel (개별 카테고리 시트) 읽기"""
+    result = {
+        'meta': {}, 'info': [], 'monitoring': [], 'status': [],
+        'alarm': [], 'review': [], 'h01_match': [], 'iv_regs': [],
+    }
+
+    # META 시트
+    if 'META' in wb.sheetnames:
+        ws = wb['META']
+        for row in ws.iter_rows(values_only=True):
+            if row[0] and row[1]:
+                result['meta'][str(row[0]).strip()] = str(row[1]).strip()
+
+    # 카테고리 시트 파싱
+    cat_map = {
+        'INFO': 'info', 'MONITORING': 'monitoring', 'STATUS': 'status',
+        'ALARM': 'alarm', 'REVIEW': 'review', 'IV_SCAN': 'iv_regs',
+    }
+    for sheet_name, key in cat_map.items():
+        if sheet_name not in wb.sheetnames:
+            continue
+        ws = wb[sheet_name]
+        header = None
+        for row in ws.iter_rows(values_only=True):
+            cells = [str(c).strip() if c is not None else '' for c in row]
+            if not header:
+                if cells[0] in ('No', 'No.'):
+                    header = cells
+                continue
+            if not cells[0]:
+                continue
+            reg = _parse_section_row(cells, header, sheet_name)
+            if reg:
+                result[key].append(reg)
+
+    # H01_MATCH 시트 (있으면)
+    if 'H01_MATCH' in wb.sheetnames:
+        ws = wb['H01_MATCH']
+        header = None
+        for row in ws.iter_rows(values_only=True):
+            cells = [str(c).strip() if c is not None else '' for c in row]
+            if not header:
+                if cells[0] in ('No', 'No.'):
+                    header = cells
+                continue
+            if cells[0] and cells[0].isdigit():
+                result['h01_match'].append({
+                    'field': cells[1], 'source': cells[2] if len(cells) > 2 else '',
+                    'status': cells[3] if len(cells) > 3 else '',
+                    'address': cells[4] if len(cells) > 4 else '',
+                    'definition': cells[5] if len(cells) > 5 else '',
+                    'note': cells[6] if len(cells) > 6 else '',
+                })
+
     return result
 
 
