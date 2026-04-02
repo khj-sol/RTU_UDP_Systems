@@ -921,7 +921,10 @@ def assign_h01_field(reg: RegisterRow, synonym_db: dict,
             return 'cumulative_energy_low'
         # cumulative_energy HIGH (정수부)
         if any(k in defn_lower for k in ['total energy', 'cumulative energy', 'total power yields',
+                                          'total poweryields',
                                           'total energy yield', 'energy yield',
+                                          'lifetime energy', 'energy produced',
+                                          'ac energy', 'ac_energy',
                                           '누적발전량', '누적 발전량',
                                           'total generation energy',
                                           'high byte of total feed', 'high byte oftotal feed']):
@@ -942,10 +945,16 @@ def assign_h01_field(reg: RegisterRow, synonym_db: dict,
 
     # V2: STATUS 카테고리 — inverter_status 매핑
     if category == 'STATUS':
+        defn_nospace_s = defn_lower.replace(' ', '')
         if any(k in defn_lower for k in ['inverter mode', 'work mode', 'work state',
-                                          'operating mode', 'running status', 'run mode',
+                                          'operating mode', 'operation state',
+                                          'running status', 'run mode',
+                                          'inverter state', 'inverter status',
+                                          'i status',
                                           '인버터 모드', '시스템동작상태', '동작상태',
-                                          'device status', 'system status']):
+                                          'device status', 'system status']) or \
+           any(k in defn_nospace_s for k in ['workmode', 'invworkmode', 'runningmode']) or \
+           defn_lower.strip() in ('state', 'running'):
             return 'inverter_status'
         return ''
 
@@ -972,6 +981,7 @@ def assign_h01_field(reg: RegisterRow, synonym_db: dict,
                                       'input power', 'output power',
                                       'inverter current output',
                                       'totaldc input', 'totaldcinput',
+                                      'i dc power', 'i_dc_power',
                                       '태양전지 전력', '태양전지전력']) or \
        re.search(r'\bpac\b', defn_lower):
         return 'pv_power'
@@ -989,15 +999,17 @@ def assign_h01_field(reg: RegisterRow, synonym_db: dict,
         return 'cumulative_energy'
     # cumulative_energy HIGH (정수부)
     if any(k in defn_lower for k in ['total energy', 'cumulative energy', 'total power yields',
+                                      'total poweryields',
                                       'lifetime energy', 'accumulated energy',
                                       'total power generation', 'total powergeneration',
                                       'total energy yield', 'energy yield',
+                                      'energy produced', 'ac energy', 'ac_energy',
                                       '누적발전량', '누적 발전량',
                                       'total generation energy',
                                       'high byte of total feed', 'high byte oftotal feed']) or \
        any(k in defn_nospace for k in ['accumulatedpower', 'accumulatedenergy',
                                         'totalpowergeneration', 'totalgenerationenergy',
-                                        'totalenergyyield']):
+                                        'totalenergyyield', 'totalpoweryields']):
         return 'cumulative_energy'
     if any(k in defn_lower for k in ['daily energy', 'today energy', 'daily power yields',
                                       'daily generation', '일발전량', '일 발전량',
@@ -1239,8 +1251,10 @@ def build_h01_match_table(categorized: dict, meta: dict) -> List[dict]:
         for sr in categorized['STATUS']:
             dl = sr.definition.lower().replace('_', ' ')
             if any(k in dl for k in ['inverter mode', 'work mode', 'work state',
-                                      'operating mode', 'running status',
-                                      '시스템동작상태', '동작상태']):
+                                      'operating mode', 'operation state',
+                                      'running status', 'inverter state',
+                                      '시스템동작상태', '동작상태']) or \
+               dl.strip() == 'state':
                 status_reg = sr
                 break
     # 상태 정의(값 테이블) 검증 — 통상 Appendix에 별도 정의

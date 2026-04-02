@@ -110,16 +110,18 @@ def _alarm_score(reg: RegisterRow) -> int:
     # Sungrow Appendix: 주소 0~600 범위의 fault code 값
     if 0 < addr < 2000 and not any(k in defn_lower for k in [
             'error_code', 'error code', 'error message',
-            'fault code', 'fault/alarm code', 'alarm code',
+            'fault code', 'faultcode', 'fault/alarm code', 'alarm code',
             'fault status', 'hw fault', 'sw fault',
             'dsp alarm', 'dsp error', 'arm alarm',
-            'warning code']):
+            'warning code', 'warningcode',
+            'ground fault', 'leak fault', 'oth fault',
+            'internal error', 'arc fault']):
         return 99
     # Work State 값 테이블 항목 (레지스터가 아닌 상태 값)
     if any(k in defn_lower for k in ['communicate fault', 'alarm run', 'derating run',
                                       'dispatch run', 'initial standby', 'key stop',
                                       'emergency stop']) or \
-       (defn_lower.strip() in ('fault', 'stop', 'run', 'standby')):
+       (defn_lower.strip() in ('fault', 'stop', 'run', 'standby') and addr < 2000):
         return 99
     # Fault/Alarm time — 시간 정보, 알람 레지스터 아님
     if any(k in defn_lower for k in ['fault/alarm time', 'alarm time', 'fault time']):
@@ -127,10 +129,10 @@ def _alarm_score(reg: RegisterRow) -> int:
 
     # ── 우선순위 ──
     # 0: 명확한 에러/폴트 코드 (정의 테이블 있음)
-    if any(k in defn_lower for k in ['error_code', 'error code', 'fault code',
+    if any(k in defn_lower for k in ['error_code', 'error code', 'fault code', 'faultcode',
                                       'fault/alarm code', 'alarm code',
                                       'sw fault', 'dsp error', 'dsp alarm',
-                                      'error message']):
+                                      'error message', 'warningcode', 'warning code']):
         return 0
     # 1: HW Fault / PID / 번호 붙은 Alarm (Alarm 1, Alarm 2 — Huawei)
     if any(k in defn_lower for k in ['hw fault', 'hardware fault']):

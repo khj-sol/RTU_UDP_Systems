@@ -283,6 +283,10 @@ PV_CURRENT_RE = re.compile(r'PV[_\s]*(\d+)[_\s]*(?:INPUT[_\s]*)?CURRENT', re.I)
 PV_STRING_CURRENT_RE = re.compile(r'PV(\d+)\s+String\s+current\s+(\d+)', re.I)
 # Goodwe: Istr{n}/PV String{n} Current
 ISTR_CURRENT_RE = re.compile(r'Istr(\d+)', re.I)
+# CPS: "MPPT zone 1", "DC voltage, MPPT zone 2"
+MPPT_ZONE_RE = re.compile(r'MPPT\s+zone\s+(\d+)', re.I)
+# CPS: "DC2 voltage", "DC2 current" (DC{n} = MPPT {n})
+DC_N_VOLTAGE_RE = re.compile(r'\bDC(\d+)\s*(?:voltage|current)', re.I)
 
 
 def detect_channel_number(definition: str) -> Optional[tuple]:
@@ -311,6 +315,16 @@ def detect_channel_number(definition: str) -> Optional[tuple]:
     m = ISTR_CURRENT_RE.search(definition)
     if m:
         return ('STRING', int(m.group(1)))
+
+    # CPS: "MPPT zone N" — voltage/current는 컨텍스트에서 판별
+    m = MPPT_ZONE_RE.search(definition)
+    if m:
+        return ('MPPT', int(m.group(1)))
+
+    # CPS: "DC2 voltage/current" (DC{n} = MPPT n)
+    m = DC_N_VOLTAGE_RE.search(definition)
+    if m:
+        return ('MPPT', int(m.group(1)))
 
     for pat, prefix in [(MPPT_VOLTAGE_RE, 'MPPT'), (MPPT_CURRENT_RE, 'MPPT'),
                          (MPPT_POWER_RE, 'MPPT'), (PV_VOLTAGE_RE, 'MPPT'),
