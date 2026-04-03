@@ -93,8 +93,8 @@ from common.solarize_registers import (
     generate_iv_voltage_data, generate_iv_current_data,
     get_iv_tracker_voltage_registers, get_iv_string_current_registers
 )
-from common.relay_registers import KDU300RegisterMap, float_to_registers
-from common.weather_registers import (
+from common.REF_relay_registers import KDU300RegisterMap, float_to_registers
+from common.REF_weather_registers import (
     SEM5046RegisterMap,
     air_temp_to_raw, humidity_to_raw, pressure_to_raw,
     wind_speed_to_raw, wind_direction_to_raw, module_temp_to_raw,

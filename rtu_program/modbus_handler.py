@@ -147,8 +147,8 @@ from common.huawei_registers import (
     registers_to_s32 as huawei_registers_to_s32,
     s16 as huawei_s16,
 )
-from common.relay_registers import KDU300RegisterMap, registers_to_float, H01_RELAY_FIELD_MAP
-from common.weather_registers import (
+from common.REF_relay_registers import KDU300RegisterMap, registers_to_float, H01_RELAY_FIELD_MAP
+from common.REF_weather_registers import (
     SEM5046RegisterMap,
     raw_to_air_temp, raw_to_humidity, raw_to_pressure,
     raw_to_wind_speed, raw_to_wind_direction, raw_to_module_temp,
