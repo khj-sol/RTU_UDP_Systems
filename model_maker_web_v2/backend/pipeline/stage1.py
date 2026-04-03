@@ -1249,6 +1249,7 @@ def assign_h01_field(reg: RegisterRow, synonym_db: dict,
                                           'running status', 'run mode',
                                           'inverter state', 'inverter status',
                                           'inverter current', 'i status',
+                                          'global state',
                                           '인버터 모드', '시스템동작상태', '동작상태',
                                           'device status', 'system status']) or \
            any(k in defn_nospace_s for k in ['workmode', 'invworkmode', 'runningmode',
@@ -1587,6 +1588,7 @@ def build_h01_match_table(categorized: dict, meta: dict) -> List[dict]:
             if any(k in dl for k in ['inverter mode', 'work mode', 'work state',
                                       'operating mode', 'operation state',
                                       'running status', 'inverter state',
+                                      'global state',
                                       '시스템동작상태', '동작상태']) or \
                dl.strip() == 'state':
                 status_reg = sr
