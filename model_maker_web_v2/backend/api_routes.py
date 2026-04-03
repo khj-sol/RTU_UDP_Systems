@@ -15,10 +15,70 @@ from .ws_manager import ws_manager
 
 router = APIRouter()
 
+import hashlib
+import threading
+
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 COMMON_DIR = os.path.join(PROJECT_ROOT, 'common')
 RESULTS_DIR = os.path.join(os.path.dirname(__file__), '..', 'results')
 DEFINITIONS_DIR = os.path.join(os.path.dirname(__file__), 'pipeline', 'definitions')
+SUCCESS_INDEX_PATH = os.path.join(RESULTS_DIR, '_success_index.json')
+_success_index_lock = threading.Lock()
+
+
+def _load_success_index() -> dict:
+    try:
+        with open(SUCCESS_INDEX_PATH, encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _save_success_index(index: dict):
+    os.makedirs(RESULTS_DIR, exist_ok=True)
+    with open(SUCCESS_INDEX_PATH, 'w', encoding='utf-8') as f:
+        json.dump(index, f, ensure_ascii=False, indent=2)
+
+
+def _pdf_sha256(path: str) -> str:
+    h = hashlib.sha256()
+    with open(path, 'rb') as f:
+        for chunk in iter(lambda: f.read(65536), b''):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _record_success(pdf_path: str, manufacturer: str, h01_match: dict,
+                    der_match: dict, info_match: dict, meta: dict):
+    """H01+DER 완전 매칭 시 성공 인덱스에 기록"""
+    try:
+        sha = _pdf_sha256(pdf_path)
+        record = {
+            'manufacturer': manufacturer,
+            'pdf_filename': os.path.basename(pdf_path),
+            'h01': [h01_match.get('matched', 0), h01_match.get('total', 0)],
+            'der': [der_match.get('matched', 0), der_match.get('total', 0)],
+            'info_match': info_match,
+            'max_mppt': meta.get('max_mppt', 0),
+            'max_string': meta.get('max_string', 0),
+            'date': __import__('datetime').date.today().isoformat(),
+        }
+        with _success_index_lock:
+            index = _load_success_index()
+            index[sha] = record
+            _save_success_index(index)
+    except Exception:
+        pass
+
+
+def _check_success(pdf_path: str) -> dict | None:
+    """PDF 해시로 기존 성공 기록 조회. 없으면 None."""
+    try:
+        sha = _pdf_sha256(pdf_path)
+        with _success_index_lock:
+            return _load_success_index().get(sha)
+    except Exception:
+        return None
 
 
 def _save_to_results(manufacturer: str, src_path: str, label: str) -> str:
@@ -149,6 +209,26 @@ async def stage1_run(body: dict):
     async def _run():
         try:
             from .pipeline.stage1 import run_stage1, NotRegisterMapError
+
+            # ── 성공 인덱스 조회 (PDF 해시 기반) ──
+            cached = await _run_in_thread(_check_success, uploaded)
+            if cached:
+                h01c, der_c = cached['h01'], cached['der']
+                await ws_manager.send_json(sid, {
+                    'event': 'already_verified',
+                    'stage': 's1',
+                    'manufacturer': cached['manufacturer'],
+                    'pdf_filename': cached['pdf_filename'],
+                    'h01_matched': h01c[0], 'h01_total': h01c[1],
+                    'der_matched': der_c[0], 'der_total': der_c[1],
+                    'info_match': cached.get('info_match', {}),
+                    'max_mppt': cached.get('max_mppt', 0),
+                    'max_string': cached.get('max_string', 0),
+                    'date': cached.get('date', ''),
+                })
+                # 성공 기록이 있어도 Stage 1을 계속 실행하여 Excel 생성
+                # (다운로드/Stage2 진행 가능하도록)
+
             progress = _make_progress_callback(sid, 's1', asyncio.get_running_loop())
             result = await _run_in_thread(
                 run_stage1, uploaded, work_dir, device_type, progress)
@@ -169,6 +249,16 @@ async def stage1_run(body: dict):
                 _save_to_results(mfr, result['output_path'], 'stage1')
                 _copy_definitions_to_results(mfr)
                 _copy_source_to_results(mfr, uploaded)
+
+            # Stage 1에서 H01+DER 완전 매칭이면 성공 기록
+            h01m = result.get('h01_match', {})
+            derm = result.get('der_match', {})
+            if (h01m.get('matched') == h01m.get('total') and h01m.get('total', 0) > 0
+                    and derm.get('matched') == derm.get('total') and derm.get('total', 0) > 0
+                    and not cached):
+                await _run_in_thread(
+                    _record_success, uploaded, mfr, h01m, derm,
+                    result.get('info_match', {}), result['meta'])
 
             await ws_manager.send_json(sid, {
                 'event': 'stage1_done',
@@ -362,9 +452,24 @@ async def stage2_run(body: dict):
                                 stage2_excel=result['output_path'])
 
             # results/{제조사}/ 에 자동 저장
-            mfr = (SessionStore.get(sid) or {}).get('meta', {}).get('manufacturer', '')
+            sess = SessionStore.get(sid) or {}
+            mfr = sess.get('meta', {}).get('manufacturer', '')
             if mfr:
                 _save_to_results(mfr, result['output_path'], 'stage2')
+
+            # Stage 2에서 H01+DER 완전 매칭이면 성공 기록
+            h01_ok = result['h01_matched'] == result['h01_total'] and result['h01_total'] > 0
+            der_ok = result['der_matched'] == result['der_total'] and result['der_total'] > 0
+            if h01_ok and der_ok and mfr:
+                uploaded = sess.get('uploaded_file', '')
+                if uploaded and os.path.exists(uploaded):
+                    h01m = {'matched': result['h01_matched'], 'total': result['h01_total']}
+                    derm = {'matched': result['der_matched'], 'total': result['der_total']}
+                    meta = sess.get('meta', {})
+                    info_match = sess.get('suggestions', {}).get('_info_match',
+                                         {'model': False, 'sn': False})
+                    await _run_in_thread(
+                        _record_success, uploaded, mfr, h01m, derm, info_match, meta)
 
             await ws_manager.send_json(sid, {
                 'event': 'stage2_done',

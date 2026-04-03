@@ -350,6 +350,7 @@
     ws.onmessage = (e) => {
       const msg = JSON.parse(e.data);
       appendLog(msg.stage, msg.text, msg.level);
+      if (msg.event === 'already_verified') onAlreadyVerified(msg);
       if (msg.event === 'stage1_done') onStage1Done(msg);
       if (msg.event === 'stage2_done') onStage2Done(msg);
       if (msg.event === 'stage3_done') onStage3Done(msg);
@@ -505,6 +506,32 @@
     ].join(';');
     banner.innerHTML = `<strong>⚠️ 올바른 파일이 아닙니다</strong><br>${(msg.text||'').replace(/\n/g,'<br>')}`;
     const logEl = document.getElementById('log-s1');
+    logEl.insertBefore(banner, logEl.firstChild);
+  }
+
+  function onAlreadyVerified(msg) {
+    const logEl = document.getElementById('log-s1');
+    const banner = document.createElement('div');
+    banner.style.cssText = [
+      'background:#052e16','border:2px solid #4ade80','border-radius:8px',
+      'padding:14px 18px','margin:10px 0','color:#bbf7d0','font-size:14px',
+      'line-height:1.7',
+    ].join(';');
+    const h01ok = msg.h01_matched === msg.h01_total;
+    const derOk = msg.der_matched === msg.der_total;
+    const h01txt = h01ok
+      ? '<span style="color:#4ade80;font-weight:700">OK</span>'
+      : `<span style="color:#f87171">${msg.h01_matched}/${msg.h01_total}</span>`;
+    const dertxt = derOk
+      ? '<span style="color:#4ade80;font-weight:700">OK</span>'
+      : `<span style="color:#f87171">${msg.der_matched}/${msg.der_total}</span>`;
+    banner.innerHTML =
+      `<strong style="font-size:15px;color:#4ade80">✓ 이미 검증된 인버터</strong>
+       &nbsp;<span style="color:#86efac;font-size:12px">(${msg.date || ''})</span><br>
+       <span style="color:#d1fae5"><b>${msg.manufacturer}</b> — ${msg.pdf_filename}</span><br>
+       H01: ${h01txt} &nbsp;|&nbsp; DER: ${dertxt}
+       &nbsp;|&nbsp; MPPT: ${msg.max_mppt} &nbsp;String: ${msg.max_string}<br>
+       <span style="color:#86efac;font-size:12px">Stage 1 분석을 계속 진행합니다 (결과 확인 / Stage 2 진행 가능)</span>`;
     logEl.insertBefore(banner, logEl.firstChild);
   }
 
