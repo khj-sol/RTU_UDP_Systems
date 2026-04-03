@@ -107,7 +107,8 @@ async def stage1_run(body: dict):
             SessionStore.update(sid,
                                 stage=1,
                                 stage1_excel=result['output_path'],
-                                meta=result['meta'])
+                                meta=result['meta'],
+                                suggestions=result.get('suggestions', {}))
 
             await ws_manager.send_json(sid, {
                 'event': 'stage1_done',
@@ -118,6 +119,7 @@ async def stage1_run(body: dict):
                 'review_count': result['review_count'],
                 'iv_scan': result['meta'].get('iv_scan', False),
                 'iv_data_points': result['meta'].get('iv_data_points', 0),
+                'suggestions': result.get('suggestions', {}),
             })
         except Exception as e:
             await ws_manager.send_json(sid, {
@@ -129,6 +131,81 @@ async def stage1_run(body: dict):
 
     asyncio.ensure_future(_run())
     return {'status': 'running', 'session_id': sid}
+
+
+@router.post('/stage1/apply-suggestion')
+async def apply_suggestion(body: dict):
+    """
+    Stage 1 suggestion 적용 → synonym_db에 등록 → Stage 1 재실행
+    body: {session_id, field, definition, addr, rerun}
+    """
+    sid = body.get('session_id')
+    s = SessionStore.get(sid)
+    if not s:
+        raise HTTPException(404, 'session not found')
+
+    field = body.get('field', '')
+    definition = body.get('definition', '')
+    addr = body.get('addr', '')
+    rerun = body.get('rerun', True)
+
+    # synonym_db에 (definition → field) 매핑 추가
+    if field and definition:
+        from .pipeline import load_synonym_db, save_synonym_db
+        db = load_synonym_db()
+        fields = db.setdefault('fields', {})
+        synonyms = fields.setdefault(field, [])
+        key = definition.upper().replace(' ', '_')
+        if key not in synonyms:
+            synonyms.append(key)
+            save_synonym_db(db)
+
+    if not rerun:
+        return {'status': 'ok', 'field': field, 'added': definition}
+
+    # Stage 1 재실행
+    uploaded = s.get('uploaded_file')
+    device_type = s.get('meta', {}).get('device_type', 'inverter')
+    if not uploaded or not os.path.exists(uploaded):
+        raise HTTPException(400, 'no file uploaded')
+
+    work_dir = SessionStore.get_work_dir(sid)
+
+    async def _rerun():
+        try:
+            from .pipeline.stage1 import run_stage1
+            loop = asyncio.get_running_loop()
+            progress = _make_progress_callback(sid, 's1', loop)
+            progress(f'[제안 적용] {field} → {definition}', 'info')
+            result = await _run_in_thread(run_stage1, uploaded, work_dir, device_type, progress)
+
+            SessionStore.update(sid,
+                                stage=1,
+                                stage1_excel=result['output_path'],
+                                meta=result['meta'],
+                                suggestions=result.get('suggestions', {}))
+
+            await ws_manager.send_json(sid, {
+                'event': 'stage1_done',
+                'stage': 's1',
+                'text': f'Stage 1 재실행 완료: {result["output_name"]}',
+                'level': 'ok',
+                'counts': result['counts'],
+                'review_count': result['review_count'],
+                'iv_scan': result['meta'].get('iv_scan', False),
+                'iv_data_points': result['meta'].get('iv_data_points', 0),
+                'suggestions': result.get('suggestions', {}),
+            })
+        except Exception as e:
+            await ws_manager.send_json(sid, {
+                'stage': 's1',
+                'text': f'재실행 오류: {str(e)}',
+                'level': 'err',
+            })
+            import traceback; traceback.print_exc()
+
+    asyncio.ensure_future(_rerun())
+    return {'status': 'rerunning', 'session_id': sid}
 
 
 # ─── Stage 2 ─────────────────────────────────────────────────────────────────

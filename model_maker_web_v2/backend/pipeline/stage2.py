@@ -122,45 +122,56 @@ def read_stage1_excel_v2(excel_path: str) -> dict:
                     elif current_section == 'REVIEW':
                         result['review'].append(reg)
 
-    # ── 2_H01 시트: H01 매칭 테이블 + MONITORING 목록 ──
+    # ── 2_H01 시트: H01 매칭 테이블만 (MONITORING은 3_MPPT_STRING에) ──
     if '2_H01' in wb.sheetnames:
         ws = wb['2_H01']
-        current_section = 'H01_TABLE'
         header = None
-
         for row in ws.iter_rows(values_only=True):
             cells = [str(c).strip() if c is not None else '' for c in row]
             first = cells[0] if cells else ''
-
-            if first.startswith('H01 모니터링'):
+            if first.startswith('H01') or (first and not first.isdigit() and first != 'No'):
+                if first == 'No':
+                    header = cells
                 continue
+            if first == 'No':
+                header = cells
+                continue
+            if header and first.isdigit():
+                result['h01_match'].append({
+                    'field': cells[1], 'source': cells[2] if len(cells) > 2 else '',
+                    'status': cells[3] if len(cells) > 3 else '',
+                    'address': cells[4] if len(cells) > 4 else '',
+                    'definition': cells[5] if len(cells) > 5 else '',
+                    'note': cells[9] if len(cells) > 9 else '',
+                })
+
+    # ── 3_MPPT_STRING 시트: MONITORING 전체 목록 ──
+    ms_sheet = '3_MPPT_STRING'
+    if ms_sheet in wb.sheetnames:
+        ws = wb[ms_sheet]
+        current_section = 'META'
+        header = None
+        for row in ws.iter_rows(values_only=True):
+            cells = [str(c).strip() if c is not None else '' for c in row]
+            first = cells[0] if cells else ''
             if 'MONITORING 전체' in first:
                 current_section = 'MONITORING'
                 header = None
                 continue
+            if current_section != 'MONITORING':
+                continue
+            if first == 'No':
+                header = cells
+                continue
+            if header and first.isdigit():
+                reg = _parse_section_row(cells, header, 'MONITORING')
+                if reg:
+                    result['monitoring'].append(reg)
 
-            if current_section == 'H01_TABLE':
-                if first == 'No':
-                    header = cells
-                    continue
-                if header and first.isdigit():
-                    result['h01_match'].append({
-                        'field': cells[1], 'source': cells[2],
-                        'status': cells[3], 'address': cells[4],
-                        'definition': cells[5], 'note': cells[6] if len(cells) > 6 else '',
-                    })
-            elif current_section == 'MONITORING':
-                if first == 'No':
-                    header = cells
-                    continue
-                if header and first.isdigit():
-                    reg = _parse_section_row(cells, header, 'MONITORING')
-                    if reg:
-                        result['monitoring'].append(reg)
-
-    # ── 4_IV 시트: IV 레지스터 ──
-    if '4_IV' in wb.sheetnames:
-        ws = wb['4_IV']
+    # ── 5_IV 시트: IV 레지스터 (backward compat: 4_IV도 지원) ──
+    iv_sheet = '5_IV' if '5_IV' in wb.sheetnames else ('4_IV' if '4_IV' in wb.sheetnames else None)
+    if iv_sheet:
+        ws = wb[iv_sheet]
         for row in ws.iter_rows(min_row=2, values_only=True):
             cells = [str(c).strip() if c is not None else '' for c in row]
             if cells[0] and cells[0].isdigit() and len(cells) >= 4:

@@ -2245,35 +2245,97 @@ def run_stage1(
             elif rd['source'] == 'HANDLER':
                 cell.fill = PatternFill('solid', fgColor='FCE5CD')
 
-    # MONITORING 전체 목록
-    mon_start = 3 + len(h01_match_table) + 3
-    ws_h01.cell(row=mon_start, column=1,
-                value=f'MONITORING 전체 ({len(categorized.get("MONITORING", []))}개)').font = section_font
-    mon_cols = ['No', 'Definition', 'Address', 'FC', 'Type', 'Unit/Scale', 'R/W', 'H01 Field']
-    _write_header(ws_h01, mon_cols, mon_start + 1)
+    ws_h01.column_dimensions['B'].width = 25
+    ws_h01.column_dimensions['E'].width = 20
+    ws_h01.column_dimensions['F'].width = 40
+    ws_h01.column_dimensions['J'].width = 40
 
+    # ═══════════════════════════════════════════════════════════════════
+    # Sheet 3: MPPT_STRING — MPPT/String 채널 매칭 + MONITORING 전체
+    # ═══════════════════════════════════════════════════════════════════
+    ws_ms = wb.create_sheet('3_MPPT_STRING')
+    ws_ms['A1'] = f'MPPT & String 매칭 — MPPT {meta.get("max_mppt", 0)}ch / String {meta.get("max_string", 0)}ch'
+    ws_ms['A1'].font = title_font
+
+    # 메타
+    ms_meta = [
+        ('MPPT 채널 수', meta.get('max_mppt', 0)),
+        ('String 채널 수', meta.get('max_string', 0)),
+        ('String 모니터링', 'Yes' if meta.get('string_monitoring') else 'No (MPPT당 1 String)'),
+    ]
+    for i, (k, v) in enumerate(ms_meta, start=3):
+        ws_ms.cell(row=i, column=1, value=k).font = Font(bold=True)
+        ws_ms.cell(row=i, column=2, value=str(v))
+
+    # MPPT 채널 H01 매칭 섹션
+    mppt_rows = [r for r in h01_match_table
+                 if re.match(r'mppt\d+_(voltage|current|power)', r['field'])]
+    mppt_sec = len(ms_meta) + 5
+    ws_ms.cell(row=mppt_sec, column=1,
+               value=f'MPPT 채널 H01 매칭 ({len(mppt_rows)}개)').font = section_font
+    ms_cols = ['No', 'H01 Field', 'Source', 'Status', 'Address', 'Definition', 'Type', 'Unit', 'Scale', 'Note']
+    _write_header(ws_ms, ms_cols, mppt_sec + 1)
+    for i, rd in enumerate(mppt_rows, start=1):
+        sc = MATCH_COLORS.get(rd['status'], 'FFFFFF')
+        vals = [i, rd['field'], rd['source'], rd['status'],
+                rd['address'], rd['definition'],
+                rd.get('type', ''), rd.get('unit', ''), rd.get('scale', ''), rd.get('note', '')]
+        for j, val in enumerate(vals, start=1):
+            cell = ws_ms.cell(row=mppt_sec + 1 + i, column=j, value=val)
+            cell.border = thin_border
+            if j == 4:
+                cell.fill = PatternFill('solid', fgColor=sc)
+            elif rd['source'] == 'HANDLER':
+                cell.fill = PatternFill('solid', fgColor='FCE5CD')
+
+    # String 채널 H01 매칭 섹션
+    str_rows = [r for r in h01_match_table
+                if re.match(r'string\d+_current', r['field'])]
+    str_sec = mppt_sec + len(mppt_rows) + 4
+    ws_ms.cell(row=str_sec, column=1,
+               value=f'String 채널 H01 매칭 ({len(str_rows)}개)').font = section_font
+    _write_header(ws_ms, ms_cols, str_sec + 1)
+    for i, rd in enumerate(str_rows, start=1):
+        sc = MATCH_COLORS.get(rd['status'], 'FFFFFF')
+        vals = [i, rd['field'], rd['source'], rd['status'],
+                rd['address'], rd['definition'],
+                rd.get('type', ''), rd.get('unit', ''), rd.get('scale', ''), rd.get('note', '')]
+        for j, val in enumerate(vals, start=1):
+            cell = ws_ms.cell(row=str_sec + 1 + i, column=j, value=val)
+            cell.border = thin_border
+            if j == 4:
+                cell.fill = PatternFill('solid', fgColor=sc)
+            elif rd['source'] == 'HANDLER':
+                cell.fill = PatternFill('solid', fgColor='FCE5CD')
+
+    # MONITORING 전체 목록 (Stage 2 입력용)
     mon_regs = sorted(categorized.get('MONITORING', []),
                       key=lambda r: (r.address if isinstance(r.address, int) else 0))
+    mon_sec = str_sec + len(str_rows) + 4
+    ws_ms.cell(row=mon_sec, column=1,
+               value=f'MONITORING 전체 ({len(mon_regs)}개)').font = section_font
+    mon_cols = ['No', 'Definition', 'Address', 'FC', 'Type', 'Unit/Scale', 'R/W', 'H01 Field']
+    _write_header(ws_ms, mon_cols, mon_sec + 1)
     for i, reg in enumerate(mon_regs, start=1):
         su = f'{reg.unit} {reg.scale}'.strip() if reg.unit or reg.scale else ''
         vals = [i, reg.definition, reg.address_hex, reg.fc or '', reg.data_type, su,
                 reg.rw, reg.h01_field or '']
         for j, val in enumerate(vals, start=1):
-            cell = ws_h01.cell(row=mon_start + 1 + i, column=j, value=val)
+            cell = ws_ms.cell(row=mon_sec + 1 + i, column=j, value=val)
             cell.border = thin_border
             cell.fill = PatternFill('solid', fgColor=CATEGORY_COLORS['MONITORING'])
 
-    ws_h01.column_dimensions['B'].width = 25
-    ws_h01.column_dimensions['E'].width = 20
-    ws_h01.column_dimensions['F'].width = 40
-    ws_h01.column_dimensions['G'].width = 40
+    ws_ms.column_dimensions['B'].width = 25
+    ws_ms.column_dimensions['E'].width = 20
+    ws_ms.column_dimensions['F'].width = 40
+    ws_ms.column_dimensions['J'].width = 40
 
     # ═══════════════════════════════════════════════════════════════════
-    # Sheet 3: DER — DER-AVM 매칭
+    # Sheet 4: DER — DER-AVM 매칭
     # ═══════════════════════════════════════════════════════════════════
     if device_type == 'inverter':
-        ws_der = wb.create_sheet('3_DER')
-        ws_der['A1'] = f'DER-AVM 매칭 — {der_matched}/{der_total}'
+        ws_der = wb.create_sheet('4_DER')
+        ws_der['A1'] = f'DER-AVM 매칭 — {der_matched}/{der_total} (Sheet 4)'
         ws_der['A1'].font = title_font
 
         der_cols = ['No', 'Field', 'Type', 'Status', 'Address', 'Scale', 'R/W', 'Description']
@@ -2297,10 +2359,10 @@ def run_stage1(
         ws_der.column_dimensions['H'].width = 45
 
     # ═══════════════════════════════════════════════════════════════════
-    # Sheet 4: IV — IV 스캔 매핑 (지원 시)
+    # Sheet 5: IV — IV 스캔 매핑 (지원 시)
     # ═══════════════════════════════════════════════════════════════════
     if meta['iv_scan'] and iv_info.get('supported'):
-        ws_iv = wb.create_sheet('4_IV')
+        ws_iv = wb.create_sheet('5_IV')
         ws_iv['A1'] = f'IV Scan 매핑 — data_points={iv_info["data_points"]}'
         ws_iv['A1'].font = title_font
 
@@ -2375,7 +2437,7 @@ def run_stage1(
     wb.save(output_path)
     wb.close()
 
-    sheet_count = 3 + (1 if meta['iv_scan'] and iv_info.get('supported') else 0)
+    sheet_count = 4 + (1 if meta['iv_scan'] and iv_info.get('supported') else 0)
     log(f'Stage 1 완료: {output_name} ({sheet_count}시트)', 'ok')
 
     return {

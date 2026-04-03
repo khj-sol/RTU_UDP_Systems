@@ -144,6 +144,50 @@
     .review-verdict select {
       width: auto; padding: 3px 6px; font-size: 11px;
     }
+
+    .suggest-section {
+      margin-top: 12px;
+      padding: 10px;
+      background: #0d1117;
+      border: 1px solid #7eb8f7;
+      border-radius: 6px;
+      font-size: 12px;
+    }
+    .suggest-section h4 { color: #7eb8f7; margin-bottom: 8px; font-size: 12px; }
+    .suggest-group {
+      margin-bottom: 10px;
+      padding: 8px;
+      background: #12151f;
+      border-radius: 4px;
+      border: 1px solid #2e3248;
+    }
+    .suggest-group-title {
+      font-size: 11px; font-weight: 700; color: #fbbf24;
+      margin-bottom: 6px;
+    }
+    .suggest-cand {
+      display: flex; align-items: center; gap: 6px;
+      padding: 3px 0; border-bottom: 1px solid #1e2235;
+      font-size: 11px;
+    }
+    .suggest-cand:last-child { border-bottom: none; }
+    .suggest-cand input[type=radio] { cursor: pointer; }
+    .suggest-cand .cand-addr { color: #64b5f6; min-width: 70px; }
+    .suggest-cand .cand-def { flex: 1; color: #e0e0e0; }
+    .suggest-cand .cand-reason { color: #9ca3af; font-size: 10px; }
+    .suggest-apply-btn {
+      margin-top: 6px; padding: 4px 12px;
+      background: #1d4ed8; color: white;
+      border: none; border-radius: 4px;
+      font-size: 11px; cursor: pointer;
+    }
+    .suggest-apply-btn:hover { background: #2563eb; }
+    .suggest-skip-btn {
+      margin-top: 6px; margin-left: 6px; padding: 4px 10px;
+      background: #374151; color: #9ca3af;
+      border: none; border-radius: 4px;
+      font-size: 11px; cursor: pointer;
+    }
   </style>
 </head>
 <body>
@@ -175,6 +219,12 @@
       </select>
       <button class="run-btn" id="btn-s1" disabled onclick="runStage1()">Stage 1 실행</button>
       <div class="log-box" id="log-s1"><span style="color:#4b5563">-- 대기 중 --</span></div>
+      <div id="suggest-area" style="display:none">
+        <div class="suggest-section">
+          <h4>💡 후보 제안 — 선택 후 적용하면 Stage 1 재실행</h4>
+          <div id="suggest-groups"></div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -332,11 +382,20 @@
   }
 
   // ─── 이벤트 핸들러 ─────────────────────────────────────────────
+  const _SUGGEST_LABELS = {
+    'info_model':          'INFO: Model 레지스터 미발견',
+    'info_sn':             'INFO: SN 레지스터 미발견',
+    'cumulative_energy':   'H01: cumulative_energy (누적발전량) X',
+    'status':              'H01: status (인버터 상태) X',
+    'alarm1':              'H01: alarm1 (알람 코드) X',
+    'pv_power':            'H01: pv_power (DC 전력) X',
+    'status_definitions':  'STATUS 값 정의 테이블 없음',
+    'alarm_definitions':   'ALARM 값 정의 테이블 없음',
+    'mppt_detection':      'MPPT 채널 감지 실패 (MPPT=0)',
+    'iv_scan':             'IV Scan 레지스터 미발견',
+  };
+
   function onStage1Done(msg) {
-    document.getElementById('card-s1').className = 'stage-card done';
-    document.getElementById('card-s2').className = 'stage-card active';
-    document.getElementById('btn-s2').disabled = false;
-    // IV 미지원 시 data points를 0으로
     const ivField = document.getElementById('s2-iv-points');
     if (!msg.iv_scan) {
       ivField.value = '0';
@@ -346,6 +405,129 @@
     appendLog('s1', `카테고리: ${Object.entries(msg.counts||{}).filter(([k,v])=>v>0).map(([k,v])=>`${k}:${v}`).join(' ')}`, 'ok');
     if (msg.review_count > 0) {
       appendLog('s1', `REVIEW ${msg.review_count}개 — Stage 2에서 확인`, 'warn');
+    }
+
+    // 제안 표시
+    const sugg = msg.suggestions || {};
+    const keys = Object.keys(sugg);
+    if (keys.length > 0) {
+      appendLog('s1', `후보 제안 ${keys.length}개 항목`, 'warn');
+      showSuggestions(sugg);
+    } else {
+      document.getElementById('suggest-area').style.display = 'none';
+      // suggestions 없으면 바로 Stage 2 활성화
+      document.getElementById('card-s1').className = 'stage-card done';
+      document.getElementById('card-s2').className = 'stage-card active';
+      document.getElementById('btn-s2').disabled = false;
+    }
+  }
+
+  function showSuggestions(sugg) {
+    const area = document.getElementById('suggest-area');
+    const groups = document.getElementById('suggest-groups');
+    groups.innerHTML = '';
+
+    const actionable = {};  // field → candidates (actually actionable = has real candidates)
+    const infoOnly = {};    // just informational messages
+
+    for (const [field, cands] of Object.entries(sugg)) {
+      if (cands.length === 1 && cands[0].score === 0) {
+        infoOnly[field] = cands[0];
+      } else {
+        actionable[field] = cands;
+      }
+    }
+
+    // Actionable 제안 (radio 선택)
+    for (const [field, cands] of Object.entries(actionable)) {
+      const label = _SUGGEST_LABELS[field] || field;
+      const div = document.createElement('div');
+      div.className = 'suggest-group';
+      div.dataset.field = field;
+
+      let html = `<div class="suggest-group-title">⚡ ${label}</div>`;
+      cands.slice(0, 5).forEach((c, i) => {
+        html += `<div class="suggest-cand">
+          <input type="radio" name="sg-${field}" value="${i}" id="sg-${field}-${i}">
+          <span class="cand-addr">${c.addr}</span>
+          <span class="cand-def">${c.definition}</span>
+          <span class="cand-reason">${c.reason} (${c.score}점)</span>
+        </div>`;
+      });
+      html += `<button class="suggest-apply-btn" onclick="applySuggestion('${field}')">적용 후 재실행</button>
+               <button class="suggest-skip-btn" onclick="skipSuggestion('${field}', this.closest('.suggest-group'))">건너뛰기</button>`;
+      div.innerHTML = html;
+      groups.appendChild(div);
+    }
+
+    // 정보성 메시지
+    for (const [field, info] of Object.entries(infoOnly)) {
+      const label = _SUGGEST_LABELS[field] || field;
+      const div = document.createElement('div');
+      div.className = 'suggest-group';
+      div.style.borderColor = '#6b7280';
+      div.innerHTML = `<div class="suggest-group-title" style="color:#9ca3af">ℹ ${label}</div>
+        <div style="color:#6b7280;font-size:11px">${info.reason}</div>`;
+      groups.appendChild(div);
+    }
+
+    if (groups.children.length > 0) {
+      area.style.display = 'block';
+    }
+
+    // actionable 없으면 바로 Stage 2 활성화
+    if (Object.keys(actionable).length === 0) {
+      document.getElementById('card-s1').className = 'stage-card done';
+      document.getElementById('card-s2').className = 'stage-card active';
+      document.getElementById('btn-s2').disabled = false;
+    } else {
+      // Stage 1 done이지만 Stage 2는 제안 처리 전 or 직접 넘어가기 허용
+      document.getElementById('card-s1').className = 'stage-card done';
+      document.getElementById('card-s2').className = 'stage-card active';
+      document.getElementById('btn-s2').disabled = false;
+    }
+  }
+
+  async function applySuggestion(field) {
+    const selected = document.querySelector(`input[name="sg-${field}"]:checked`);
+    if (!selected) {
+      appendLog('s1', `[${field}] 후보를 선택해주세요`, 'warn');
+      return;
+    }
+    const idx = parseInt(selected.value);
+    // suggestions는 ws msg에서 저장해뒀어야 함 → DOM에서 읽기
+    const group = document.querySelector(`.suggest-group[data-field="${field}"]`);
+    if (!group) return;
+    const cands = group.querySelectorAll('.suggest-cand');
+    const cand = cands[idx];
+    if (!cand) return;
+    const addr = cand.querySelector('.cand-addr').textContent.trim();
+    const def = cand.querySelector('.cand-def').textContent.trim();
+
+    appendLog('s1', `[제안 적용] ${field} → ${def} (${addr})`, 'info');
+
+    const r = await fetch(`${API}/stage1/apply-suggestion`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        session_id: sessionId,
+        field, definition: def, addr, rerun: true,
+      }),
+    });
+    const d = await r.json();
+    if (d.status === 'rerunning') {
+      document.getElementById('suggest-area').style.display = 'none';
+      clearLog('s1');
+    }
+  }
+
+  function skipSuggestion(field, groupEl) {
+    appendLog('s1', `[건너뜀] ${field}`, 'info');
+    groupEl.remove();
+    const groups = document.getElementById('suggest-groups');
+    const actionable = groups.querySelectorAll('.suggest-group[data-field]');
+    if (actionable.length === 0) {
+      document.getElementById('suggest-area').style.display = 'none';
     }
   }
 
