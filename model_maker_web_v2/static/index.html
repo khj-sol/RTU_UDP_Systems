@@ -17,7 +17,7 @@
       gap: 16px;
     }
     header h1 { font-size: 18px; font-weight: 600; color: #7eb8f7; }
-    header span { font-size: 12px; color: #6b7280; }
+    header span { font-size: 12px; color: #ffffff; }
 
     .pipeline {
       display: flex;
@@ -59,7 +59,7 @@
 
     .stage-body { padding: 16px; }
 
-    label { font-size: 12px; color: #9ca3af; display: block; margin-bottom: 4px; margin-top: 12px; }
+    label { font-size: 12px; color: #ffffff; display: block; margin-bottom: 4px; margin-top: 12px; }
     input[type=text], input[type=number], select {
       width: 100%; padding: 7px 10px;
       background: #0f1117; border: 1px solid #2e3248;
@@ -78,7 +78,7 @@
     }
     .upload-area:hover { border-color: #7eb8f7; }
     .upload-area.dragover { border-color: #7eb8f7; background: #1e2235; }
-    .upload-area p { font-size: 13px; color: #6b7280; margin-top: 6px; }
+    .upload-area p { font-size: 13px; color: #ffffff; margin-top: 6px; }
     .upload-area .icon { font-size: 28px; }
 
     button.run-btn {
@@ -140,7 +140,7 @@
     }
     .review-row:last-child { border-bottom: none; }
     .review-def { flex: 1; color: #e0e0e0; }
-    .review-reason { flex: 1; color: #9ca3af; }
+    .review-reason { flex: 1; color: #ffffff; }
     .review-verdict select {
       width: auto; padding: 3px 6px; font-size: 11px;
     }
@@ -174,7 +174,7 @@
     .suggest-cand input[type=radio] { cursor: pointer; }
     .suggest-cand .cand-addr { color: #64b5f6; min-width: 70px; }
     .suggest-cand .cand-def { flex: 1; color: #e0e0e0; }
-    .suggest-cand .cand-reason { color: #9ca3af; font-size: 10px; }
+    .suggest-cand .cand-reason { color: #ffffff; font-size: 10px; }
     .suggest-apply-btn {
       margin-top: 6px; padding: 4px 12px;
       background: #1d4ed8; color: white;
@@ -184,7 +184,7 @@
     .suggest-apply-btn:hover { background: #2563eb; }
     .suggest-skip-btn {
       margin-top: 6px; margin-left: 6px; padding: 4px 10px;
-      background: #374151; color: #9ca3af;
+      background: #374151; color: #ffffff;
       border: none; border-radius: 4px;
       font-size: 11px; cursor: pointer;
     }
@@ -265,7 +265,7 @@
       Stage 3 — 코드 생성
     </div>
     <div class="stage-body">
-      <div id="s3-summary" style="font-size:12px; color:#9ca3af; margin-top:8px;">
+      <div id="s3-summary" style="font-size:12px; color:#ffffff; margin-top:8px;">
         Stage 2 완료 후 활성화됩니다.
       </div>
       <button class="run-btn" id="btn-s3" disabled onclick="runStage3()">Stage 3 실행 — registers.py 생성</button>
@@ -498,8 +498,8 @@
       const div = document.createElement('div');
       div.className = 'suggest-group';
       div.style.borderColor = '#6b7280';
-      div.innerHTML = `<div class="suggest-group-title" style="color:#9ca3af">ℹ ${label}</div>
-        <div style="color:#6b7280;font-size:11px">${info.reason}</div>`;
+      div.innerHTML = `<div class="suggest-group-title" style="color:#ffffff">ℹ ${label}</div>
+        <div style="color:#ffffff;font-size:11px">${info.reason}</div>`;
       groups.appendChild(div);
     }
 
@@ -614,13 +614,13 @@
         html += `<label style="color:#81c784;cursor:pointer">
           <input type="radio" name="rv-${i}" value="ALT1" class="review-radio" data-idx="${i}">
           <b>추천1</b>: ${a1.definition} → <span style="color:#aed581">${a1.category}</span>
-          <span style="color:#777;font-size:0.8em">(${a1.reason})</span></label>`;
+          <span style="color:#ffffff;font-size:0.8em">(${a1.reason})</span></label>`;
       }
       if (a2) {
         html += `<label style="color:#64b5f6;cursor:pointer">
           <input type="radio" name="rv-${i}" value="ALT2" class="review-radio" data-idx="${i}">
           <b>추천2</b>: ${a2.definition} → <span style="color:#90caf9">${a2.category}</span>
-          <span style="color:#777;font-size:0.8em">(${a2.reason})</span></label>`;
+          <span style="color:#ffffff;font-size:0.8em">(${a2.reason})</span></label>`;
       }
       html += `<label style="color:#ef9a9a;cursor:pointer">
           <input type="radio" name="rv-${i}" value="DELETE" class="review-radio" data-idx="${i}">
