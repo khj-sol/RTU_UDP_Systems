@@ -888,6 +888,10 @@ def run_stage3(
     _pdf_fn = meta.get('원본 파일', '').upper()
     inverter_type = 'HYB' if any(k in _pdf_fn for k in ['HYB', 'HYBRID', '하이브리드']) else 'PV'
 
+    # 용량 (Stage 2에서 사용자 입력, '-' 이거나 비어있으면 생략)
+    _cap = meta.get('용량', '').strip()
+    capacity_str = f'_{_cap}' if _cap and _cap != '-' else ''
+
     # V2: IV/DER 판단 — 레지스터 유무 + 메타데이터 + 제조사 확정
     iv_scan = (
         len(regs_by_cat.get('IV_SCAN', [])) > 0 or
@@ -947,7 +951,7 @@ def run_stage3(
         log(f'    {"✓" if ok else "✗"} {check_name}')
 
     # ── 파일 저장 ──
-    output_name = f'{manufacturer}_{inverter_type}_registers.py'
+    output_name = f'{manufacturer}_{inverter_type}{capacity_str}_registers.py'
     output_path = os.path.join(output_dir, output_name)
     with open(output_path, 'w', encoding='utf-8') as f:
         f.write(code)
