@@ -2508,6 +2508,20 @@ def _build_all_suggestions(h01_table: list, categorized: dict,
             why = f'{why}\n[Stage 1 노트: {x_note}]' if why else f'Stage 1 노트: {x_note}'
         return {'why': why, 'candidates': candidates}
 
+    # ── 2-pre. alarm1 X이고 ALARM 카테고리에 레지스터가 있으면 자동 할당 ──
+    alarm1_row = next((r for r in h01_table if r['field'] == 'alarm1' and r['status'] == 'X'), None)
+    if alarm1_row:
+        alarm_cat = categorized.get('ALARM', [])
+        # value_definitions 있는 레지스터 우선, 없으면 첫 번째
+        primary_alarm = next((r for r in alarm_cat if getattr(r, 'value_definitions', None)), None)
+        if primary_alarm is None and alarm_cat:
+            primary_alarm = alarm_cat[0]
+        if primary_alarm:
+            _auto_register_synonym('alarm1', primary_alarm.definition)
+            alarm1_row['status'] = '~'
+            alarm1_row['note'] = f'자동 할당→synonym_db: {primary_alarm.definition} ({primary_alarm.address_hex})'
+            if log: log(f'  자동 할당: alarm1 → {primary_alarm.definition} (재실행 시 ✓)', 'info')
+
     # ── 2. H01: X 필드 ──
     x_fields = [row for row in h01_table if row['status'] == 'X']
     for x_row in x_fields:
@@ -2720,10 +2734,12 @@ def _suggest_candidates(x_field: str, all_regs: list, categorized: dict) -> list
             'type_pref': ['U16'],
         },
         'alarm1': {
+            # 단일 단어(fault/alarm/error/warning)는 false positive 방지를 위해 제외
+            # 복합 키워드만 사용 + word_boundary 플래그
             'keywords': ['fault code', 'error code', 'alarm code', 'faultcode',
                          'warningcode', 'warning code', 'fault status',
-                         'fault register', 'alarm register', 'error register',
-                         'fault', 'alarm', 'error', 'warning'],
+                         'fault register', 'alarm register', 'error register'],
+            'word_boundary': ['fault', 'alarm', 'error', 'warning'],  # \b 단어경계 매칭
             'type_pref': ['U16', 'U32'],
         },
     }
@@ -2818,6 +2834,13 @@ def _suggest_candidates(x_field: str, all_regs: list, categorized: dict) -> list
                 score = max(score, 70)
                 reason = f'키워드 "{kw}" 매칭'
                 break
+        # 단어경계 매칭 (단일 단어 — false positive 방지)
+        if score == 0:
+            for kw in hints.get('word_boundary', []):
+                if re.search(rf'\b{re.escape(kw)}\b', dl):
+                    score = max(score, 65)
+                    reason = f'키워드 "{kw}" 단어경계 매칭'
+                    break
 
         # 정확한 이름 매칭
         for ex in exact_matches:
