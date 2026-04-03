@@ -2125,6 +2125,10 @@ def run_stage1(
                     # mppt1_voltage/current로 매핑 (assign_h01_field에서 처리)
                     break
 
+    # MPPT 최솟값 보정: 실제 인버터는 MPPT=0이 없음 (Central type = 1)
+    if max_mppt == 0:
+        max_mppt = 1
+
     # String 수 보정: String >= MPPT (최소 MPPT당 1 String)
     # PDF에 String별 레지스터가 없어도 실제로는 MPPT에 String이 연결됨
     if max_mppt > 0 and max_string < max_mppt:
@@ -2840,10 +2844,8 @@ def _build_all_suggestions(h01_table: list, categorized: dict,
             suggestions[x_row['field']] = _make_suggestion(x_row['field'], sorted_cands, note)
             if log: log(f'  제안: H01 [{x_row["field"]}] 후보 {len(sorted_cands)}개 (선택 필요)')
 
-    # ── 3. MPPT/String 미감지 — Stage 2에서 직접 설정하므로 제안 불필요 ──
-    max_mppt = meta.get('max_mppt', 0)
-    if max_mppt == 0:
-        if log: log('  MPPT=0 감지 — Stage 2에서 채널 수 직접 입력', 'warn')
+    # ── 3. MPPT/String 미감지 — Stage 1에서 최소 1로 보정됨 ──
+    max_mppt = meta.get('max_mppt', 1)
 
     # ── 5. IV Scan ──
     iv_scan = meta.get('iv_scan', False)
