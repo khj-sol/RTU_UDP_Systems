@@ -2541,31 +2541,44 @@ def _build_all_suggestions(h01_table: list, categorized: dict,
 
 
 def _suggest_info_field(all_regs: list, field_type: str) -> list:
-    """INFO Model/SN 후보 제안"""
-    candidates = []
-    for reg in all_regs:
+    """INFO Model/SN 후보 제안 — 1차 키워드로 후보 탐색, 2개 미만이면 보조 키워드로 보충"""
+    already = set()
+
+    def _score_reg(reg, primary_kws, primary_excl, secondary_kws, string_kws):
         dl = reg.definition.lower()
         score = 0
         reason = ''
-
-        if field_type == 'model':
-            if any(k in dl for k in ['model', 'device type', 'type code', 'product']):
-                if not any(k in dl for k in ['working', 'battery', 'pf']):
-                    score = 70
-                    reason = 'Model 키워드'
-            if (reg.data_type or '').upper() in ('STRING', 'STRINGING', 'ASCII'):
-                if 'model' in dl or 'product' in dl:
-                    score = 85
-                    reason = 'Model + STRING 타입'
-        elif field_type == 'sn':
-            if any(k in dl for k in ['serial', 'sn']):
+        if any(k in dl for k in primary_kws):
+            if not any(k in dl for k in primary_excl):
                 score = 70
-                reason = 'SN 키워드'
-            if (reg.data_type or '').upper() in ('STRING', 'STRINGING', 'ASCII'):
-                if 'serial' in dl or 'sn' in dl:
-                    score = 85
-                    reason = 'SN + STRING 타입'
+                reason = f'{field_type.upper()} 키워드'
+        if (reg.data_type or '').upper() in ('STRING', 'STRINGING', 'ASCII'):
+            if any(k in dl for k in string_kws):
+                score = 85
+                reason = f'{field_type.upper()} + STRING 타입'
+        return score, reason
 
+    def _score_secondary(reg, secondary_kws, primary_excl):
+        dl = reg.definition.lower()
+        if any(k in dl for k in secondary_kws):
+            if not any(k in dl for k in primary_excl):
+                return 40, f'{field_type.upper()} 보조 키워드'
+        return 0, ''
+
+    if field_type == 'model':
+        prim_kws  = ['model', 'device type', 'type code', 'product']
+        prim_excl = ['working', 'battery', 'pf']
+        str_kws   = ['model', 'product']
+        sec_kws   = ['type', 'rated', 'name', 'equip', 'identifier', 'kind']
+    else:  # sn
+        prim_kws  = ['serial', 'sn']
+        prim_excl = []
+        str_kws   = ['serial', 'sn']
+        sec_kws   = ['number', 'id', 'code', 'uid', 'barcode', 'lot']
+
+    candidates = []
+    for reg in all_regs:
+        score, reason = _score_reg(reg, prim_kws, prim_excl, sec_kws if field_type == 'model' else prim_kws, str_kws)
         if score > 0:
             candidates.append({
                 'addr': reg.address_hex,
@@ -2575,6 +2588,26 @@ def _suggest_info_field(all_regs: list, field_type: str) -> list:
                 'reason': reason,
                 'source': 'PDF',
             })
+            already.add(reg.address_hex)
+
+    # 2개 미만이면 보조 키워드로 보충 (중복 제외)
+    if len(candidates) < 2:
+        for reg in all_regs:
+            if reg.address_hex in already:
+                continue
+            score, reason = _score_secondary(reg, sec_kws, prim_excl)
+            if score > 0:
+                candidates.append({
+                    'addr': reg.address_hex,
+                    'definition': reg.definition[:50],
+                    'unit': reg.unit or '',
+                    'score': score,
+                    'reason': reason,
+                    'source': 'PDF',
+                })
+                already.add(reg.address_hex)
+                if len(candidates) >= 2:
+                    break
 
     return sorted(candidates, key=lambda c: -c['score'])[:5]
 
