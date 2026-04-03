@@ -17,6 +17,31 @@ router = APIRouter()
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 COMMON_DIR = os.path.join(PROJECT_ROOT, 'common')
+RESULTS_DIR = os.path.join(os.path.dirname(__file__), '..', 'results')
+DEFINITIONS_DIR = os.path.join(os.path.dirname(__file__), 'pipeline', 'definitions')
+
+
+def _save_to_results(manufacturer: str, src_path: str, label: str) -> str:
+    """Stage 결과 파일을 results/{제조사}/ 디렉토리에 저장. 저장된 경로 반환."""
+    if not manufacturer or not os.path.exists(src_path):
+        return ''
+    mfr_dir = os.path.join(RESULTS_DIR, manufacturer)
+    os.makedirs(mfr_dir, exist_ok=True)
+    ext = os.path.splitext(src_path)[1]
+    dest = os.path.join(mfr_dir, f'{manufacturer}_{label}{ext}')
+    shutil.copy2(src_path, dest)
+    return dest
+
+
+def _copy_definitions_to_results(manufacturer: str):
+    """definitions/{mfr}_definitions.json → results/{제조사}/"""
+    mfr_key = manufacturer.lower()
+    json_src = os.path.join(DEFINITIONS_DIR, f'{mfr_key}_definitions.json')
+    if not os.path.exists(json_src):
+        return
+    mfr_dir = os.path.join(RESULTS_DIR, manufacturer)
+    os.makedirs(mfr_dir, exist_ok=True)
+    shutil.copy2(json_src, os.path.join(mfr_dir, f'{manufacturer}_definitions.json'))
 
 
 # ─── 비동기 파이프라인 실행 헬퍼 ─────────────────────────────────────────────
@@ -126,6 +151,12 @@ async def stage1_run(body: dict):
                                 meta=result['meta'],
                                 suggestions=result.get('suggestions', {}))
 
+            # results/{제조사}/ 에 자동 저장
+            mfr = result['meta'].get('manufacturer', '')
+            if mfr:
+                _save_to_results(mfr, result['output_path'], 'stage1')
+                _copy_definitions_to_results(mfr)
+
             await ws_manager.send_json(sid, {
                 'event': 'stage1_done',
                 'stage': 's1',
@@ -216,6 +247,11 @@ async def apply_suggestion(body: dict):
                                 stage1_excel=result['output_path'],
                                 meta=result['meta'],
                                 suggestions=result.get('suggestions', {}))
+
+            mfr = result['meta'].get('manufacturer', '')
+            if mfr:
+                _save_to_results(mfr, result['output_path'], 'stage1')
+                _copy_definitions_to_results(mfr)
 
             await ws_manager.send_json(sid, {
                 'event': 'stage1_done',
@@ -308,6 +344,11 @@ async def stage2_run(body: dict):
             SessionStore.update(sid,
                                 stage=2,
                                 stage2_excel=result['output_path'])
+
+            # results/{제조사}/ 에 자동 저장
+            mfr = (SessionStore.get(sid) or {}).get('meta', {}).get('manufacturer', '')
+            if mfr:
+                _save_to_results(mfr, result['output_path'], 'stage2')
 
             await ws_manager.send_json(sid, {
                 'event': 'stage2_done',
