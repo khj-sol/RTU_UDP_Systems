@@ -140,7 +140,8 @@ class DB:
         # Migrate existing rtu_registry tables
         for col, typ in [('model','TEXT'), ('phone','TEXT'), ('serial','TEXT'),
                          ('firmware','TEXT'), ('rtu_type','TEXT'),
-                         ('last_info_update','TEXT'), ('note','TEXT')]:
+                         ('last_info_update','TEXT'), ('note','TEXT'),
+                         ('hidden','INTEGER DEFAULT 0')]:
             try:
                 await self.db.execute(f"ALTER TABLE rtu_registry ADD COLUMN {col} {typ}")
             except Exception:
@@ -209,12 +210,16 @@ class DB:
         await self.db.execute("""
             INSERT INTO rtu_registry (rtu_id, ip, port, last_seen, status)
             VALUES (?, ?, ?, ?, 'online')
-            ON CONFLICT(rtu_id) DO UPDATE SET ip=excluded.ip, port=excluded.port, last_seen=?, status='online'
+            ON CONFLICT(rtu_id) DO UPDATE SET
+                ip=excluded.ip, port=excluded.port, last_seen=?, status='online'
+                WHERE hidden IS NOT 1
         """, (rtu_id, ip, port, now_kst(), now_kst()))
         await self._maybe_commit()
 
     async def get_rtus(self):
-        async with self.db.execute("SELECT * FROM rtu_registry ORDER BY rtu_id") as cursor:
+        async with self.db.execute(
+            "SELECT * FROM rtu_registry WHERE hidden IS NOT 1 ORDER BY rtu_id"
+        ) as cursor:
             return [dict(row) for row in await cursor.fetchall()]
 
     async def get_rtu(self, rtu_id: int):
@@ -234,6 +239,8 @@ class DB:
         rtu_type = 'RIP' if 'SRPV' in model else ('SOLARIZE' if model else '')
         existing = await self.get_rtu(rtu_id)
         if existing:
+            if existing.get('hidden'):
+                return  # hidden RTU는 업데이트 안 함
             await self.db.execute("""
                 UPDATE rtu_registry SET model=?, phone=?, serial=?, firmware=?,
                     rtu_type=?, last_info_update=?, last_seen=?
@@ -267,8 +274,9 @@ class DB:
             return [dict(row) for row in await cursor.fetchall()]
 
     async def delete_rtu(self, rtu_id: int):
-        """Permanently delete RTU from registry and connection log."""
-        await self.db.execute("DELETE FROM rtu_registry WHERE rtu_id=?", (rtu_id,))
+        """Hide RTU from dashboard (keeps DB data, prevents re-display on reconnect)."""
+        await self.db.execute(
+            "UPDATE rtu_registry SET hidden=1, status='offline' WHERE rtu_id=?", (rtu_id,))
         await self.db.execute("DELETE FROM rtu_connection_log WHERE rtu_id=?", (rtu_id,))
         await self.db.commit()
 

@@ -251,38 +251,25 @@ async def get_rtu_detail(rtu_id: int):
 
 @router.delete("/rtus/{rtu_id}")
 async def delete_rtu(rtu_id: int):
-    """Delete an RTU from both memory and database."""
+    """Hide RTU from dashboard (keeps historical data, suppresses re-display on reconnect)."""
     removed_memory = False
-    removed_db = False
 
-    # Remove from engine memory
+    # Remove from engine memory (stop processing new packets for display)
     if engine:
         with engine._lock:
             if rtu_id in engine.rtu_registry:
                 del engine.rtu_registry[rtu_id]
                 removed_memory = True
 
-    # Remove from database
+    # Mark as hidden in DB (data retained, won't reappear on restart or reconnect)
     if database:
         try:
-            for table in ('inverter_data', 'relay_data', 'weather_data',
-                         'event_log', 'control_status', 'control_monitor',
-                         'rtu_connection_log'):
-                await database.db.execute(
-                    f"DELETE FROM {table} WHERE rtu_id=?", (rtu_id,))
-            await database.db.execute(
-                "DELETE FROM rtu_registry WHERE rtu_id=?", (rtu_id,))
-            await database.db.commit()
-            removed_db = True
+            await database.delete_rtu(rtu_id)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"DB error: {e}")
 
-    if not removed_memory and not removed_db:
-        raise HTTPException(status_code=404, detail=f"RTU {rtu_id} not found")
-
-    logger.info(f"RTU {rtu_id} deleted (memory={removed_memory}, db={removed_db})")
-    return {"status": "deleted", "rtu_id": rtu_id,
-            "removed_memory": removed_memory, "removed_db": removed_db}
+    logger.info(f"RTU {rtu_id} hidden (memory={removed_memory})")
+    return {"status": "deleted", "rtu_id": rtu_id, "removed_memory": removed_memory}
 
 
 @router.get("/rtus/{rtu_id}/devices")
