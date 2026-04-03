@@ -1593,6 +1593,20 @@ def build_h01_match_table(categorized: dict, meta: dict) -> List[dict]:
                dl.strip() == 'state':
                 status_reg = sr
                 break
+    if not status_reg:
+        # MONITORING 범주에서도 status 키워드 검색 (MUST-PV 등 상태 레지스터가 모니터링 섹션에 있는 경우)
+        _status_kws = ['inverter status', 'inverter mode', 'work mode', 'work state',
+                       'operating mode', 'operation state', 'running status',
+                       'inverter state', 'operating status', 'global state',
+                       'device status', 'system status']
+        for cat_name in ('MONITORING', 'REVIEW'):
+            for sr in categorized.get(cat_name, []):
+                dl = sr.definition.lower().replace('_', ' ')
+                if any(k in dl for k in _status_kws) or dl.strip() in ('state', 'running', 'st'):
+                    status_reg = sr
+                    break
+            if status_reg:
+                break
     # 상태 정의(값 테이블) 검증 — 통상 Appendix에 별도 정의
     status_note = ''
     rows.append(_make_pdf_match_row('status', status_reg, 'Work State 미발견'))
@@ -1601,6 +1615,19 @@ def build_h01_match_table(categorized: dict, meta: dict) -> List[dict]:
 
     alarm_regs = categorized.get('ALARM', [])
     alarm_dist = distribute_alarms(alarm_regs)
+    # alarm1이 없으면 MONITORING 범주에서 fault/alarm code 레지스터 검색
+    if not alarm_dist.get('alarm1'):
+        _alarm_kws = ['fault code', 'faultcode', 'alarm code', 'error code',
+                      'warning code', 'warningcode', 'fault status',
+                      'hw fault', 'arc fault', 'ground fault']
+        for cat_name in ('MONITORING', 'REVIEW'):
+            for sr in categorized.get(cat_name, []):
+                dl = sr.definition.lower().replace('_', ' ')
+                if any(k in dl for k in _alarm_kws):
+                    alarm_dist['alarm1'] = [sr]
+                    break
+            if alarm_dist.get('alarm1'):
+                break
     for slot in ['alarm1', 'alarm2', 'alarm3']:
         regs = alarm_dist.get(slot, [])
         if regs:
@@ -1993,6 +2020,7 @@ def run_stage1(
     if before - len(registers):
         log(f'  DER 고정 주소 제외: {before - len(registers)}개')
 
+    matched_ref = {}
     if ref_patterns:
         mfr_lower = manufacturer.lower()
         matched_ref = {k: v for k, v in ref_patterns.items() if mfr_lower in k.lower()}
@@ -2068,12 +2096,13 @@ def run_stage1(
 
     max_mppt = 0
     max_string = 0
+    # detect_channel_from_ref는 제조사 매칭 ref만 사용 (타 제조사 주소 충돌 방지)
     for reg in registers:
         ch = detect_channel_number(reg.definition)
         if not ch:
             addr = reg.address if isinstance(reg.address, int) else parse_address(reg.address)
             if addr is not None:
-                ch = detect_channel_from_ref(addr, ref_patterns)
+                ch = detect_channel_from_ref(addr, matched_ref)
         if ch:
             prefix, n = ch
             if prefix == 'MPPT':
@@ -2636,8 +2665,9 @@ def _build_all_suggestions(h01_table: list, categorized: dict,
     # ── 1. INFO: Model/SN 미매칭 ──
     info_regs = categorized.get('INFO', [])
     has_model = any(
-        any(k in r.definition.lower() for k in ['model', 'device type', 'type code'])
-        and not any(k in r.definition.lower() for k in ['working', 'battery', 'pf', 'init fault'])
+        (any(k in r.definition.lower() for k in ['model', 'device type', 'type code'])
+         and not any(k in r.definition.lower() for k in ['working', 'battery', 'pf', 'init fault']))
+        or r.definition.startswith('DEVICE_MODEL')  # PDF 텍스트 추출 모델명
         for r in info_regs)
     has_sn = any(
         any(k in r.definition.lower() for k in ['serial_number', 'serial n', 'serialn', 'c_serial',
