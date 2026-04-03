@@ -99,7 +99,7 @@ async def stage1_run(body: dict):
     # 비동기 실행
     async def _run():
         try:
-            from .pipeline.stage1 import run_stage1
+            from .pipeline.stage1 import run_stage1, NotRegisterMapError
             progress = _make_progress_callback(sid, 's1', asyncio.get_running_loop())
             result = await _run_in_thread(
                 run_stage1, uploaded, work_dir, device_type, progress)
@@ -120,6 +120,13 @@ async def stage1_run(body: dict):
                 'iv_scan': result['meta'].get('iv_scan', False),
                 'iv_data_points': result['meta'].get('iv_data_points', 0),
                 'suggestions': result.get('suggestions', {}),
+            })
+        except NotRegisterMapError as e:
+            await ws_manager.send_json(sid, {
+                'event': 'invalid_file',
+                'stage': 's1',
+                'text': str(e),
+                'level': 'err',
             })
         except Exception as e:
             await ws_manager.send_json(sid, {
@@ -179,7 +186,7 @@ async def apply_suggestion(body: dict):
 
     async def _rerun():
         try:
-            from .pipeline.stage1 import run_stage1
+            from .pipeline.stage1 import run_stage1, NotRegisterMapError
             loop = asyncio.get_running_loop()
             progress = _make_progress_callback(sid, 's1', loop)
             progress(f'[제안 적용] {field} → {definition}', 'info')
@@ -201,6 +208,13 @@ async def apply_suggestion(body: dict):
                 'iv_scan': result['meta'].get('iv_scan', False),
                 'iv_data_points': result['meta'].get('iv_data_points', 0),
                 'suggestions': result.get('suggestions', {}),
+            })
+        except NotRegisterMapError as e:
+            await ws_manager.send_json(sid, {
+                'event': 'invalid_file',
+                'stage': 's1',
+                'text': str(e),
+                'level': 'err',
             })
         except Exception as e:
             await ws_manager.send_json(sid, {

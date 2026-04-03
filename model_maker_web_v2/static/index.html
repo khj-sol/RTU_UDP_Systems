@@ -307,6 +307,7 @@
       if (msg.event === 'stage2_done') onStage2Done(msg);
       if (msg.event === 'stage3_done') onStage3Done(msg);
       if (msg.event === 'review_items') showReview(msg.items);
+      if (msg.event === 'invalid_file') onInvalidFile(msg);
     };
   })();
 
@@ -403,6 +404,26 @@
     'mppt_detection':      'MPPT 채널 감지 실패 (MPPT=0)',
     'iv_scan':             'IV Scan 레지스터 미발견',
   };
+
+  function onInvalidFile(msg) {
+    // 업로드 영역 초기화 — 다시 파일을 올릴 수 있도록
+    uploadedFilename = null;
+    const drop1 = document.getElementById('drop1');
+    drop1.querySelector('p').textContent = '파일을 드래그하거나 클릭하여 업로드';
+    document.getElementById('btn-s1').disabled = true;
+    document.getElementById('suggest-area').style.display = 'none';
+
+    // 경고 배너 표시
+    const banner = document.createElement('div');
+    banner.style.cssText = [
+      'background:#fff3cd', 'border:2px solid #ffc107', 'border-radius:8px',
+      'padding:14px 16px', 'margin:10px 0', 'color:#856404', 'font-size:14px',
+      'white-space:pre-line', 'line-height:1.6',
+    ].join(';');
+    banner.innerHTML = `<strong>⚠️ 올바른 파일이 아닙니다</strong><br>${(msg.text||'').replace(/\n/g,'<br>')}`;
+    const logEl = document.getElementById('log-s1');
+    logEl.insertBefore(banner, logEl.firstChild);
+  }
 
   function onStage1Done(msg) {
     const ivField = document.getElementById('s2-iv-points');
