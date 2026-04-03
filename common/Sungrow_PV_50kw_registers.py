@@ -19,18 +19,23 @@ class RegisterMap:
     LOW_SYSTEM_INSULATION_RESISTANCE         = 0x0027  # U16
     SERIAL_NUMBER                            = 0x137E  # U16
     DEVICE_MODEL                             = 0x1388  # U16
-    NOMINAL_ACTIVEPOWER                      = 0x1389  # U16, scale kW 0.1
-    OUTPUT_TYPE                              = 0x138A  # U16
     TOTAL_RUNNING_TIME                       = 0x138E  # U32
     TOTAL_RUNNING_TIME_HIGH                  = 0x138F
     TOTAL_APPARENTPOWER                      = 0x1391  # U32, scale VA
     TOTAL_APPARENTPOWER_HIGH                 = 0x1392
+    A_B_LINEVOLTAGE_PHASE_AVOLTAGE           = 0x139B  # U16, scale A 0.1
+    B_C_LINE_VOLTAGE_PHASE_BVOLTAGE          = 0x139C  # U16, scale V 0.1
+    C_A_LINE_VOLTAGE_PHASE_CVOLTAGE          = 0x139D  # U16, scale A 0.1
     NOMINAL_REACTIVEPOWER                    = 0x13B9  # U16
     ARRAY_INSULATIONRESISTANCE               = 0x13CF  # U16
+    METER_A_PHASEPOWER                       = 0x13DD  # S32, scale A
+    METER_A_PHASEPOWER_HIGH                  = 0x13DE
+    METER_B_PHASEPOWER                       = 0x13DF  # S32
+    METER_B_PHASEPOWER_HIGH                  = 0x13E0
+    METER_C_PHASEPOWER                       = 0x13E1  # S32
+    METER_C_PHASEPOWER_HIGH                  = 0x13E2
     DAILY_RUNNING_TIME                       = 0x13F9  # U16
     PRESENT_COUNTRY                          = 0x13FA  # U16
-    MONTHLY_POWERYIELDS                      = 0x1408  # U32, scale kWh 0.1
-    MONTHLY_POWERYIELDS_HIGH                 = 0x1409
     BUS_VOLTAGE                              = 0x141B  # U16, scale V 0.1
 
     # =========================================================================
@@ -43,20 +48,16 @@ class RegisterMap:
     AC_INSTANTANEOUS_OVERCURRENT             = 0x0007  # U16
     FAULT                                    = 0x0009  # U16
     ALARM_RUN                                = 0x000A  # U16
-    EXCESSIVE_LEAKAGE_CURRENT                = 0x000C  # U16
+    L1_VOLTAGE                               = 0x000C  # U16
     COMMUNICATE_FAULT                        = 0x000D  # U16
-    REG_10_MINUTE_GRID_OVERVOLTAGE           = 0x000E  # U16
-    GRID_HIGH_VOLTAGE                        = 0x000F  # U16
     TOTAL_RUN_BIT_DEVICE_ISGRID_CONNECTED_RUNNING = 0x0011  # U16
     TOTAL_FAULT_BIT_DEVICE_IS_INFAULT_STOP_STATE = 0x0012  # U16
     PV_CONNECTION_FAULT                      = 0x0017  # U16
     TEMPERATURE                              = 0x0024  # U16
     L2_CURRENT                               = 0x002B  # U16
-    FAN_ALARM                                = 0x0046  # U16
-    AC_SIDE_SPD_ALARM                        = 0x0047  # U16
-    COMMUNICATION_ALARM                      = 0x004A  # U16
+    PV1_ABNORMAL                             = 0x004E  # U16
     PV2_ABNORMAL                             = 0x004F  # U16
-    PV3_ABNORMAL                             = 0x0050  # U16
+    PV_POWER                                 = 0x0050  # U16
     PV4_ABNORMAL                             = 0x0051  # U16
     GRID_SIDE_PROTECTION_SELF_CHECK_FAILURE  = 0x0069  # U16
     PV5_ABNORMAL                             = 0x00DC  # U16
@@ -100,22 +101,17 @@ class RegisterMap:
     PV30_OVERVOLTAGE                         = 0x05F9  # U16
     PV31_OVERVOLTAGE                         = 0x05FA  # U16
     PV32_OVERVOLTAGE                         = 0x05FB  # U16
+    NOMINAL_ACTIVEPOWER                      = 0x1389  # U16, scale kW 0.1
+    OUTPUT_TYPE                              = 0x138A  # U16
     DAILY_ENERGY                             = 0x138B  # U16, scale kWh 0.1
     CUMULATIVE_ENERGY                        = 0x138C  # U32, scale kWh
     CUMULATIVE_ENERGY_HIGH                   = 0x138D
-    POWERLIMITATIONSWITCH                    = 0x138F  # U16
-    EXPORT_POWERLIMITATION                   = 0x1392  # U16
     MPPT_1_VOLTAGE                           = 0x1393  # U16, scale V 0.1
     MPPT_1_CURRENT                           = 0x1394  # U16, scale A 0.1
     MPPT_2_VOLTAGE                           = 0x1395  # U16, scale V 0.1
     MPPT_2_CURRENT                           = 0x1396  # U16, scale A 0.1
     MPPT_3_VOLTAGE                           = 0x1397  # U16, scale V 0.1
     MPPT_3_CURRENT                           = 0x1398  # U16, scale A 0.1
-    PV_POWER                                 = 0x1399  # U32
-    PV_POWER_HIGH                            = 0x139A
-    A_B_LINEVOLTAGE_PHASE_AVOLTAGE           = 0x139B  # U16, scale A 0.1
-    B_C_LINE_VOLTAGE_PHASE_BVOLTAGE          = 0x139C  # U16, scale V 0.1
-    C_A_LINE_VOLTAGE_PHASE_CVOLTAGE          = 0x139D  # U16, scale A 0.1
     L1_CURRENT                               = 0x139E  # U16, scale A 0.1
     L3_CURRENT                               = 0x13A0  # U16, scale A 0.1
     AC_POWER                                 = 0x13A7  # U32
@@ -123,6 +119,7 @@ class RegisterMap:
     REACTIVE_POWER                           = 0x13A9  # S32
     REACTIVE_POWER_HIGH                      = 0x13AA
     POWER_FACTOR                             = 0x13AB  # S16
+    WORK_STATE                               = 0x13AE  # U16
     PALOWER_POWER                            = 0x13BB  # U16, scale % 0.1
     PCUPPER_POWER                            = 0x13BC  # U16, scale % 0.1
     KAUPPERLIMIT_PF                          = 0x13BD  # S16
@@ -137,12 +134,6 @@ class RegisterMap:
     REACTIVE_POWER_REGULATION_SETPOINT_HIGH  = 0x13D8
     METER_POWER                              = 0x13DB  # S32
     METER_POWER_HIGH                         = 0x13DC
-    METER_A_PHASEPOWER                       = 0x13DD  # S32, scale A
-    METER_A_PHASEPOWER_HIGH                  = 0x13DE
-    METER_B_PHASEPOWER                       = 0x13DF  # S32
-    METER_B_PHASEPOWER_HIGH                  = 0x13E0
-    METER_C_PHASEPOWER                       = 0x13E1  # S32
-    METER_C_PHASEPOWER_HIGH                  = 0x13E2
     LOAD_POWER                               = 0x13E3  # S32
     LOAD_POWER_HIGH                          = 0x13E4
     DAILY_EXPORT_ENERGY                      = 0x13E5  # U32, scale kWh 0.1
@@ -160,8 +151,11 @@ class RegisterMap:
     MPPT_4_VOLTAGE                           = 0x13FB  # U16, scale V 0.1
     MPPT_4_CURRENT                           = 0x13FC  # U16, scale A 0.1
     QP_EXIT_POWER_RATIO                      = 0x1405  # U16, scale % 0.1
+    MONTHLY_POWERYIELDS                      = 0x1408  # U32, scale kWh 0.1
+    MONTHLY_POWERYIELDS_HIGH                 = 0x1409
     QU_ENTER_POWER                           = 0x1419  # U16, scale % 0.1
     NEGATIVE_VOLTAGE_TOTHE_GROUND            = 0x141A  # S16, scale V 0.1
+    PID_WORK_STATE                           = 0x141E  # U16
     STRING_1_CURRENT                         = 0x1B65  # STRINGING, scale A 0.01
     STRING_2_CURRENT                         = 0x1B66  # STRINGING, scale A 0.01
     STRING_3_CURRENT                         = 0x1B67  # STRINGING, scale A 0.01
@@ -174,14 +168,15 @@ class RegisterMap:
     # =========================================================================
     # Status & Temperature
     # =========================================================================
-    WORK_STATE                               = 0x13AE  # U16
-    PID_WORK_STATE                           = 0x141E  # U16
 
     # =========================================================================
     # Alarm / Error Codes
     # =========================================================================
+    L3_VOLTAGE                               = 0x000E  # U16
+    FAN_ALARM                                = 0x0046  # U16
+    AC_SIDE_SPD_ALARM                        = 0x0047  # U16
     DC_SIDE_SPD_ALARM                        = 0x0048  # U16
-    PV1_ABNORMAL                             = 0x004E  # U16
+    COMMUNICATION_ALARM                      = 0x004A  # U16
     ELECTRIC_ARC_FAULT                       = 0x0058  # U16
     GROUNDING_CABLE_FAULT                    = 0x006A  # U16
     STRING_1_REVERSE_CONNECTION_FAULT        = 0x01C0  # STRINGING
@@ -266,32 +261,25 @@ class RegisterMap:
     FAULT_ALARM_CODE_1                       = 0x13B5  # U16
     PID_ALARM_CODE                           = 0x141F  # U16
 
+    # R/S/T Phase Aliases
+    R_VOLTAGE                                = L1_VOLTAGE
+    R_CURRENT                                = L1_CURRENT
+    S_CURRENT                                = L2_CURRENT
+    T_VOLTAGE                                = L3_VOLTAGE
+    T_CURRENT                                = L3_CURRENT
+
     # --- Standard handler compatibility aliases (H01 Body Type 4 required) ---
+    R_PHASE_VOLTAGE                          = L1_VOLTAGE
+    T_PHASE_VOLTAGE                          = L3_VOLTAGE
     R_PHASE_CURRENT                          = L1_CURRENT
     S_PHASE_CURRENT                          = L2_CURRENT
     T_PHASE_CURRENT                          = L3_CURRENT
 
-    # =========================================================================
-    # Simulator / backward-compat aliases
-    # =========================================================================
-    INVERTER_MODE                            = 0x13AE
-    ERROR_CODE1                              = 0x13AF
-    ERROR_CODE2                              = 0x13B1
-    R_PHASE_VOLTAGE                          = A_B_LINEVOLTAGE_PHASE_AVOLTAGE  # 0x139B
-    S_PHASE_VOLTAGE                          = B_C_LINE_VOLTAGE_PHASE_BVOLTAGE  # 0x139C
-    T_PHASE_VOLTAGE                          = C_A_LINE_VOLTAGE_PHASE_CVOLTAGE  # 0x139D
-    INNER_TEMP                               = TEMPERATURE                # 0x0024
-    TOTAL_ENERGY                             = CUMULATIVE_ENERGY          # 0x138C
-    MPPT1_VOLTAGE                            = MPPT_1_VOLTAGE             # 0x1393
-    MPPT1_CURRENT                            = MPPT_1_CURRENT             # 0x1394
-    MPPT3_VOLTAGE                            = MPPT_3_VOLTAGE             # 0x1397
-    MPPT3_CURRENT                            = MPPT_3_CURRENT             # 0x1398
-    STRING5_CURRENT                          = STRING_5_CURRENT           # 0x1B69
-    STRING6_CURRENT                          = STRING_6_CURRENT           # 0x1B6A
-    STRING7_CURRENT                          = STRING_7_CURRENT           # 0x1B6B
-    STRING8_CURRENT                          = STRING_8_CURRENT           # 0x1B6C
+    # --- RTU modbus_handler / simulator 필수 alias ---
+    INNER_TEMP                               = TEMPERATURE         # 0x0024
+    INVERTER_MODE                            = WORK_STATE          # 0x13AE
 
-    # DER / Control registers
+    # DER / Control registers (Solarize 표준 주소)
     DER_POWER_FACTOR_SET                     = 0x07D0
     DER_ACTION_MODE                          = 0x07D1
     DER_REACTIVE_POWER_PCT                   = 0x07D2
@@ -355,7 +343,7 @@ class ControlMode:
 
 
 class ErrorCode1:
-    """Error Code Table1 (0x0048) — Bit field"""
+    """Error Code Table1 (0x000E) — Bit field"""
     BITS = {
     }
 
@@ -369,7 +357,7 @@ class ErrorCode1:
 
 
 class ErrorCode2:
-    """Error Code Table2 (0x004E) — Bit field"""
+    """Error Code Table2 (0x0046) — Bit field"""
     BITS = {
     }
 
@@ -383,7 +371,7 @@ class ErrorCode2:
 
 
 class ErrorCode3:
-    """Error Code Table3 (0x0058) — Bit field"""
+    """Error Code Table3 (0x0047) — Bit field"""
     BITS = {
     }
 
@@ -397,7 +385,7 @@ class ErrorCode3:
 
 
 class ErrorCode4:
-    """Error Code Table4 (0x006A) — Bit field"""
+    """Error Code Table4 (0x0048) — Bit field"""
     BITS = {
     }
 
@@ -411,7 +399,7 @@ class ErrorCode4:
 
 
 class ErrorCode5:
-    """Error Code Table5 (0x01C0) — Bit field"""
+    """Error Code Table5 (0x004A) — Bit field"""
     BITS = {
     }
 
@@ -425,7 +413,7 @@ class ErrorCode5:
 
 
 class ErrorCode6:
-    """Error Code Table6 (0x01C1) — Bit field"""
+    """Error Code Table6 (0x0058) — Bit field"""
     BITS = {
     }
 
@@ -439,7 +427,7 @@ class ErrorCode6:
 
 
 class ErrorCode7:
-    """Error Code Table7 (0x01C2) — Bit field"""
+    """Error Code Table7 (0x006A) — Bit field"""
     BITS = {
     }
 
@@ -453,7 +441,7 @@ class ErrorCode7:
 
 
 class ErrorCode8:
-    """Error Code Table8 (0x01C3) — Bit field"""
+    """Error Code Table8 (0x01C0) — Bit field"""
     BITS = {
     }
 
@@ -467,7 +455,7 @@ class ErrorCode8:
 
 
 class ErrorCode9:
-    """Error Code Table9 (0x01C4) — Bit field"""
+    """Error Code Table9 (0x01C1) — Bit field"""
     BITS = {
     }
 
@@ -481,7 +469,7 @@ class ErrorCode9:
 
 
 class ErrorCode10:
-    """Error Code Table10 (0x01C5) — Bit field"""
+    """Error Code Table10 (0x01C2) — Bit field"""
     BITS = {
     }
 
@@ -495,7 +483,7 @@ class ErrorCode10:
 
 
 class ErrorCode11:
-    """Error Code Table11 (0x01C6) — Bit field"""
+    """Error Code Table11 (0x01C3) — Bit field"""
     BITS = {
     }
 
@@ -509,7 +497,7 @@ class ErrorCode11:
 
 
 class ErrorCode12:
-    """Error Code Table12 (0x01C7) — Bit field"""
+    """Error Code Table12 (0x01C4) — Bit field"""
     BITS = {
     }
 
@@ -523,7 +511,7 @@ class ErrorCode12:
 
 
 class ErrorCode13:
-    """Error Code Table13 (0x01C8) — Bit field"""
+    """Error Code Table13 (0x01C5) — Bit field"""
     BITS = {
     }
 
@@ -537,7 +525,7 @@ class ErrorCode13:
 
 
 class ErrorCode14:
-    """Error Code Table14 (0x01C9) — Bit field"""
+    """Error Code Table14 (0x01C6) — Bit field"""
     BITS = {
     }
 
@@ -551,7 +539,7 @@ class ErrorCode14:
 
 
 class ErrorCode15:
-    """Error Code Table15 (0x01CA) — Bit field"""
+    """Error Code Table15 (0x01C7) — Bit field"""
     BITS = {
     }
 
@@ -565,7 +553,7 @@ class ErrorCode15:
 
 
 class ErrorCode16:
-    """Error Code Table16 (0x01CB) — Bit field"""
+    """Error Code Table16 (0x01C8) — Bit field"""
     BITS = {
     }
 
@@ -579,7 +567,7 @@ class ErrorCode16:
 
 
 class ErrorCode17:
-    """Error Code Table17 (0x01CC) — Bit field"""
+    """Error Code Table17 (0x01C9) — Bit field"""
     BITS = {
     }
 
@@ -593,7 +581,7 @@ class ErrorCode17:
 
 
 class ErrorCode18:
-    """Error Code Table18 (0x01CD) — Bit field"""
+    """Error Code Table18 (0x01CA) — Bit field"""
     BITS = {
     }
 
@@ -607,7 +595,7 @@ class ErrorCode18:
 
 
 class ErrorCode19:
-    """Error Code Table19 (0x01CE) — Bit field"""
+    """Error Code Table19 (0x01CB) — Bit field"""
     BITS = {
     }
 
@@ -621,7 +609,7 @@ class ErrorCode19:
 
 
 class ErrorCode20:
-    """Error Code Table20 (0x01CF) — Bit field"""
+    """Error Code Table20 (0x01CC) — Bit field"""
     BITS = {
     }
 
@@ -635,7 +623,7 @@ class ErrorCode20:
 
 
 class ErrorCode21:
-    """Error Code Table21 (0x01D0) — Bit field"""
+    """Error Code Table21 (0x01CD) — Bit field"""
     BITS = {
     }
 
@@ -649,7 +637,7 @@ class ErrorCode21:
 
 
 class ErrorCode22:
-    """Error Code Table22 (0x01D1) — Bit field"""
+    """Error Code Table22 (0x01CE) — Bit field"""
     BITS = {
     }
 
@@ -663,7 +651,7 @@ class ErrorCode22:
 
 
 class ErrorCode23:
-    """Error Code Table23 (0x01D2) — Bit field"""
+    """Error Code Table23 (0x01CF) — Bit field"""
     BITS = {
     }
 
@@ -677,7 +665,7 @@ class ErrorCode23:
 
 
 class ErrorCode24:
-    """Error Code Table24 (0x01D3) — Bit field"""
+    """Error Code Table24 (0x01D0) — Bit field"""
     BITS = {
     }
 
@@ -691,7 +679,7 @@ class ErrorCode24:
 
 
 class ErrorCode25:
-    """Error Code Table25 (0x01D4) — Bit field"""
+    """Error Code Table25 (0x01D1) — Bit field"""
     BITS = {
     }
 
@@ -705,7 +693,7 @@ class ErrorCode25:
 
 
 class ErrorCode26:
-    """Error Code Table26 (0x01D5) — Bit field"""
+    """Error Code Table26 (0x01D2) — Bit field"""
     BITS = {
     }
 
@@ -719,7 +707,7 @@ class ErrorCode26:
 
 
 class ErrorCode27:
-    """Error Code Table27 (0x01D6) — Bit field"""
+    """Error Code Table27 (0x01D3) — Bit field"""
     BITS = {
     }
 
@@ -733,7 +721,7 @@ class ErrorCode27:
 
 
 class ErrorCode28:
-    """Error Code Table28 (0x01D7) — Bit field"""
+    """Error Code Table28 (0x01D4) — Bit field"""
     BITS = {
     }
 
@@ -747,7 +735,7 @@ class ErrorCode28:
 
 
 class ErrorCode29:
-    """Error Code Table29 (0x0202) — Bit field"""
+    """Error Code Table29 (0x01D5) — Bit field"""
     BITS = {
     }
 
@@ -761,7 +749,7 @@ class ErrorCode29:
 
 
 class ErrorCode30:
-    """Error Code Table30 (0x0214) — Bit field"""
+    """Error Code Table30 (0x01D6) — Bit field"""
     BITS = {
     }
 
@@ -775,7 +763,7 @@ class ErrorCode30:
 
 
 class ErrorCode31:
-    """Error Code Table31 (0x0215) — Bit field"""
+    """Error Code Table31 (0x01D7) — Bit field"""
     BITS = {
     }
 
@@ -789,7 +777,7 @@ class ErrorCode31:
 
 
 class ErrorCode32:
-    """Error Code Table32 (0x0216) — Bit field"""
+    """Error Code Table32 (0x0202) — Bit field"""
     BITS = {
     }
 
@@ -803,7 +791,7 @@ class ErrorCode32:
 
 
 class ErrorCode33:
-    """Error Code Table33 (0x0217) — Bit field"""
+    """Error Code Table33 (0x0214) — Bit field"""
     BITS = {
     }
 
@@ -817,7 +805,7 @@ class ErrorCode33:
 
 
 class ErrorCode34:
-    """Error Code Table34 (0x0218) — Bit field"""
+    """Error Code Table34 (0x0215) — Bit field"""
     BITS = {
     }
 
@@ -831,7 +819,7 @@ class ErrorCode34:
 
 
 class ErrorCode35:
-    """Error Code Table35 (0x0219) — Bit field"""
+    """Error Code Table35 (0x0216) — Bit field"""
     BITS = {
     }
 
@@ -845,7 +833,7 @@ class ErrorCode35:
 
 
 class ErrorCode36:
-    """Error Code Table36 (0x021A) — Bit field"""
+    """Error Code Table36 (0x0217) — Bit field"""
     BITS = {
     }
 
@@ -859,7 +847,7 @@ class ErrorCode36:
 
 
 class ErrorCode37:
-    """Error Code Table37 (0x021B) — Bit field"""
+    """Error Code Table37 (0x0218) — Bit field"""
     BITS = {
     }
 
@@ -873,7 +861,7 @@ class ErrorCode37:
 
 
 class ErrorCode38:
-    """Error Code Table38 (0x021C) — Bit field"""
+    """Error Code Table38 (0x0219) — Bit field"""
     BITS = {
     }
 
@@ -887,7 +875,7 @@ class ErrorCode38:
 
 
 class ErrorCode39:
-    """Error Code Table39 (0x021D) — Bit field"""
+    """Error Code Table39 (0x021A) — Bit field"""
     BITS = {
     }
 
@@ -901,7 +889,7 @@ class ErrorCode39:
 
 
 class ErrorCode40:
-    """Error Code Table40 (0x021E) — Bit field"""
+    """Error Code Table40 (0x021B) — Bit field"""
     BITS = {
     }
 
@@ -915,7 +903,7 @@ class ErrorCode40:
 
 
 class ErrorCode41:
-    """Error Code Table41 (0x021F) — Bit field"""
+    """Error Code Table41 (0x021C) — Bit field"""
     BITS = {
     }
 
@@ -929,7 +917,7 @@ class ErrorCode41:
 
 
 class ErrorCode42:
-    """Error Code Table42 (0x0220) — Bit field"""
+    """Error Code Table42 (0x021D) — Bit field"""
     BITS = {
     }
 
@@ -943,7 +931,7 @@ class ErrorCode42:
 
 
 class ErrorCode43:
-    """Error Code Table43 (0x0221) — Bit field"""
+    """Error Code Table43 (0x021E) — Bit field"""
     BITS = {
     }
 
@@ -957,7 +945,7 @@ class ErrorCode43:
 
 
 class ErrorCode44:
-    """Error Code Table44 (0x0222) — Bit field"""
+    """Error Code Table44 (0x021F) — Bit field"""
     BITS = {
     }
 
@@ -971,7 +959,7 @@ class ErrorCode44:
 
 
 class ErrorCode45:
-    """Error Code Table45 (0x0223) — Bit field"""
+    """Error Code Table45 (0x0220) — Bit field"""
     BITS = {
     }
 
@@ -985,7 +973,7 @@ class ErrorCode45:
 
 
 class ErrorCode46:
-    """Error Code Table46 (0x0224) — Bit field"""
+    """Error Code Table46 (0x0221) — Bit field"""
     BITS = {
     }
 
@@ -999,7 +987,7 @@ class ErrorCode46:
 
 
 class ErrorCode47:
-    """Error Code Table47 (0x0225) — Bit field"""
+    """Error Code Table47 (0x0222) — Bit field"""
     BITS = {
     }
 
@@ -1013,7 +1001,7 @@ class ErrorCode47:
 
 
 class ErrorCode48:
-    """Error Code Table48 (0x0226) — Bit field"""
+    """Error Code Table48 (0x0223) — Bit field"""
     BITS = {
     }
 
@@ -1027,7 +1015,7 @@ class ErrorCode48:
 
 
 class ErrorCode49:
-    """Error Code Table49 (0x0227) — Bit field"""
+    """Error Code Table49 (0x0224) — Bit field"""
     BITS = {
     }
 
@@ -1041,7 +1029,7 @@ class ErrorCode49:
 
 
 class ErrorCode50:
-    """Error Code Table50 (0x0228) — Bit field"""
+    """Error Code Table50 (0x0225) — Bit field"""
     BITS = {
     }
 
@@ -1055,7 +1043,7 @@ class ErrorCode50:
 
 
 class ErrorCode51:
-    """Error Code Table51 (0x0229) — Bit field"""
+    """Error Code Table51 (0x0226) — Bit field"""
     BITS = {
     }
 
@@ -1069,7 +1057,7 @@ class ErrorCode51:
 
 
 class ErrorCode52:
-    """Error Code Table52 (0x022A) — Bit field"""
+    """Error Code Table52 (0x0227) — Bit field"""
     BITS = {
     }
 
@@ -1083,7 +1071,7 @@ class ErrorCode52:
 
 
 class ErrorCode53:
-    """Error Code Table53 (0x022B) — Bit field"""
+    """Error Code Table53 (0x0228) — Bit field"""
     BITS = {
     }
 
@@ -1097,7 +1085,7 @@ class ErrorCode53:
 
 
 class ErrorCode54:
-    """Error Code Table54 (0x022C) — Bit field"""
+    """Error Code Table54 (0x0229) — Bit field"""
     BITS = {
     }
 
@@ -1111,7 +1099,7 @@ class ErrorCode54:
 
 
 class ErrorCode55:
-    """Error Code Table55 (0x022D) — Bit field"""
+    """Error Code Table55 (0x022A) — Bit field"""
     BITS = {
     }
 
@@ -1125,7 +1113,7 @@ class ErrorCode55:
 
 
 class ErrorCode56:
-    """Error Code Table56 (0x022E) — Bit field"""
+    """Error Code Table56 (0x022B) — Bit field"""
     BITS = {
     }
 
@@ -1139,7 +1127,7 @@ class ErrorCode56:
 
 
 class ErrorCode57:
-    """Error Code Table57 (0x022F) — Bit field"""
+    """Error Code Table57 (0x022C) — Bit field"""
     BITS = {
     }
 
@@ -1153,7 +1141,7 @@ class ErrorCode57:
 
 
 class ErrorCode58:
-    """Error Code Table58 (0x0230) — Bit field"""
+    """Error Code Table58 (0x022D) — Bit field"""
     BITS = {
     }
 
@@ -1167,7 +1155,7 @@ class ErrorCode58:
 
 
 class ErrorCode59:
-    """Error Code Table59 (0x0231) — Bit field"""
+    """Error Code Table59 (0x022E) — Bit field"""
     BITS = {
     }
 
@@ -1181,7 +1169,7 @@ class ErrorCode59:
 
 
 class ErrorCode60:
-    """Error Code Table60 (0x0232) — Bit field"""
+    """Error Code Table60 (0x022F) — Bit field"""
     BITS = {
     }
 
@@ -1195,7 +1183,7 @@ class ErrorCode60:
 
 
 class ErrorCode61:
-    """Error Code Table61 (0x0233) — Bit field"""
+    """Error Code Table61 (0x0230) — Bit field"""
     BITS = {
     }
 
@@ -1209,7 +1197,7 @@ class ErrorCode61:
 
 
 class ErrorCode62:
-    """Error Code Table62 (0x0234) — Bit field"""
+    """Error Code Table62 (0x0231) — Bit field"""
     BITS = {
     }
 
@@ -1223,7 +1211,7 @@ class ErrorCode62:
 
 
 class ErrorCode63:
-    """Error Code Table63 (0x0235) — Bit field"""
+    """Error Code Table63 (0x0232) — Bit field"""
     BITS = {
     }
 
@@ -1237,7 +1225,7 @@ class ErrorCode63:
 
 
 class ErrorCode64:
-    """Error Code Table64 (0x0236) — Bit field"""
+    """Error Code Table64 (0x0233) — Bit field"""
     BITS = {
     }
 
@@ -1251,7 +1239,7 @@ class ErrorCode64:
 
 
 class ErrorCode65:
-    """Error Code Table65 (0x0237) — Bit field"""
+    """Error Code Table65 (0x0234) — Bit field"""
     BITS = {
     }
 
@@ -1265,7 +1253,7 @@ class ErrorCode65:
 
 
 class ErrorCode66:
-    """Error Code Table66 (0x0238) — Bit field"""
+    """Error Code Table66 (0x0235) — Bit field"""
     BITS = {
     }
 
@@ -1279,7 +1267,7 @@ class ErrorCode66:
 
 
 class ErrorCode67:
-    """Error Code Table67 (0x0239) — Bit field"""
+    """Error Code Table67 (0x0236) — Bit field"""
     BITS = {
     }
 
@@ -1293,7 +1281,7 @@ class ErrorCode67:
 
 
 class ErrorCode68:
-    """Error Code Table68 (0x023A) — Bit field"""
+    """Error Code Table68 (0x0237) — Bit field"""
     BITS = {
     }
 
@@ -1307,7 +1295,7 @@ class ErrorCode68:
 
 
 class ErrorCode69:
-    """Error Code Table69 (0x023B) — Bit field"""
+    """Error Code Table69 (0x0238) — Bit field"""
     BITS = {
     }
 
@@ -1321,7 +1309,7 @@ class ErrorCode69:
 
 
 class ErrorCode70:
-    """Error Code Table70 (0x0244) — Bit field"""
+    """Error Code Table70 (0x0239) — Bit field"""
     BITS = {
     }
 
@@ -1335,7 +1323,7 @@ class ErrorCode70:
 
 
 class ErrorCode71:
-    """Error Code Table71 (0x0245) — Bit field"""
+    """Error Code Table71 (0x023A) — Bit field"""
     BITS = {
     }
 
@@ -1349,7 +1337,7 @@ class ErrorCode71:
 
 
 class ErrorCode72:
-    """Error Code Table72 (0x0246) — Bit field"""
+    """Error Code Table72 (0x023B) — Bit field"""
     BITS = {
     }
 
@@ -1363,7 +1351,7 @@ class ErrorCode72:
 
 
 class ErrorCode73:
-    """Error Code Table73 (0x0247) — Bit field"""
+    """Error Code Table73 (0x0244) — Bit field"""
     BITS = {
     }
 
@@ -1377,7 +1365,7 @@ class ErrorCode73:
 
 
 class ErrorCode74:
-    """Error Code Table74 (0x0248) — Bit field"""
+    """Error Code Table74 (0x0245) — Bit field"""
     BITS = {
     }
 
@@ -1391,7 +1379,7 @@ class ErrorCode74:
 
 
 class ErrorCode75:
-    """Error Code Table75 (0x0249) — Bit field"""
+    """Error Code Table75 (0x0246) — Bit field"""
     BITS = {
     }
 
@@ -1405,7 +1393,7 @@ class ErrorCode75:
 
 
 class ErrorCode76:
-    """Error Code Table76 (0x024A) — Bit field"""
+    """Error Code Table76 (0x0247) — Bit field"""
     BITS = {
     }
 
@@ -1419,7 +1407,7 @@ class ErrorCode76:
 
 
 class ErrorCode77:
-    """Error Code Table77 (0x024B) — Bit field"""
+    """Error Code Table77 (0x0248) — Bit field"""
     BITS = {
     }
 
@@ -1433,7 +1421,7 @@ class ErrorCode77:
 
 
 class ErrorCode78:
-    """Error Code Table78 (0x13AF) — Bit field"""
+    """Error Code Table78 (0x0249) — Bit field"""
     BITS = {
     }
 
@@ -1447,7 +1435,7 @@ class ErrorCode78:
 
 
 class ErrorCode79:
-    """Error Code Table79 (0x13B0) — Bit field"""
+    """Error Code Table79 (0x024A) — Bit field"""
     BITS = {
     }
 
@@ -1461,7 +1449,7 @@ class ErrorCode79:
 
 
 class ErrorCode80:
-    """Error Code Table80 (0x13B1) — Bit field"""
+    """Error Code Table80 (0x024B) — Bit field"""
     BITS = {
     }
 
@@ -1475,7 +1463,7 @@ class ErrorCode80:
 
 
 class ErrorCode81:
-    """Error Code Table81 (0x13B2) — Bit field"""
+    """Error Code Table81 (0x13AF) — Bit field"""
     BITS = {
     }
 
@@ -1489,7 +1477,7 @@ class ErrorCode81:
 
 
 class ErrorCode82:
-    """Error Code Table82 (0x13B3) — Bit field"""
+    """Error Code Table82 (0x13B0) — Bit field"""
     BITS = {
     }
 
@@ -1503,7 +1491,7 @@ class ErrorCode82:
 
 
 class ErrorCode83:
-    """Error Code Table83 (0x13B4) — Bit field"""
+    """Error Code Table83 (0x13B1) — Bit field"""
     BITS = {
     }
 
@@ -1517,7 +1505,7 @@ class ErrorCode83:
 
 
 class ErrorCode84:
-    """Error Code Table84 (0x13B5) — Bit field"""
+    """Error Code Table84 (0x13B2) — Bit field"""
     BITS = {
     }
 
@@ -1531,7 +1519,7 @@ class ErrorCode84:
 
 
 class ErrorCode85:
-    """Error Code Table85 (0x141F) — Bit field"""
+    """Error Code Table85 (0x13B3) — Bit field"""
     BITS = {
     }
 
@@ -1545,7 +1533,7 @@ class ErrorCode85:
 
 
 class ErrorCode86:
-    """Error Code Table86 (0x2500) — Bit field"""
+    """Error Code Table86 (0x13B4) — Bit field"""
     BITS = {
     }
 
@@ -1559,7 +1547,49 @@ class ErrorCode86:
 
 
 class ErrorCode87:
-    """Error Code Table87 (0x5500) — Bit field"""
+    """Error Code Table87 (0x13B5) — Bit field"""
+    BITS = {
+    }
+
+    @classmethod
+    def decode(cls, value):
+        return [f"E{b}:{d}" for b, d in cls.BITS.items() if value & (1 << b)]
+
+    @classmethod
+    def to_string(cls, value):
+        return ", ".join(cls.decode(value)) if value else "OK"
+
+
+class ErrorCode88:
+    """Error Code Table88 (0x141F) — Bit field"""
+    BITS = {
+    }
+
+    @classmethod
+    def decode(cls, value):
+        return [f"E{b}:{d}" for b, d in cls.BITS.items() if value & (1 << b)]
+
+    @classmethod
+    def to_string(cls, value):
+        return ", ".join(cls.decode(value)) if value else "OK"
+
+
+class ErrorCode89:
+    """Error Code Table89 (0x2500) — Bit field"""
+    BITS = {
+    }
+
+    @classmethod
+    def decode(cls, value):
+        return [f"E{b}:{d}" for b, d in cls.BITS.items() if value & (1 << b)]
+
+    @classmethod
+    def to_string(cls, value):
+        return ", ".join(cls.decode(value)) if value else "OK"
+
+
+class ErrorCode90:
+    """Error Code Table90 (0x5500) — Bit field"""
     BITS = {
     }
 
@@ -1710,10 +1740,9 @@ DATA_TYPES = {
     'AC_INSTANTANEOUS_OVERCURRENT': 'U16',
     'FAULT': 'U16',
     'ALARM_RUN': 'U16',
-    'EXCESSIVE_LEAKAGE_CURRENT': 'U16',
+    'L1_VOLTAGE': 'U16',
     'COMMUNICATE_FAULT': 'U16',
-    'REG_10_MINUTE_GRID_OVERVOLTAGE': 'U16',
-    'GRID_HIGH_VOLTAGE': 'U16',
+    'L3_VOLTAGE': 'U16',
     'TOTAL_RUN_BIT_DEVICE_ISGRID_CONNECTED_RUNNING': 'U16',
     'TOTAL_FAULT_BIT_DEVICE_IS_INFAULT_STOP_STATE': 'U16',
     'PV_CONNECTION_FAULT': 'U16',
@@ -1726,7 +1755,7 @@ DATA_TYPES = {
     'COMMUNICATION_ALARM': 'U16',
     'PV1_ABNORMAL': 'U16',
     'PV2_ABNORMAL': 'U16',
-    'PV3_ABNORMAL': 'U16',
+    'PV_POWER': 'U16',
     'PV4_ABNORMAL': 'U16',
     'ELECTRIC_ARC_FAULT': 'U16',
     'GRID_SIDE_PROTECTION_SELF_CHECK_FAILURE': 'U16',
@@ -1851,17 +1880,17 @@ DATA_TYPES = {
     'OUTPUT_TYPE': 'U16',
     'DAILY_ENERGY': 'U16',
     'CUMULATIVE_ENERGY': 'U32',
+    'CUMULATIVE_ENERGY_HIGH': 'U16',
     'TOTAL_RUNNING_TIME': 'U32',
-    'POWERLIMITATIONSWITCH': 'U16',
+    'TOTAL_RUNNING_TIME_HIGH': 'U16',
     'TOTAL_APPARENTPOWER': 'U32',
-    'EXPORT_POWERLIMITATION': 'U16',
+    'TOTAL_APPARENTPOWER_HIGH': 'U16',
     'MPPT_1_VOLTAGE': 'U16',
     'MPPT_1_CURRENT': 'U16',
     'MPPT_2_VOLTAGE': 'U16',
     'MPPT_2_CURRENT': 'U16',
     'MPPT_3_VOLTAGE': 'U16',
     'MPPT_3_CURRENT': 'U16',
-    'PV_POWER': 'U32',
     'A_B_LINEVOLTAGE_PHASE_AVOLTAGE': 'U16',
     'B_C_LINE_VOLTAGE_PHASE_BVOLTAGE': 'U16',
     'C_A_LINE_VOLTAGE_PHASE_CVOLTAGE': 'U16',
@@ -1889,18 +1918,25 @@ DATA_TYPES = {
     'PF_MAX': 'U16',
     'ARRAY_INSULATIONRESISTANCE': 'U16',
     'ACTIVE_POWER_REGULATION_SETPOINT': 'U32',
+    'ACTIVE_POWER_REGULATION_SETPOINT_HIGH': 'U16',
     'REACTIVE_POWER_REGULATION_SETPOINT': 'S32',
     'METER_POWER': 'S32',
+    'METER_POWER_HIGH': 'U16',
     'METER_A_PHASEPOWER': 'S32',
+    'METER_A_PHASEPOWER_HIGH': 'U16',
     'METER_B_PHASEPOWER': 'S32',
     'METER_C_PHASEPOWER': 'S32',
     'LOAD_POWER': 'S32',
     'DAILY_EXPORT_ENERGY': 'U32',
     'TOTAL_EXPORT_ENERGY': 'U32',
     'DAILY_IMPORT_ENERGY': 'U32',
+    'DAILY_IMPORT_ENERGY_HIGH': 'U16',
     'TOTAL_IMPORT_ENERGY': 'U32',
+    'TOTAL_IMPORT_ENERGY_HIGH': 'U16',
     'DAILY_DIRECT_ENERGYCONSUMPTION': 'U32',
+    'DAILY_DIRECT_ENERGYCONSUMPTION_HIGH': 'U16',
     'TOTAL_DIRECT_ENERGYCONSUMPTION': 'U32',
+    'TOTAL_DIRECT_ENERGYCONSUMPTION_HIGH': 'U16',
     'DAILY_RUNNING_TIME': 'U16',
     'PRESENT_COUNTRY': 'U16',
     'MPPT_4_VOLTAGE': 'U16',
