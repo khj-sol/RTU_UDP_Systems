@@ -60,6 +60,20 @@ def extract_pdf_text_and_tables(pdf_path: str) -> List[dict]:
     return pages
 
 
+# 제어/설정 레지스터를 STATUS/ALARM 정의 적용 대상에서 제외하기 위한 키워드
+_CONTROL_REG_EXCL = [
+    'reactive', 'power factor', 'active power', 'voltage limit',
+    'current limit', 'frequency limit', 'setting', 'control',
+    'threshold', 'setpoint', 'permanen', 'fixed', 'droop',
+]
+
+
+def _is_control_reg(reg) -> bool:
+    """제어/설정 레지스터 여부 판단 — STATUS/ALARM 정의 적용 대상 제외용"""
+    dl = reg.definition.lower().replace('_', ' ')
+    return any(k in dl for k in _CONTROL_REG_EXCL)
+
+
 def _apply_saved_definitions(categorized: dict, manufacturer: str, log=None):
     """definitions/{manufacturer}_definitions.json에서 정의 로드 (PDF 파싱으로 못 찾은 경우 fallback)"""
     defs_dir = os.path.join(os.path.dirname(__file__), 'definitions')
@@ -74,20 +88,20 @@ def _apply_saved_definitions(categorized: dict, manufacturer: str, log=None):
     status_defs = saved.get('status_definitions', {})
     alarm_codes = saved.get('alarm_codes', {})
 
-    # STATUS: value_definitions 없는 inverter_status 레지스터에 적용
+    # STATUS: value_definitions 없는 inverter_status 레지스터에 적용 (제어 레지스터 제외)
     if status_defs:
         for reg in categorized.get('STATUS', []):
             if getattr(reg, 'h01_field', '') == 'inverter_status':
-                if not getattr(reg, 'value_definitions', None):
+                if not getattr(reg, 'value_definitions', None) and not _is_control_reg(reg):
                     reg.value_definitions = status_defs
                     if log:
                         log(f'  정의 파일 적용 (status): {fname} ({len(status_defs)}개)')
                 break
 
-    # ALARM: value_definitions 없는 첫 번째 ALARM에 적용
+    # ALARM: value_definitions 없는 첫 번째 ALARM에 적용 (제어 레지스터 제외)
     if alarm_codes:
         for reg in categorized.get('ALARM', []):
-            if not getattr(reg, 'value_definitions', None):
+            if not getattr(reg, 'value_definitions', None) and not _is_control_reg(reg):
                 reg.value_definitions = alarm_codes
                 if log:
                     log(f'  정의 파일 적용 (alarm): {fname} ({len(alarm_codes)}개)')
@@ -2808,10 +2822,10 @@ def _suggest_candidates(x_field: str, all_regs: list, categorized: dict) -> list
 
 def _link_definitions_to_registers(categorized: dict, def_tables: dict):
     """정의 테이블을 STATUS/ALARM 레지스터에 연결"""
-    # STATUS: h01_field='inverter_status'인 레지스터에 가장 적합한 mode_table 연결
+    # STATUS: h01_field='inverter_status'인 레지스터에 가장 적합한 mode_table 연결 (제어 레지스터 제외)
     status_reg = None
     for reg in categorized.get('STATUS', []):
-        if getattr(reg, 'h01_field', '') == 'inverter_status':
+        if getattr(reg, 'h01_field', '') == 'inverter_status' and not _is_control_reg(reg):
             status_reg = reg
             break
     if status_reg and not getattr(status_reg, 'value_definitions', None):
@@ -2855,9 +2869,9 @@ def _link_definitions_to_registers(categorized: dict, def_tables: dict):
 
         best_alarm_def = best_bitfield or best_fault
         if best_alarm_def:
-            # alarm1에 연결
+            # alarm1에 연결 (제어 레지스터 제외)
             for reg in alarm_regs:
-                if not getattr(reg, 'value_definitions', None):
+                if not getattr(reg, 'value_definitions', None) and not _is_control_reg(reg):
                     reg.value_definitions = best_alarm_def['values']
                     break  # 첫 번째 ALARM만
 
