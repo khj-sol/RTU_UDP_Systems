@@ -2537,10 +2537,9 @@ def _build_all_suggestions(h01_table: list, categorized: dict,
             if log: log(f'  제안: H01 [{x_row["field"]}] 후보 {len(sorted_cands)}개 (선택 필요)')
 
     # ── 3. STATUS/ALARM 정의 없음 ──
+    # h01_field 무관하게 STATUS 카테고리 레지스터 중 value_definitions가 있으면 OK
     status_regs = categorized.get('STATUS', [])
-    status_with_defs = [r for r in status_regs
-                        if getattr(r, 'h01_field', '') == 'inverter_status'
-                        and getattr(r, 'value_definitions', None)]
+    status_with_defs = [r for r in status_regs if getattr(r, 'value_definitions', None)]
     if status_regs and not status_with_defs:
         cands = [{'addr': '-', 'definition': 'STATUS 레지스터 값 정의 테이블 없음',
                   'score': 0, 'reason': 'PDF에서 Inverter Mode/State 값 정의를 찾지 못함',
