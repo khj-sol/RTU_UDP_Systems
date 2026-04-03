@@ -716,14 +716,23 @@
     }
   }
 
+  function fmtMatch(matched, total) {
+    if (matched === total) return '<span style="color:#4ade80;font-weight:700">OK</span>';
+    return `<span style="color:#f87171">${matched}/${total}</span>`;
+  }
+
   function onStage2Done(msg) {
-    appendLog('s2', `H01: ${msg.h01_matched}/${msg.h01_total}  DER: ${msg.der_matched}/${msg.der_total}`, 'ok');
+    const h01ok = msg.h01_matched === msg.h01_total;
+    const derOk = msg.der_matched === msg.der_total;
+    appendLog('s2',
+      `H01: ${msg.h01_matched}/${msg.h01_total}  DER: ${msg.der_matched}/${msg.der_total}`,
+      h01ok && derOk ? 'ok' : 'warn');
     if (msg.review_count > 0 && msg.review_items && msg.review_items.length > 0) {
       appendLog('s2', `REVIEW ${msg.review_count}개 — 판정 후 Stage 3 진행`, 'warn');
       showReview(msg.review_items);
       document.getElementById('card-s2').className = 'stage-card done';
       document.getElementById('s3-summary').innerHTML =
-        `H01 ${msg.h01_matched}/${msg.h01_total}  |  DER ${msg.der_matched}/${msg.der_total}` +
+        `H01 ${fmtMatch(msg.h01_matched, msg.h01_total)}  |  DER ${fmtMatch(msg.der_matched, msg.der_total)}` +
         `<br><span style="color:#fbbf24">REVIEW ${msg.review_count}개 미결</span>`;
       return; // Stage 3는 REVIEW 판정 후 활성화
     }
@@ -731,7 +740,7 @@
     document.getElementById('card-s3').className = 'stage-card active';
     document.getElementById('btn-s3').disabled = false;
     document.getElementById('s3-summary').innerHTML =
-      `H01 ${msg.h01_matched}/${msg.h01_total}  |  DER ${msg.der_matched}/${msg.der_total}`;
+      `H01 ${fmtMatch(msg.h01_matched, msg.h01_total)}  |  DER ${fmtMatch(msg.der_matched, msg.der_total)}`;
   }
 
   function onStage3Done(msg) {
