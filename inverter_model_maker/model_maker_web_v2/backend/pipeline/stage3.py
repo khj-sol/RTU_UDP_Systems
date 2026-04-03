@@ -338,8 +338,7 @@ def _gen_register_map(regs_by_cat: dict, mppt: int, total_strings: int,
     # Standard handler compatibility aliases (H01 Body Type 4 required)
     lines.append('    # --- Standard handler compatibility aliases (H01 Body Type 4 required) ---')
     compat_aliases = [
-        ('R_PHASE_VOLTAGE', 'L1_VOLTAGE'), ('S_PHASE_VOLTAGE', 'L2_VOLTAGE'),
-        ('T_PHASE_VOLTAGE', 'L3_VOLTAGE'),
+        ('R_PHASE_VOLTAGE', 'L1_VOLTAGE'), ('T_PHASE_VOLTAGE', 'L3_VOLTAGE'),
         ('R_PHASE_CURRENT', 'L1_CURRENT'), ('S_PHASE_CURRENT', 'L2_CURRENT'),
         ('T_PHASE_CURRENT', 'L3_CURRENT'),
         ('FREQUENCY', 'L1_FREQUENCY'),
@@ -350,6 +349,45 @@ def _gen_register_map(regs_by_cat: dict, mppt: int, total_strings: int,
     for alias, src in compat_aliases:
         if src in all_defined:
             lines.append(f'    {alias:40s} = {src}')
+            all_defined.add(alias)
+
+    # S_PHASE_VOLTAGE: L2_VOLTAGE 없으면 L1_VOLTAGE로 대체 (단상/Sungrow 등)
+    if 'S_PHASE_VOLTAGE' not in all_defined:
+        fallback = next((x for x in ['L2_VOLTAGE', 'L1_VOLTAGE', 'R_PHASE_VOLTAGE'] if x in all_defined), None)
+        if fallback:
+            lines.append(f'    {"S_PHASE_VOLTAGE":40s} = {fallback}  # L2 없음 → 대체')
+            all_defined.add('S_PHASE_VOLTAGE')
+
+    # MPPT{N}_VOLTAGE/CURRENT aliases (handler: MPPTn_, 생성파일: MPPT_N_)
+    lines.append('')
+    lines.append('    # --- MPPT alias (modbus_handler: MPPT{N}_ 형식) ---')
+    for i in range(1, 17):
+        src_v = f'MPPT_{i}_VOLTAGE'
+        src_c = f'MPPT_{i}_CURRENT'
+        if src_v in all_defined:
+            lines.append(f'    {"MPPT%d_VOLTAGE" % i:40s} = {src_v}')
+            all_defined.add(f'MPPT{i}_VOLTAGE')
+        if src_c in all_defined:
+            lines.append(f'    {"MPPT%d_CURRENT" % i:40s} = {src_c}')
+            all_defined.add(f'MPPT{i}_CURRENT')
+        if src_v not in all_defined:
+            break  # 연속되지 않으면 중단
+
+    # PV_VOLTAGE: 대표 PV 전압 (MPPT1 또는 PV_INPUT_VOLTAGE)
+    if 'PV_VOLTAGE' not in all_defined:
+        for _pv in ['MPPT1_VOLTAGE', 'MPPT_1_VOLTAGE', 'PV_INPUT_VOLTAGE', 'DC_VOLTAGE', 'L1_VOLTAGE']:
+            if _pv in all_defined:
+                lines.append(f'    {"PV_VOLTAGE":40s} = {_pv}')
+                all_defined.add('PV_VOLTAGE')
+                break
+
+    # PV_STRING_COUNT: 실제 string 수 (mppt × strings_per_mppt)
+    if 'PV_STRING_COUNT' not in all_defined:
+        _sc = mppt * strings_per_mppt if (mppt and strings_per_mppt) else 0
+        if _sc > 0:
+            lines.append(f'    {"PV_STRING_COUNT":40s} = {_sc}')
+            all_defined.add('PV_STRING_COUNT')
+
     lines.append('')
 
     # DER-AVM backward compatibility aliases
@@ -764,6 +802,10 @@ def validate_code(code: str, mppt: int, total_strings: int,
     checks['alias_INVERTER_MODE'] = 'INVERTER_MODE' in code
     checks['alias_INVERTER_ON_OFF'] = 'INVERTER_ON_OFF' in code
     checks['alias_DER_POWER_FACTOR_SET'] = 'DER_POWER_FACTOR_SET' in code
+    checks['alias_S_PHASE_VOLTAGE'] = 'S_PHASE_VOLTAGE' in code
+    checks['alias_MPPT1_VOLTAGE'] = 'MPPT1_VOLTAGE' in code
+    checks['alias_PV_VOLTAGE'] = 'PV_VOLTAGE' in code
+    checks['alias_PV_STRING_COUNT'] = 'PV_STRING_COUNT' in code
     checks['get_string_registers'] = 'def get_string_registers' in code
     checks['get_mppt_registers'] = 'def get_mppt_registers' in code
     checks['DATA_TYPES'] = 'DATA_TYPES' in code
