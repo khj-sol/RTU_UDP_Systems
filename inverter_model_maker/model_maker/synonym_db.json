@@ -31,7 +31,36 @@
         "String 1 abnormal alarm",
         "String 2 abnormal alarm",
         "String 8 abnormal alarm",
-        "String 9 abnormal alarm"
+        "String 9 abnormal alarm",
+        "Internal storage error",
+        "Byte number",
+        "ST-phase grid voltage",
+        "TR-phase grid voltage",
+        "DUBAI",
+        "Gridvoltage(phase Avoltage)",
+        "Ambient Temperature Over",
+        "RS-phase grid voltage",
+        "ST-phase grid frequency",
+        "TR-phase grid frequency",
+        "G83-Scotland",
+        "Excessive leakage current",
+        "String 3 abnormal alarm",
+        "String 4 abnormal alarm",
+        "String 5 abnormal alarm",
+        "String 6 abnormal alarm",
+        "String 11 abnormal alarm",
+        "String 12 abnormal alarm",
+        "String 14 abnormal alarm",
+        "String 15 abnormal alarm",
+        "String 16 abnormal alarm",
+        "String 17 abnormal alarm",
+        "String 18 abnormal alarm",
+        "String 19 abnormal alarm",
+        "String 20 abnormal alarm",
+        "String 21 abnormal alarm",
+        "String 22 abnormal alarm",
+        "String 23 abnormal alarm",
+        "String 24 abnormal alarm"
       ]
     },
     "L2_VOLTAGE": {
@@ -61,7 +90,15 @@
         "Internal Error E029",
         "Internal Error E030",
         "Inverter address",
-        "AC current imbalance"
+        "AC current imbalance",
+        "Data inconsistency",
+        "DUBAI-MV480",
+        "Cos?-P/Pnexitvoltage",
+        "Sink Temperature Over",
+        "CEI0-21",
+        "DUBAI-MV800",
+        "DC지락",
+        "Communicate fault"
       ]
     },
     "L3_VOLTAGE": {
@@ -86,7 +123,17 @@
         "Grid Faultrecord 2-value",
         "Grid Faultrecord 3-value",
         "Grid Faultrecord 4-value",
-        "Average grid over-voltage (10minutes)"
+        "Average grid over-voltage (10minutes)",
+        "Inverter abnormal",
+        "T-phase CurrentCalibration Factor",
+        "Northern Ireland",
+        "CAlinevoltage",
+        "AC Relay Fault",
+        "T-phase VoltageCalibration Factor",
+        "R-phase CurrentCalibration Factor",
+        "0x0E",
+        "비상 스위치ON",
+        "10-minute grid overvoltage"
       ]
     },
     "L1_CURRENT": {
@@ -104,7 +151,11 @@
         "Grid Current Phase A",
         "Inverter – Part number (PN5)",
         "String 10 abnormal alarm",
-        "Vref Error"
+        "Vref Error",
+        "String Test Threshold",
+        "Northern Ireland-MV480",
+        "LeakagecurrentRCD",
+        "Northern Ireland-MV800"
       ]
     },
     "L2_CURRENT": {
@@ -122,7 +173,9 @@
         "Grid Not Present",
         "Low ambient temperature",
         "The ambient temperature fallsbelow - 25 °C (-13 °F)",
-        "Total activepower"
+        "Total activepower",
+        "Cameroon",
+        "Q-Ucurve"
       ]
     },
     "L3_CURRENT": {
@@ -139,7 +192,11 @@
         "T_PHASE_CURRENT",
         "Input OC",
         "Inverter – Country/Grid standard",
-        "Sys Day"
+        "Sys Day",
+        "Battery VoltageCalibration Factor",
+        "Cameroon-MV480",
+        "CTratedcurrent",
+        "Cameroon-MV800"
       ]
     },
     "AC_POWER": {
@@ -154,7 +211,9 @@
         "Total AC Power",
         "Grid Total Active Power",
         "Inverter –Transformer type",
-        "Total reactivepower"
+        "Total reactivepower",
+        "Grid total Reactive Power",
+        "Overfrequency powerreduction percentage"
       ]
     },
     "POWER_FACTOR": {
@@ -171,7 +230,22 @@
         "Length of the following fields",
         "Inverter Status",
         "OnOff",
-        "Reactive powerpercentage setting"
+        "Reactive powerpercentage setting",
+        "Broadcast address",
+        "Fan A Lock",
+        "VDE-AR-N-4105",
+        "Custom MV600-50 Hz",
+        "Powerfactor",
+        "PV total(98)PV1(99)PV2(100)",
+        "역률(종합) PF",
+        "Custom MV480 (50 Hz)",
+        "VDE-AR-N4120-HV",
+        "VDE-AR-N4120-HV480",
+        "VDE-AR-N4120-HV800",
+        "Custom-MV800-50Hz",
+        "VDE-AR-N4110",
+        "VDE-AR-N4110-MV480",
+        "VDE-AR-N4110-MV800"
       ]
     },
     "FREQUENCY": {
@@ -193,7 +267,19 @@
         "LCDlanguage",
         "Grid overvoltage",
         "Internal ambient temperatureis too high.",
-        "Operating State"
+        "Operating State",
+        "Boost abnormal",
+        "L2 Frequency",
+        "L3 Frequency",
+        "Frequency of grid",
+        "Day Generation",
+        "Gridfrequency",
+        "FrequencyClass",
+        "주파수 Frequency",
+        "Reserve",
+        "RD1699/661",
+        "전체 상태",
+        "Grid high voltage"
       ]
     },
     "PV_POWER": {
@@ -215,7 +301,30 @@
         "Pac2 L",
         "Pac3 L",
         "Pac3 H",
-        "PV 3 power event warning"
+        "PV 3 power event warning",
+        "PV12 input power",
+        "PV11 input power",
+        "PV10 input power",
+        "PV9 input power",
+        "PV8 input power",
+        "PV7 input power",
+        "PV6 input power",
+        "PV5 input power",
+        "PV4 input power",
+        "PV1 input power",
+        "PV2 input power",
+        "PV3 input power",
+        "Rotational speed of fan B",
+        "ELECTRIC RULE NO.21-MV600",
+        "태양전지 전력",
+        "Rotational speed of fan A",
+        "Rotational speed of fan C",
+        "ELECTRIC RULE NO.21-MV480",
+        "ELECTRIC RULE NO.21-MV800",
+        "ELECTRIC RULE NO.21-LV208",
+        "ELECTRIC RULE NO.21-LV240",
+        "TotalDCInputPower",
+        "PV3 abnormal"
       ]
     },
     "CUMULATIVE_ENERGY": {
@@ -238,7 +347,20 @@
         "Cap",
         "WH",
         "Energy total H",
-        "Energy total L"
+        "Energy total L",
+        "Accumulated energy ofimport",
+        "Accumulated energy ofexport",
+        "Accumulated energy of load",
+        "Total energy yield",
+        "Daily energy yield",
+        "Annual energy yield",
+        "MPPT4DCAccumulatedEnergyYield",
+        "Accumulatedenergyyieldcorrection",
+        "SettingtheAccumulatedEnergyYield",
+        "누적발전량",
+        "적산전력량 Total generation Energy",
+        "CUMULATIVE_ENERGY_LOW",
+        "Accumulatedpowergeneration"
       ]
     },
     "DAILY_ENERGY": {
@@ -255,7 +377,8 @@
         "Inverter – Daily Energy",
         "Temperature Fault",
         "Time total L",
-        "Clamp capacitance under-voltage event is detected."
+        "Clamp capacitance under-voltage event is detected.",
+        "일발전량"
       ]
     },
     "CUMULATIVE_ENERGY_LOW": {
@@ -264,7 +387,8 @@
       "synonyms": [
         "Decimals of Total Energy",
         "Decimal of Total",
-        "Low Byte of Total Feed"
+        "Low Byte of Total Feed",
+        "적산전력량  소수점"
       ]
     },
     "REACTIVE_POWER": {
@@ -275,7 +399,19 @@
         "Grid Reactive Power",
         "AC Reactive Power",
         "Inverter – Grid Reactive Power",
-        "Inverter – Grid Power"
+        "Inverter – Grid Power",
+        "reactivepower",
+        "L2유효전력",
+        "L1전압",
+        "L2전압",
+        "L1전류",
+        "L2전류",
+        "L3전류",
+        "L1유효전력",
+        "L3유효전력",
+        "L1역률",
+        "L2역률",
+        "L3역률"
       ]
     },
     "TEMPERATURE": {
@@ -292,7 +428,8 @@
         "Current Input over threshold (out of measurement range)",
         "Fan Staucked",
         "Module temperature is toohigh.",
-        "Clamp capacitance imbalanceevent is detected."
+        "Clamp capacitance imbalanceevent is detected.",
+        "Temperature1"
       ]
     },
     "DEVICE_MODEL": {
@@ -392,7 +529,10 @@
         "MPPT3_POWER_/_MPPT3_VOLTAGE",
         "DCA",
         "mppt3_current",
-        "MPPT 3 current"
+        "MPPT 3 current",
+        "MPPT3 Current",
+        "PV3 input current",
+        "PV3current"
       ]
     }
   }

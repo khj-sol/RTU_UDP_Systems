@@ -57,8 +57,8 @@
     "date": "2026-04-03"
   },
   "407aa7a5ed90058124701d64f68eff8a98554fbc9de621eae35bdb40a7de6438": {
-    "manufacturer": "Solarize",
-    "pdf_filename": "Solarize Modbus Protocol-Korea-V1.2.4.pdf",
+    "manufacturer": "Senergy",
+    "pdf_filename": "Senergy-PV_Modbus_Protocol-Korea-V1.2.4.pdf",
     "h01": [
       60,
       60
@@ -68,8 +68,8 @@
       33
     ],
     "info_match": {
-      "model": true,
-      "sn": true
+      "model": false,
+      "sn": false
     },
     "max_mppt": 9,
     "max_string": 24,
@@ -77,7 +77,7 @@
   },
   "02295407f4459314caa89635dbe639f53af26e08f7c69e3f02c404c8d71fa336": {
     "manufacturer": "Sungrow",
-    "pdf_filename": "Sungrow_StringInverter_Modbus_Protocol_v1137.pdf",
+    "pdf_filename": "Sungrow-PV_StringInverter_Modbus_Protocol_v1137.pdf",
     "h01": [
       65,
       65
@@ -87,11 +87,68 @@
       33
     ],
     "info_match": {
-      "model": true,
-      "sn": true
+      "model": false,
+      "sn": false
     },
     "max_mppt": 12,
     "max_string": 24,
+    "date": "2026-04-03"
+  },
+  "db77f2df41de2f099f4b609c1be0ee4dbacaf2bc8de4bf7ec513f103e123ad33": {
+    "manufacturer": "Kstar",
+    "pdf_filename": "Kstar-PV_KSG1250K_Modbus_Protocol_v35.pdf",
+    "h01": [
+      65,
+      65
+    ],
+    "der": [
+      33,
+      33
+    ],
+    "info_match": {
+      "model": false,
+      "sn": false
+    },
+    "max_mppt": 12,
+    "max_string": 24,
+    "date": "2026-04-03"
+  },
+  "5688ee27feb6e682ac8623da0cec58ee99e2c4abab348373aab025c3fb0f846e": {
+    "manufacturer": "Huawei",
+    "pdf_filename": "Huawei-PV_SUN2000MC_Modbus_Interface_Definitions.pdf",
+    "h01": [
+      41,
+      41
+    ],
+    "der": [
+      33,
+      33
+    ],
+    "info_match": {
+      "model": false,
+      "sn": false
+    },
+    "max_mppt": 8,
+    "max_string": 8,
+    "date": "2026-04-03"
+  },
+  "36434d35ca6f48428bd5acd31cc2fea4f12115a68685a0ebf7ca82a5b034350e": {
+    "manufacturer": "Ekos",
+    "pdf_filename": "Ekos-PV_ModBus_map-EK_20220209_통신테스트용.xlsx",
+    "h01": [
+      21,
+      21
+    ],
+    "der": [
+      33,
+      33
+    ],
+    "info_match": {
+      "model": false,
+      "sn": false
+    },
+    "max_mppt": 1,
+    "max_string": 2,
     "date": "2026-04-03"
   }
 }
