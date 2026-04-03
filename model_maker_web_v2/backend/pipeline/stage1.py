@@ -2681,19 +2681,34 @@ def _suggest_candidates(x_field: str, all_regs: list, categorized: dict) -> list
         is_voltage = 'voltage' in x_field
         is_current = 'current' in x_field
 
+        # AC 위상 전류/전압 제외 키워드 (L1/L2/L3, R/S/T phase, Line, Grid)
+        _ac_phase_kw = ['l1 ', 'l2 ', 'l3 ', ' l1', ' l2', ' l3',
+                        'r phase', 's phase', 't phase', 'phase r', 'phase s', 'phase t',
+                        'line current', 'line voltage', 'grid current', 'grid voltage',
+                        'ac current', 'ac voltage', 'output current', 'output voltage']
+
         for reg in all_regs:
             dl = reg.definition.lower()
             score = 0
             reason = ''
 
+            # AC 위상 레지스터는 MPPT 후보에서 제외
+            if any(k in dl for k in _ac_phase_kw):
+                continue
+
             if is_voltage:
+                # 숫자 n이 MPPT 번호로 명시된 경우만 (pv3, mppt3, input 3 등)
                 if any(k in dl for k in ['volt', 'vpv', 'v pv', 'dc volt']):
-                    if str(n) in dl or f'pv{n}' in dl or f'input {n}' in dl:
+                    if (f'pv{n}' in dl or f'mppt{n}' in dl or
+                            f'input {n}' in dl or f'input{n}' in dl or
+                            f'dc{n}' in dl or f'pp{n}' in dl):
                         score = 80
                         reason = f'PV{n} voltage 후보'
             elif is_current:
                 if any(k in dl for k in ['curr', 'ipv', 'i pv', 'dc curr']):
-                    if str(n) in dl or f'pv{n}' in dl or f'input {n}' in dl:
+                    if (f'pv{n}' in dl or f'mppt{n}' in dl or
+                            f'input {n}' in dl or f'input{n}' in dl or
+                            f'dc{n}' in dl or f'pp{n}' in dl):
                         score = 80
                         reason = f'PV{n} current 후보'
 
@@ -2707,8 +2722,9 @@ def _suggest_candidates(x_field: str, all_regs: list, categorized: dict) -> list
                     'source': 'PDF',
                 })
 
-        # handler 계산 후보 (current = power/voltage)
-        if is_current:
+        # PDF 후보가 있는 경우만 handler 계산 옵션 추가
+        # PDF 후보가 없으면 handler 자동 처리 → 제안 불필요
+        if is_current and candidates:
             candidates.append({
                 'addr': '-',
                 'definition': f'mppt{n}_power / mppt{n}_voltage',
@@ -2717,6 +2733,11 @@ def _suggest_candidates(x_field: str, all_regs: list, categorized: dict) -> list
                 'reason': 'handler 계산 (P/V=I)',
                 'source': 'HANDLER',
             })
+
+        # PDF 후보도 없고 handler만이면 제안 안 함 (자동 처리)
+        if is_current and not candidates:
+            return []
+
         return sorted(candidates, key=lambda c: -c['score'])[:5]
 
     # 일반 필드 (pv_power, cumulative_energy, status, alarm1)
