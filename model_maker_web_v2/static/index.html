@@ -517,16 +517,14 @@
     }
     appendLog('s1', `카테고리: ${Object.entries(msg.counts||{}).filter(([k,v])=>v>0).map(([k,v])=>`${k}:${v}`).join(' ')}`, 'ok');
 
-    // INFO 매칭 상태 표시
+    // INFO 매칭 상태 표시 — Model 매칭되면 OK (SN 없어도 메타데이터로 대체 가능)
     const im = msg.info_match || {};
     const modelOk = im.model === true;
     const snOk    = im.sn    === true;
-    if (modelOk && snOk) {
-      appendLog('s1', 'INFO: OK  (Model ✓  SN ✓)', 'ok');
+    if (modelOk) {
+      appendLog('s1', `INFO: OK  (Model ✓${snOk ? '  SN ✓' : ''})`, 'ok');
     } else {
-      const modelTxt = modelOk ? '<span style="color:#4ade80">Model ✓</span>' : '<span style="color:#f87171">Model ✗</span>';
-      const snTxt    = snOk    ? '<span style="color:#4ade80">SN ✓</span>'    : '<span style="color:#f87171">SN ✗</span>';
-      appendLog('s1', `INFO: ${modelTxt}  ${snTxt}`, snOk && modelOk ? 'ok' : 'warn');
+      appendLog('s1', 'INFO: Model ✗  (레지스터 미발견)', 'warn');
     }
 
     if (msg.review_count > 0) {
