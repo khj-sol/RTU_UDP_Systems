@@ -2513,10 +2513,28 @@ def _build_all_suggestions(h01_table: list, categorized: dict,
     x_fields = [row for row in h01_table if row['status'] == 'X']
     for x_row in x_fields:
         candidates = _suggest_candidates(x_row['field'], all_regs, categorized)
-        if candidates:
+        if not candidates:
+            continue
+
+        sorted_cands = sorted(candidates, key=lambda c: -c['score'])
+        top = sorted_cands[0]
+
+        # 명확한 단독 우위: 2위와 25점 이상 차이 or 후보 1개, 점수 50 이상, PDF 출처
+        second_score = sorted_cands[1]['score'] if len(sorted_cands) >= 2 else -999
+        is_clear_winner = top['score'] >= 50 and top['source'] == 'PDF' and \
+                          (top['score'] - second_score >= 25)
+
+        if is_clear_winner:
+            # 자동 할당: synonym_db 등록 + H01 테이블 ~ 로 갱신
+            _auto_register_synonym(x_row['field'], top['definition'])
+            x_row['status'] = '~'
+            x_row['note'] = f'자동 할당→synonym_db: {top["definition"]} ({top["addr"]})'
+            if log: log(f'  자동 할당: {x_row["field"]} → {top["definition"]} (재실행 시 ✓)', 'info')
+        elif len(sorted_cands) >= 2:
+            # 애매함: 사용자 선택 필요 (최소 2개 후보 보장)
             note = x_row.get('note', '')
-            suggestions[x_row['field']] = _make_suggestion(x_row['field'], candidates, note)
-            if log: log(f'  제안: H01 [{x_row["field"]}] 후보 {len(candidates)}개')
+            suggestions[x_row['field']] = _make_suggestion(x_row['field'], sorted_cands, note)
+            if log: log(f'  제안: H01 [{x_row["field"]}] 후보 {len(sorted_cands)}개 (선택 필요)')
 
     # ── 3. STATUS/ALARM 정의 없음 ──
     status_regs = categorized.get('STATUS', [])
@@ -2646,6 +2664,28 @@ def _suggest_iv_scan(all_regs: list) -> list:
                 'source': 'PDF',
             })
     return sorted(candidates, key=lambda c: -c['score'])[:5]
+
+
+def _auto_register_synonym(field: str, definition: str):
+    """명확한 단독 후보를 synonym_db에 자동 등록 (재실행 시 자동 매칭)"""
+    try:
+        import re as _re
+        from . import load_synonym_db, save_synonym_db
+        db = load_synonym_db()
+        fields = db.setdefault('fields', {})
+        entry = fields.get(field)
+        if isinstance(entry, list):
+            fields[field] = {'category': 'MONITORING', 'h01_field': field, 'synonyms': entry}
+        elif entry is None:
+            fields[field] = {'category': 'MONITORING', 'h01_field': field, 'synonyms': []}
+        key = _re.sub(r'[^A-Z0-9]', '_', definition.upper()).strip('_')
+        key = _re.sub(r'_+', '_', key)
+        synonyms = fields[field].setdefault('synonyms', [])
+        if key not in synonyms:
+            synonyms.append(key)
+            save_synonym_db(db)
+    except Exception:
+        pass
 
 
 def _suggest_candidates(x_field: str, all_regs: list, categorized: dict) -> list:
