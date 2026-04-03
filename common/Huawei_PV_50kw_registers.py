@@ -926,7 +926,10 @@ class RegisterMap:
     INPUT_POWER                              = DCPOWER                 # 0x7D40
     PHASE_A_VOLTAGE                          = POWERGRIDPHASE_AVOLTAGE  # 0x7D45
     PHASE_A_CURRENT                          = POWERGRIDPHASE_ACURRENT  # 0x7D48
+    PHASE_B_CURRENT                          = POWERGRIDPHASE_BCURRENT  # 0x7D4A
+    PHASE_C_CURRENT                          = POWERGRIDPHASE_CCURRENT  # 0x7D4C
     PV_STRING_BASE                           = PV1VOLTAGE              # 0x7D10
+    PV_STRING_COUNT                          = 16                       # 8 strings × (V+I)
 
     # DER / Control registers
     DER_POWER_FACTOR_SET                     = 0x07D0
