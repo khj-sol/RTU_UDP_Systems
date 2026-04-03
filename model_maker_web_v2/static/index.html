@@ -293,11 +293,49 @@
   let ws = null;
   let uploadedFilename = null;
 
-  // ─── 세션 초기화 ───────────────────────────────────────────────
+  // ─── 세션 초기화 (F5 복원 포함) ───────────────────────────────
   (async () => {
-    const r = await fetch(`${API}/session/new`, { method: 'POST' });
-    const d = await r.json();
-    sessionId = d.session_id;
+    let restored = false;
+    const savedSid  = sessionStorage.getItem('mm_session_id');
+    const savedOrig = sessionStorage.getItem('mm_orig_name');   // 원본 파일명 (표시용)
+    const savedFile = sessionStorage.getItem('mm_filename');    // 서버 저장 파일명
+
+    if (savedSid && savedOrig && savedFile) {
+      try {
+        const chk = await fetch(`${API}/session/${savedSid}`);
+        if (chk.ok) {
+          const s = await chk.json();
+          if (s.uploaded_file) {
+            // 세션 복원
+            sessionId        = savedSid;
+            uploadedFilename = savedFile;
+            document.getElementById('drop1').querySelector('p').textContent = `✓ ${savedOrig}`;
+            document.getElementById('btn-s1').disabled = false;
+            if (s.stage >= 1) {
+              document.getElementById('card-s1').className = 'stage-card done';
+              document.getElementById('card-s2').className = 'stage-card active';
+              document.getElementById('btn-s2').disabled = false;
+            }
+            if (s.stage >= 2) {
+              document.getElementById('card-s2').className = 'stage-card done';
+              document.getElementById('card-s3').className = 'stage-card active';
+              document.getElementById('btn-s3').disabled = false;
+            }
+            appendLog('s1', `[F5 복원] ${savedOrig} — 이전 작업을 이어서 실행할 수 있습니다.`, 'info');
+            restored = true;
+          }
+        }
+      } catch (_) { /* 서버 재시작 등으로 세션 없음 → 새 세션 생성 */ }
+    }
+
+    if (!restored) {
+      const r = await fetch(`${API}/session/new`, { method: 'POST' });
+      const d = await r.json();
+      sessionId = d.session_id;
+      sessionStorage.setItem('mm_session_id', sessionId);
+      sessionStorage.removeItem('mm_filename');
+      sessionStorage.removeItem('mm_orig_name');
+    }
 
     ws = new WebSocket(`ws://${location.host}/api/ws/${sessionId}`);
     ws.onmessage = (e) => {
@@ -344,6 +382,8 @@
     const r = await fetch(`${API}/stage1/upload`, { method: 'POST', body: fd });
     const d = await r.json();
     uploadedFilename = d.filename;
+    sessionStorage.setItem('mm_filename', uploadedFilename);   // F5 복원용
+    sessionStorage.setItem('mm_orig_name', file.name);        // F5 복원용
     drop1.querySelector('p').textContent = `✓ ${file.name}`;
     document.getElementById('btn-s1').disabled = false;
   }
@@ -408,6 +448,8 @@
   function onInvalidFile(msg) {
     // 업로드 영역 초기화 — 다시 파일을 올릴 수 있도록
     uploadedFilename = null;
+    sessionStorage.removeItem('mm_filename');
+    sessionStorage.removeItem('mm_orig_name');
     const drop1 = document.getElementById('drop1');
     drop1.querySelector('p').textContent = '파일을 드래그하거나 클릭하여 업로드';
     document.getElementById('btn-s1').disabled = true;
