@@ -44,6 +44,18 @@ def _copy_definitions_to_results(manufacturer: str):
     shutil.copy2(json_src, os.path.join(mfr_dir, f'{manufacturer}_definitions.json'))
 
 
+def _copy_source_to_results(manufacturer: str, src_path: str):
+    """업로드된 원본 프로토콜 문서(PDF/Excel) → results/{제조사}/"""
+    if not manufacturer or not src_path or not os.path.exists(src_path):
+        return
+    mfr_dir = os.path.join(RESULTS_DIR, manufacturer)
+    os.makedirs(mfr_dir, exist_ok=True)
+    fname = os.path.basename(src_path)
+    dest = os.path.join(mfr_dir, fname)
+    if not os.path.exists(dest):  # 이미 있으면 덮어쓰지 않음
+        shutil.copy2(src_path, dest)
+
+
 # ─── 비동기 파이프라인 실행 헬퍼 ─────────────────────────────────────────────
 
 async def _run_in_thread(func, *args, **kwargs):
@@ -156,6 +168,7 @@ async def stage1_run(body: dict):
             if mfr:
                 _save_to_results(mfr, result['output_path'], 'stage1')
                 _copy_definitions_to_results(mfr)
+                _copy_source_to_results(mfr, uploaded)
 
             await ws_manager.send_json(sid, {
                 'event': 'stage1_done',
@@ -252,6 +265,7 @@ async def apply_suggestion(body: dict):
             if mfr:
                 _save_to_results(mfr, result['output_path'], 'stage1')
                 _copy_definitions_to_results(mfr)
+                _copy_source_to_results(mfr, uploaded)
 
             await ws_manager.send_json(sid, {
                 'event': 'stage1_done',
