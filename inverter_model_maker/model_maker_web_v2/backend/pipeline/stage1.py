@@ -2019,6 +2019,9 @@ def run_stage1(
         )
 
     manufacturer = basename.split('_')[0].split(' ')[0]
+    # 파일명에 '-PV'/'-HYB' 같은 타입 접미어가 붙어있으면 제거
+    # 예: "Senergy-PV" → "Senergy", "Ekos-PV" → "Ekos"
+    manufacturer = re.sub(r'-(PV|HYB|HYBRID)$', '', manufacturer, flags=re.IGNORECASE)
     log(f'  제조사 (파일명 기반): {manufacturer}')
 
     DER_FIXED_ADDRS = set()
