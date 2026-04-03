@@ -19,6 +19,7 @@ import time
 # Ensure project root is on sys.path so 'from common.protocol_constants import *' works
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
@@ -80,7 +81,14 @@ logger = logging.getLogger("rtu_dashboard")
 # ---------------------------------------------------------------------------
 # Application Components
 # ---------------------------------------------------------------------------
-app = FastAPI(title="RTU Dashboard", version="1.1.0")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await startup()
+    yield
+    await shutdown()
+
+
+app = FastAPI(title="RTU Dashboard", version="1.1.0", lifespan=lifespan)
 
 engine = UDPEngine(listen_port=UDP_PORT)
 database = DB(db_path=DB_PATH)
@@ -524,7 +532,6 @@ def send_control_check_for_rtu(rtu_id: int):
 # ---------------------------------------------------------------------------
 # Lifecycle Events
 # ---------------------------------------------------------------------------
-@app.on_event("startup")
 async def startup():
     global _start_time
     _start_time = time.time()
@@ -641,7 +648,6 @@ async def startup():
         logger.warning("pyftpdlib not installed - FTP server disabled")
 
 
-@app.on_event("shutdown")
 async def shutdown():
     # Stop UDP engine first (prevents new packets arriving during shutdown)
     engine.stop()
