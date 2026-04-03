@@ -32,8 +32,9 @@ SUNSPEC_REGISTER_PATTERNS = [
 
 def is_sunspec_pdf(registers: list, manufacturer: str = '') -> bool:
     """PDF에서 추출된 레지스터가 SunSpec 형식인지 감지"""
-    # 1) 제조사명으로 감지
-    if manufacturer.lower() in SUNSPEC_MANUFACTURERS:
+    # 1) 제조사명으로 감지 (접두사 포함: "SMA-PV" → "sma" 추출)
+    mfr_lower = manufacturer.lower().split('-')[0].split(' ')[0]
+    if mfr_lower in SUNSPEC_MANUFACTURERS or manufacturer.lower() in SUNSPEC_MANUFACTURERS:
         return True
 
     # 2) SunSpec 특유의 레지스터 이름 패턴으로 감지
@@ -83,6 +84,7 @@ SUNSPEC_STATUS_DEFINITIONS = {
 # SunSpec STATUS 필드 분류
 SUNSPEC_STATUS_FIELDS = {
     'i_status':   'STATUS',     # 인버터 상태 (1~8)
+    'st':         'STATUS',     # SMA SunSpec 텍스트 약어
 }
 
 # SunSpec 값 정의 테이블 (레지스터가 아닌 상태값 정의)
@@ -103,6 +105,7 @@ SUNSPEC_ALARM_FIELDS = {
     'i_status_vendor':  'ALARM',    # 에러코드 (제조사별)
     'i_status_vendor4': 'ALARM',    # 추가 에러코드
     'm_events':         'ALARM',    # Meter 이벤트 비트필드
+    'stvnd':            'ALARM',    # SMA SunSpec 텍스트 약어 (Manufacturer status)
 }
 
 # Scale Factor 레지스터 — 독립 레지스터가 아닌 보조값 → EXCLUDE
@@ -133,19 +136,26 @@ def classify_sunspec_register(definition: str, addr: int = None) -> str:
     for pattern, cat in SUNSPEC_INFO_FIELDS.items():
         if pattern in dl_clean:
             return cat
+    # SunSpec 텍스트 형식 약어/전체이름 (SMA 등 — 접두사 없는 이름)
+    if dl_clean in ('manufacturer', 'model', 'version', 'serialnumber', 'serial',
+                    'mn', 'md', 'vr', 'sn', 'da', 'opt'):
+        return 'INFO'
+    if 'serial number' in dl.replace('_', ' '):
+        return 'INFO'
 
-    # 3) STATUS
-    for pattern, cat in SUNSPEC_STATUS_FIELDS.items():
-        if dl_clean == pattern or (pattern in dl_clean and 'vendor' not in dl_clean):
-            return cat
-
-    # 4) ALARM
+    # 4) ALARM — STATUS보다 먼저 체크 (StVnd가 'st' 서브스트링에 오매칭 방지)
     for pattern, cat in SUNSPEC_ALARM_FIELDS.items():
         if pattern in dl_clean:
             return cat
 
+    # 3) STATUS
+    for pattern, cat in SUNSPEC_STATUS_FIELDS.items():
+        # 짧은 패턴('st')은 완전 일치만 허용 (서브스트링 오매칭 방지)
+        if dl_clean == pattern or (len(pattern) > 2 and pattern in dl_clean and 'vendor' not in dl_clean):
+            return cat
+
     # 5) SunSpec MPPT DC 레지스터 → MONITORING
-    if dl_clean in ('dca', 'dcv', 'dcw', 'dcwh'):
+    if dl_clean in ('dca', 'dcv', 'dcw', 'dcwh', 'wh'):
         return 'MONITORING'
 
     # 6) Scale Factor → EXCLUDE (보조값)
