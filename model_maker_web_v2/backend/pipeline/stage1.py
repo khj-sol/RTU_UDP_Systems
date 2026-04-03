@@ -2526,70 +2526,102 @@ def _build_all_suggestions(h01_table: list, categorized: dict,
     except Exception:
         _status_vkw, _alarm_vkw = [], []
 
-    def _rank_by_value_kw(regs_with_defs, stored_kw, field_type):
-        """value_definitions 키워드 매칭으로 레지스터 점수 산출, 내림차순 반환.
-        점수 0인 레지스터(관련 없는 설정 레지스터 등)는 결과에서 제외.
+    # 이름 키워드 기반 점수 (기존 _suggest_candidates 로직에서 추출)
+    _STATUS_NAME_KW = ['inverter mode', 'work mode', 'work state', 'operating mode',
+                       'operation state', 'operating status', 'running status',
+                       'device status', 'inverter status', 'system status',
+                       'inverter state', 'working mode', 'run state', 'operational']
+    _ALARM_NAME_KW  = ['fault code', 'error code', 'alarm code', 'faultcode',
+                       'warningcode', 'warning code', 'fault status',
+                       'fault register', 'alarm register', 'error register']
+    _ALARM_NAME_WB  = ['fault', 'alarm', 'error', 'warning']  # \b 단어경계
+
+    def _name_score(reg, name_kws, wb_kws=None):
+        """레지스터 이름 키워드 점수 (0~70)"""
+        dl = reg.definition.lower().replace('_', ' ')
+        dl_ns = dl.replace(' ', '')
+        for kw in name_kws:
+            if kw in dl or kw.replace(' ', '') in dl_ns:
+                return 70
+        if wb_kws:
+            for kw in wb_kws:
+                if re.search(rf'\b{re.escape(kw)}\b', dl):
+                    return 50
+        return 0
+
+    def _rank_combined(regs_with_defs, stored_kw, field_type, name_kws, wb_kws=None):
+        """이름 키워드 + 값 정의 키워드 합산 점수로 레지스터 정렬.
+        값 정의 점수가 0이고 이름 점수도 0이면 제외.
         """
         scored = []
         for r in regs_with_defs:
             vd = getattr(r, 'value_definitions', None) or {}
-            kw_score = _score_by_value_keywords(vd, stored_kw, field_type)
-            if kw_score > 0:  # 점수 0 = 관련 없는 레지스터 → 제외
-                scored.append((r, kw_score))
+            v_score = _score_by_value_keywords(vd, stored_kw, field_type)   # 0~100
+            n_score = _name_score(r, name_kws, wb_kws)                       # 0~70
+            total = v_score + n_score  # 최대 170점
+            if total > 0:
+                scored.append((r, total, v_score, n_score))
         return sorted(scored, key=lambda x: -x[1])
 
-    # ── 2-pre-a. alarm1: value_definitions 있는 ALARM 레지스터만 매칭 ──
-    # 정의값(fault code 테이블) 없는 레지스터는 alarm1 후보 제외
+    # ── 2-pre-a. alarm1: 이름+값 정의 복합 점수로 ALARM 레지스터 매칭 ──
     alarm1_row = next((r for r in h01_table if r['field'] == 'alarm1' and r['status'] == 'X'), None)
     if alarm1_row:
         alarm_cat = categorized.get('ALARM', [])
         alarm_with_defs = [r for r in alarm_cat if getattr(r, 'value_definitions', None)]
         if alarm_with_defs:
-            ranked = _rank_by_value_kw(alarm_with_defs, _alarm_vkw, 'alarm')
-            winner, score = ranked[0]
-            _auto_register_synonym('alarm1', winner.definition)
-            _save_value_keywords('alarm1', getattr(winner, 'value_definitions', {}), 'alarm')
-            alarm1_row['status'] = '~'
-            alarm1_row['note'] = (f'자동 할당(정의표 vkw={score})→synonym_db: '
-                                  f'{winner.definition} ({winner.address_hex})')
-            if log: log(f'  자동 할당: alarm1 → {winner.definition} (정의표 vkw={score})', 'info')
+            ranked = _rank_combined(alarm_with_defs, _alarm_vkw, 'alarm',
+                                    _ALARM_NAME_KW, _ALARM_NAME_WB)
+            if ranked:
+                winner, total, v_sc, n_sc = ranked[0]
+                _auto_register_synonym('alarm1', winner.definition)
+                _save_value_keywords('alarm1', getattr(winner, 'value_definitions', {}), 'alarm')
+                alarm1_row['status'] = '~'
+                alarm1_row['note'] = (f'자동 할당(vkw={v_sc}+name={n_sc})→synonym_db: '
+                                      f'{winner.definition} ({winner.address_hex})')
+                if log: log(f'  자동 할당: alarm1 → {winner.definition} '
+                            f'(vkw={v_sc}+name={n_sc}={total})', 'info')
         # else: value_definitions 없는 ALARM → 할당·제안 없음 (alarm_definitions 섹션에서 안내)
 
-    # ── 2-pre-b. status: value_definitions 있는 STATUS 레지스터 직접 매칭 ──
-    # 정의값(mode 테이블: 0=대기, 1=운전...) 없는 레지스터는 status 후보 제외
+    # ── 2-pre-b. status: 이름+값 정의 복합 점수로 STATUS 레지스터 매칭 ──
     status_row = next((r for r in h01_table if r['field'] == 'status' and r['status'] == 'X'), None)
     if status_row:
         status_cat = categorized.get('STATUS', [])
         status_with_defs = [r for r in status_cat if getattr(r, 'value_definitions', None)]
-        if len(status_with_defs) == 1:
-            # 단 하나 → 자동 할당 + value_keywords 저장
-            winner = status_with_defs[0]
-            _auto_register_synonym('status', winner.definition)
-            _save_value_keywords('status', getattr(winner, 'value_definitions', {}), 'status')
-            status_row['status'] = '~'
-            status_row['note'] = f'자동 할당(정의표)→synonym_db: {winner.definition} ({winner.address_hex})'
-            if log: log(f'  자동 할당: status → {winner.definition} (정의표 직접 매칭)', 'info')
-        elif len(status_with_defs) >= 2:
-            # 여러 개 → value_keywords 기반 점수로 정렬, 상위 2개 제안 or 자동 할당
-            ranked = _rank_by_value_kw(status_with_defs, _status_vkw, 'status')
-            top_reg, top_score = ranked[0]
-            second_score = ranked[1][1] if len(ranked) >= 2 else 0
-            if _status_vkw and top_score >= 70 and (top_score - second_score) >= 20:
-                # value_keywords 기반 명확 우위 → 자동 할당
-                _auto_register_synonym('status', top_reg.definition)
-                _save_value_keywords('status', getattr(top_reg, 'value_definitions', {}), 'status')
+        if status_with_defs:
+            ranked = _rank_combined(status_with_defs, _status_vkw, 'status', _STATUS_NAME_KW)
+            if len(ranked) == 0:
+                pass  # 모두 0점 → 제안 없음
+            elif len(ranked) == 1:
+                winner, total, v_sc, n_sc = ranked[0]
+                _auto_register_synonym('status', winner.definition)
+                _save_value_keywords('status', getattr(winner, 'value_definitions', {}), 'status')
                 status_row['status'] = '~'
-                status_row['note'] = (f'자동 할당(정의표 vkw={top_score})→synonym_db: '
-                                      f'{top_reg.definition} ({top_reg.address_hex})')
-                if log: log(f'  자동 할당: status → {top_reg.definition} (vkw={top_score})', 'info')
+                status_row['note'] = (f'자동 할당(vkw={v_sc}+name={n_sc})→synonym_db: '
+                                      f'{winner.definition} ({winner.address_hex})')
+                if log: log(f'  자동 할당: status → {winner.definition} '
+                            f'(vkw={v_sc}+name={n_sc}={total})', 'info')
             else:
-                # 점수 애매 → 사용자 선택 (상위 2개)
-                cands = [{'addr': r.address_hex, 'definition': r.definition[:50],
-                          'score': s, 'reason': f'값 정의 테이블 포함 (vkw={s})', 'source': 'PDF'}
-                         for r, s in ranked[:2]]
-                suggestions['status'] = _make_suggestion('status', cands, status_row.get('note', ''))
-                if log: log(f'  제안: status 정의표 후보 {len(status_with_defs)}개 (vkw 점수 비슷)')
-        # else (0개): value_definitions 없음 → 제안 안 함 (status_definitions 섹션에서 별도 안내)
+                top_reg, top_total, top_v, top_n = ranked[0]
+                second_total = ranked[1][1]
+                gap = top_total - second_total
+                if gap >= 30:
+                    # 명확 우위 → 자동 할당
+                    _auto_register_synonym('status', top_reg.definition)
+                    _save_value_keywords('status', getattr(top_reg, 'value_definitions', {}), 'status')
+                    status_row['status'] = '~'
+                    status_row['note'] = (f'자동 할당(vkw={top_v}+name={top_n})→synonym_db: '
+                                         f'{top_reg.definition} ({top_reg.address_hex})')
+                    if log: log(f'  자동 할당: status → {top_reg.definition} '
+                                f'(vkw={top_v}+name={top_n}={top_total}, gap={gap})', 'info')
+                else:
+                    # 점수 비슷 → 상위 2개 제안
+                    cands = [{'addr': r.address_hex, 'definition': r.definition[:50],
+                              'score': tot,
+                              'reason': f'값정의({v})점 + 이름({n})점 = {tot}점',
+                              'source': 'PDF'}
+                             for r, tot, v, n in ranked[:2]]
+                    suggestions['status'] = _make_suggestion('status', cands, status_row.get('note', ''))
+                    if log: log(f'  제안: status 후보 {len(ranked)}개 (점수 차={gap})')
 
     # ── 2. H01: X 필드 (status/alarm1 제외 — 위에서 별도 처리) ──
     x_fields = [row for row in h01_table
