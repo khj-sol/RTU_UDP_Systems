@@ -200,6 +200,18 @@ class BackupManager:
 
             conn.commit()
 
+    def clear_all(self):
+        """RTU 시작 시 백업 DB 전체 초기화 (구 rtu_id 잔여 데이터 제거)"""
+        try:
+            conn = self._get_conn()
+            conn.execute('DELETE FROM backups')
+            conn.execute('DELETE FROM events')
+            conn.commit()
+            self.recovery_mode = False
+            self.logger.info("Backup DB cleared on startup (fresh session)")
+        except Exception as e:
+            self.logger.error(f"Failed to clear backup DB: {e}")
+
     def _log_backup_status(self):
         """Log current backup status"""
         try:

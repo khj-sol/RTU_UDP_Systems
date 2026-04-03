@@ -1066,6 +1066,9 @@ class RTUClient:
 
         self.running = True
 
+        # 새 세션 시작 — 구 rtu_id 잔여 백업 데이터 제거
+        self.backup.clear_all()
+
         # Send first connection event (fire-and-forget, no backup)
         pkt, seq = self.protocol.create_h05_event(EVENT_FIRST_CONNECTION)
         self._send_udp_no_ack(pkt)
