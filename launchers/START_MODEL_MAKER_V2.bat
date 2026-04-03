@@ -29,7 +29,7 @@ echo.
 start "" http://localhost:8082
 
 :LOOP
-"%PYTHON%" -m uvicorn model_maker_web_v2.backend.main:app --host 0.0.0.0 --port 8082 --reload
+"%PYTHON%" -m uvicorn model_maker_web_v2.backend.main:app --host 0.0.0.0 --port 8082 --reload --reload-dir model_maker_web_v2
 echo.
 echo [%date% %time%] Server stopped. Restarting in 5s... (Ctrl+C to quit)
 timeout /t 5 /nobreak >nul
