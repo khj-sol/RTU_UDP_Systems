@@ -884,6 +884,10 @@ def run_stage3(
     protocol_name = manufacturer.lower()
     protocol_version = meta.get('프로토콜 버전', '')
 
+    # 인버터 타입 감지 (PDF 파일명 기반): HYB / PV
+    _pdf_fn = meta.get('원본 파일', '').upper()
+    inverter_type = 'HYB' if any(k in _pdf_fn for k in ['HYB', 'HYBRID', '하이브리드']) else 'PV'
+
     # V2: IV/DER 판단 — 레지스터 유무 + 메타데이터 + 제조사 확정
     iv_scan = (
         len(regs_by_cat.get('IV_SCAN', [])) > 0 or
@@ -943,7 +947,7 @@ def run_stage3(
         log(f'    {"✓" if ok else "✗"} {check_name}')
 
     # ── 파일 저장 ──
-    output_name = f'test_{protocol_name}_registers.py'
+    output_name = f'{manufacturer}_{inverter_type}_registers.py'
     output_path = os.path.join(output_dir, output_name)
     with open(output_path, 'w', encoding='utf-8') as f:
         f.write(code)
