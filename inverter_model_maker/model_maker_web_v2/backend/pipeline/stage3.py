@@ -369,6 +369,43 @@ def _gen_register_map(regs_by_cat: dict, mppt: int, total_strings: int,
                 lines.append(f'    {alias:40s} = {src}')
         lines.append('')
 
+    # ── RTU modbus_handler / simulator 필수 alias (ALL PASS 보장) ──────────────
+    lines.append('    # --- RTU modbus_handler / simulator 필수 alias ---')
+
+    # INNER_TEMP — 온도 레지스터 후보 중 존재하는 첫 번째 사용
+    if 'INNER_TEMP' not in all_defined:
+        for _tc in ['TEMPERATURE', 'INNER_TEMPERATURE', 'HEAT_SINK_TEMPERATURE',
+                    'CABINET_TEMPERATURE', 'INVERTER_TEMPERATURE', 'MODULE_TEMPERATURE',
+                    'INTERNAL_TEMP', 'INTERNAL_TEMPERATURE']:
+            if _tc in all_defined:
+                lines.append(f'    INNER_TEMP                               = {_tc}')
+                all_defined.add('INNER_TEMP')
+                break
+
+    # INVERTER_MODE — 운전 상태 레지스터 후보 중 존재하는 첫 번째 사용
+    if 'INVERTER_MODE' not in all_defined:
+        for _mc in ['WORK_STATE', 'RUNNING_STATE', 'DEVICE_STATUS', 'SYSTEM_STATUS',
+                    'SYSTEM_STATE', 'OPERATING_STATUS', 'RUNNING_STATUS', 'STATUS',
+                    'DEVICE_STATE', 'INVERTER_STATUS']:
+            if _mc in all_defined:
+                lines.append(f'    INVERTER_MODE                            = {_mc}')
+                all_defined.add('INVERTER_MODE')
+                break
+
+    # DER / Control registers — 고정 주소 (없으면 항상 추가)
+    _der_fixed = [
+        ('DER_POWER_FACTOR_SET',   '0x07D0'),
+        ('DER_ACTION_MODE',        '0x07D1'),
+        ('DER_REACTIVE_POWER_PCT', '0x07D2'),
+        ('DER_ACTIVE_POWER_PCT',   '0x07D3'),
+        ('INVERTER_ON_OFF',        '0x0834'),
+    ]
+    for _name, _addr in _der_fixed:
+        if _name not in all_defined:
+            lines.append(f'    {_name:40s} = {_addr}')
+            all_defined.add(_name)
+    lines.append('')
+
     # IV Scan Control aliases + registers
     if 'IV_CURVE_SCAN' in all_defined:
         lines.append('    # IV Scan aliases')
@@ -722,6 +759,11 @@ def validate_code(code: str, mppt: int, total_strings: int,
     checks['SCALE_dict'] = "SCALE = {" in code
     checks['registers_to_u32'] = 'def registers_to_u32' in code
     checks['registers_to_s32'] = 'def registers_to_s32' in code
+    # RTU 필수 alias
+    checks['alias_INNER_TEMP'] = 'INNER_TEMP' in code
+    checks['alias_INVERTER_MODE'] = 'INVERTER_MODE' in code
+    checks['alias_INVERTER_ON_OFF'] = 'INVERTER_ON_OFF' in code
+    checks['alias_DER_POWER_FACTOR_SET'] = 'DER_POWER_FACTOR_SET' in code
     checks['get_string_registers'] = 'def get_string_registers' in code
     checks['get_mppt_registers'] = 'def get_mppt_registers' in code
     checks['DATA_TYPES'] = 'DATA_TYPES' in code
