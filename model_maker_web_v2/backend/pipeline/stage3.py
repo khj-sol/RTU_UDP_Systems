@@ -569,6 +569,11 @@ def _gen_helpers(mppt: int, total_strings: int, strings_per_mppt: int,
                  iv_data_points: int = 64) -> str:
     return f'''
 
+# Channel configuration (used by modbus_handler for dynamic array sizing)
+MPPT_CHANNELS = {mppt}
+STRING_CHANNELS = {total_strings}
+
+
 def registers_to_u32(low, high):
     """Combine two U16 to U32"""
     return (high << 16) | low
@@ -721,11 +726,23 @@ def validate_code(code: str, mppt: int, total_strings: int,
     checks['DATA_TYPES'] = 'DATA_TYPES' in code
     checks['StatusConverter'] = 'StatusConverter' in code
 
-    # MPPT 채널 수 (MPPT{n}_VOLTAGE 또는 PV{n}_VOLTAGE/PV{n}VOLTAGE)
-    mppt_count = 0
-    for n in range(1, 20):
-        if f'MPPT{n}_VOLTAGE' in code or f'PV{n}_VOLTAGE' in code or f'PV{n}VOLTAGE' in code:
-            mppt_count = n
+    # MPPT 채널 수 — Method 1: 생성된 MPPT_CHANNELS 상수 우선
+    if f'MPPT_CHANNELS = {mppt}' in code:
+        mppt_count = mppt  # 명시적 선언 → 바로 통과
+    else:
+        # Method 2: 상수명 패턴 (다양한 제조사 네이밍 지원)
+        mppt_count = 0
+        for n in range(1, 20):
+            _mppt_pats = [
+                f'MPPT{n}_VOLTAGE', f'PV{n}_VOLTAGE', f'PV{n}VOLTAGE',
+                f'INPUT_{n}_VOLTAGE', f'INPUT{n}_VOLTAGE',   # ABB: Input 1 Voltage
+                f'DC{n}_VOLTAGE', f'DC_{n}_VOLTAGE',          # CPS/Delta: DC1 Voltage
+                f'PP{n}_VOLTAGE', f'PP_{n}_VOLTAGE',           # ABB: PP voltage
+                f'CH{n}_VOLTAGE', f'CH_{n}_VOLTAGE',           # Channel variants
+                f'STRING{n}_INPUT_VOLTAGE',                    # String with input
+            ]
+            if any(p in code for p in _mppt_pats):
+                mppt_count = n
     checks[f'MPPT_channels_{mppt}'] = mppt_count >= mppt
 
     # String 채널 수 (STRING{n} 또는 PV_STRING{n})
