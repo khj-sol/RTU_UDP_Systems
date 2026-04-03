@@ -1285,11 +1285,13 @@ def assign_h01_field(reg: RegisterRow, synonym_db: dict,
     # 0-1) Central type: 번호 없는 DC/PV/Input voltage/current → mppt1
     defn_ns = defn_lower.replace('_', ' ')
     if re.search(r'\b(i dc|dc)\s*(voltage)', defn_ns) or \
-       re.match(r'^(pv|input)\s+(voltage)', defn_ns):
+       re.search(r'\b(pv|input)\s+(voltage)\b', defn_ns) or \
+       re.search(r'dc전압', defn_ns):
         if 'fault' not in defn_lower and 'high' not in defn_lower and 'low' not in defn_lower:
             return 'mppt1_voltage'
     if re.search(r'\b(i dc|dc)\s*(current)', defn_ns) or \
-       re.match(r'^(pv|input)\s+(current)', defn_ns):
+       re.search(r'\b(pv|input)\s+(current)\b', defn_ns) or \
+       re.search(r'dc전류', defn_ns):
         if 'fault' not in defn_lower:
             return 'mppt1_current'
 
@@ -1658,7 +1660,19 @@ def build_h01_match_table(categorized: dict, meta: dict) -> List[dict]:
                         'note': f'handler 계산: mppt{n}_power / mppt{n}_voltage',
                     })
                 else:
-                    rows.append(_make_pdf_match_row(field, None))
+                    # Fallback: string current 합산으로 계산 (Central type)
+                    str_regs = [_find_matched_reg(categorized, f'string{s}_current')
+                                for s in range(1, max_string + 1)]
+                    str_regs = [r for r in str_regs if r]
+                    if str_regs:
+                        rows.append({
+                            'field': field, 'source': 'HANDLER', 'status': 'O',
+                            'address': '-', 'definition': '-',
+                            'type': 'U16', 'unit': 'A', 'scale': '',
+                            'note': f'handler 계산: sum(string_N_current) N=1~{len(str_regs)}',
+                        })
+                    else:
+                        rows.append(_make_pdf_match_row(field, None))
             else:
                 rows.append(_make_pdf_match_row(field, None))
 
