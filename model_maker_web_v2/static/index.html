@@ -516,6 +516,19 @@
       ivField.value = String(msg.iv_data_points || 64);
     }
     appendLog('s1', `카테고리: ${Object.entries(msg.counts||{}).filter(([k,v])=>v>0).map(([k,v])=>`${k}:${v}`).join(' ')}`, 'ok');
+
+    // INFO 매칭 상태 표시
+    const im = msg.info_match || {};
+    const modelOk = im.model === true;
+    const snOk    = im.sn    === true;
+    if (modelOk && snOk) {
+      appendLog('s1', 'INFO: OK  (Model ✓  SN ✓)', 'ok');
+    } else {
+      const modelTxt = modelOk ? '<span style="color:#4ade80">Model ✓</span>' : '<span style="color:#f87171">Model ✗</span>';
+      const snTxt    = snOk    ? '<span style="color:#4ade80">SN ✓</span>'    : '<span style="color:#f87171">SN ✗</span>';
+      appendLog('s1', `INFO: ${modelTxt}  ${snTxt}`, snOk && modelOk ? 'ok' : 'warn');
+    }
+
     if (msg.review_count > 0) {
       appendLog('s1', `REVIEW ${msg.review_count}개 — Stage 2에서 확인`, 'warn');
     }
