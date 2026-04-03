@@ -200,22 +200,47 @@ except ImportError:
 def load_register_module(protocol_name: str):
     """protocol 이름으로 common/{protocol}_registers.py 동적 import.
 
+    1차: common.{protocol_name}_registers 정확히 시도
+    2차: common/ 디렉토리에서 {manufacturer}_*_registers.py glob fallback
+         (예: 'solarize' → 'Solarize_PV_50kw_registers.py')
+
     Args:
-        protocol_name: config의 protocol 값 (예: 'solarize', 'verterking')
+        protocol_name: config의 protocol 값 (예: 'solarize', 'Solarize_PV_50kw')
 
     Returns:
         Loaded register module (has RegisterMap, SCALE, etc.)
     """
+    log = logging.getLogger(__name__)
+
+    # 1차: 정확한 이름
     module_name = f"common.{protocol_name}_registers"
     try:
         mod = _importlib.import_module(module_name)
-        logging.getLogger(__name__).info(
-            f"Loaded register module: {module_name}")
+        log.info(f"Loaded register module: {module_name}")
         return mod
     except ImportError:
-        logging.getLogger(__name__).warning(
-            f"Register module '{module_name}' not found, fallback to solarize")
-        return _default_reg_module
+        pass
+
+    # 2차: 대소문자 무관 제조사 prefix glob fallback
+    import glob as _glob, os as _os
+    common_dir = _os.path.join(_os.path.dirname(__file__), '..', 'common')
+    prefix = protocol_name.split('_')[0].lower()  # 'solarize', 'ekos', ...
+    candidates = sorted(
+        _glob.glob(_os.path.join(common_dir, f'*_registers.py'))
+    )
+    for fpath in candidates:
+        fname = _os.path.basename(fpath)
+        if fname.lower().startswith(prefix) and not fname.startswith('REF_'):
+            mod_name = f"common.{fname[:-3]}"  # strip .py
+            try:
+                mod = _importlib.import_module(mod_name)
+                log.info(f"Loaded register module (fallback): {mod_name} for protocol '{protocol_name}'")
+                return mod
+            except ImportError:
+                continue
+
+    log.warning(f"Register module for '{protocol_name}' not found, fallback to solarize")
+    return _default_reg_module
 
 
 def _normalize_scale(raw_scale: dict) -> dict:
@@ -3554,8 +3579,9 @@ class MultiDeviceHandler:
         
         # Per-device simulation mode takes priority
         use_simulation = simulation or self.simulation_mode
-        is_kstar  = ('kstar' in protocol)
-        is_huawei = ('huawei' in protocol)
+        _proto_lower = protocol.lower()
+        is_kstar  = 'kstar' in _proto_lower
+        is_huawei = 'huawei' in _proto_lower
 
         # Solarize 계열 (kstar/huawei 제외): 동적 레지스터 로딩
         reg_mod = None
