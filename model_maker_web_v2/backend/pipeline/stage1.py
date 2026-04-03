@@ -2703,31 +2703,34 @@ def _build_all_suggestions(h01_table: list, categorized: dict,
     return suggestions
 
 
+def _group_consecutive_regs(matching_regs: list) -> list:
+    """
+    주소가 연속인 레지스터를 그룹으로 묶어 반환.
+    각 그룹: {'regs': [reg, ...], 'start': addr, 'count': N}
+    정렬은 주소 기준.
+    """
+    if not matching_regs:
+        return []
+    sorted_regs = sorted(matching_regs, key=lambda r: r.address if isinstance(r.address, int) else 0)
+    groups = []
+    cur = [sorted_regs[0]]
+    for reg in sorted_regs[1:]:
+        prev_addr = cur[-1].address if isinstance(cur[-1].address, int) else -999
+        cur_addr  = reg.address if isinstance(reg.address, int) else -998
+        if cur_addr == prev_addr + 1:
+            cur.append(reg)
+        else:
+            groups.append(cur)
+            cur = [reg]
+    groups.append(cur)
+    return [{'regs': g, 'start': g[0].address, 'count': len(g)} for g in groups]
+
+
 def _suggest_info_field(all_regs: list, field_type: str) -> list:
-    """INFO Model/SN 후보 제안 — 1차 키워드로 후보 탐색, 2개 미만이면 보조 키워드로 보충"""
-    already = set()
-
-    def _score_reg(reg, primary_kws, primary_excl, secondary_kws, string_kws):
-        dl = reg.definition.lower()
-        score = 0
-        reason = ''
-        if any(k in dl for k in primary_kws):
-            if not any(k in dl for k in primary_excl):
-                score = 70
-                reason = f'{field_type.upper()} 키워드'
-        if (reg.data_type or '').upper() in ('STRING', 'STRINGING', 'ASCII'):
-            if any(k in dl for k in string_kws):
-                score = 85
-                reason = f'{field_type.upper()} + STRING 타입'
-        return score, reason
-
-    def _score_secondary(reg, secondary_kws, primary_excl):
-        dl = reg.definition.lower()
-        if any(k in dl for k in secondary_kws):
-            if not any(k in dl for k in primary_excl):
-                return 40, f'{field_type.upper()} 보조 키워드'
-        return 0, ''
-
+    """INFO Model/SN 후보 제안.
+    - 연속 레지스터 그룹(SN[1]~SN[12] 등)은 하나의 후보로 묶어 표시
+    - 2개 미만이면 보조 키워드로 보충
+    """
     if field_type == 'model':
         prim_kws  = ['model', 'device type', 'type code', 'product']
         prim_excl = ['working', 'battery', 'pf']
@@ -2739,36 +2742,80 @@ def _suggest_info_field(all_regs: list, field_type: str) -> list:
         str_kws   = ['serial', 'sn']
         sec_kws   = ['number', 'id', 'code', 'uid', 'barcode', 'lot']
 
-    candidates = []
-    for reg in all_regs:
-        score, reason = _score_reg(reg, prim_kws, prim_excl, sec_kws if field_type == 'model' else prim_kws, str_kws)
-        if score > 0:
-            candidates.append({
-                'addr': reg.address_hex,
-                'definition': reg.definition[:50],
-                'unit': reg.unit or '',
-                'score': score,
-                'reason': reason,
-                'source': 'PDF',
-            })
-            already.add(reg.address_hex)
+    def _score_single(reg, kws, excl, str_kws):
+        dl = reg.definition.lower()
+        if not any(k in dl for k in kws):
+            return 0, ''
+        if any(k in dl for k in excl):
+            return 0, ''
+        score = 70
+        reason = f'{field_type.upper()} 키워드'
+        if (reg.data_type or '').upper() in ('STRING', 'STRINGING', 'ASCII'):
+            if any(k in dl for k in str_kws):
+                score, reason = 85, f'{field_type.upper()} + STRING 타입'
+        return score, reason
 
-    # 2개 미만이면 보조 키워드로 보충 (중복 제외)
+    # 1차: 주 키워드 매칭
+    primary_matches = []
+    for reg in all_regs:
+        if not isinstance(reg.address, int):
+            continue
+        score, reason = _score_single(reg, prim_kws, prim_excl, str_kws)
+        if score > 0:
+            primary_matches.append((reg, score, reason))
+
+    # 연속 주소 그룹으로 묶기
+    groups = _group_consecutive_regs([r for r, _, _ in primary_matches])
+    score_map = {id(r): (sc, rs) for r, sc, rs in primary_matches}
+
+    candidates = []
+    used_addrs = set()
+    for g in groups:
+        first = g['regs'][0]
+        count = g['count']
+        # 그룹 내 최고 점수 사용, 그룹이면 보너스 +5
+        best_sc = max(score_map[id(r)][0] for r in g['regs'])
+        best_rs = score_map[id(first)][1]
+        if count > 1:
+            best_sc = min(100, best_sc + 5)
+            end_addr = g['start'] + count - 1
+            addr_str = f'0x{g["start"]:04X}~0x{end_addr:04X} (×{count}regs)'
+            defn_str = f'{first.definition[:30]}...[×{count}]'
+            best_rs  = f'{field_type.upper()} 연속 {count}개 레지스터'
+        else:
+            addr_str = first.address_hex
+            defn_str = first.definition[:50]
+        candidates.append({
+            'addr':      addr_str,
+            'definition': defn_str,
+            'unit':      first.unit or '',
+            'score':     best_sc,
+            'reason':    best_rs,
+            'source':    'PDF',
+            'reg_count': count,
+            'reg_start': g['start'],
+        })
+        for r in g['regs']:
+            used_addrs.add(r.address)
+
+    # 2개 미만이면 보조 키워드로 보충
     if len(candidates) < 2:
         for reg in all_regs:
-            if reg.address_hex in already:
+            if not isinstance(reg.address, int) or reg.address in used_addrs:
                 continue
-            score, reason = _score_secondary(reg, sec_kws, prim_excl)
-            if score > 0:
+            dl = reg.definition.lower()
+            if any(k in dl for k in sec_kws) and not any(k in dl for k in prim_excl):
                 candidates.append({
-                    'addr': reg.address_hex,
+                    'addr':       reg.address_hex,
                     'definition': reg.definition[:50],
-                    'unit': reg.unit or '',
-                    'score': score,
-                    'reason': reason,
-                    'source': 'PDF',
+                    'unit':       reg.unit or '',
+                    'score':      40,
+                    'reason':     f'{field_type.upper()} 보조 키워드',
+                    'source':     'PDF',
+                    'reg_count':  1,
+                    'reg_start':  reg.address,
                 })
-                already.add(reg.address_hex)
+                used_addrs.add(reg.address)
                 if len(candidates) >= 2:
                     break
 
