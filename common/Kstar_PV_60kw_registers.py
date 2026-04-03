@@ -390,6 +390,50 @@ class RegisterMap:
     IV_SCAN_DATA_POINTS                      = 100
     IV_TRACKER_BLOCK_SIZE                    = 0x140  # 5 x 64 registers per tracker
 
+    # =========================================================================
+    # Simulator / backward-compat aliases
+    # =========================================================================
+    MODEL_NAME_BASE                          = MACHINE_MODEL        # 0x0C80
+    ARM_VERSION                              = 0x0C90
+    DSP_VERSION                              = 0x0C91
+    SERIAL_NUMBER_BASE                       = 0x0C9C
+    PV1_VOLTAGE                              = PV1_INPUT_VOLTAGE    # 0x0BB8
+    PV1_CURRENT                              = PV1_INPUT_CURRENT    # 0x0BBB
+    PV1_POWER                                = 0x0BD0
+    DAILY_PRODUCTION                         = DAILY_POWER_GENERATION0_1KWH  # 0x0CA9
+    CUMULATIVE_PRODUCTION_L                  = CUMULATIVE_ENERGY    # 0x0BDE
+    SYSTEM_STATUS                            = OPERATING_MODE_OF_THEINVERTER  # 0x0BD6
+    INVERTER_STATUS                          = OPERATING_MODE_OF_THEINVERTER
+    INVERTER_MODE                            = OPERATING_MODE_OF_THEINVERTER
+    RADIATOR_TEMP                            = RADIATOR_TEMPERATURE  # 0x0BD1
+    CHASSIS_TEMP                             = TEMPERATURE           # 0x0BD2
+    INNER_TEMP                               = RADIATOR_TEMPERATURE
+    TOTAL_ENERGY_LOW                         = CUMULATIVE_ENERGY
+    GRID_R_VOLTAGE                           = L1_VOLTAGE            # 0x0BC7
+    GRID_FREQUENCY                           = RS_PHASE_GRID_FREQUENCY  # 0x0BC9
+    INV_R_VOLTAGE                            = L1_VOLTAGE
+    INV_R_CURRENT                            = R_PHASE_GRID_TIED_CURRENT  # 0x0BCC
+    INV_R_POWER                              = I_V_SCAN_STATUS       # 0x0C36 (shared)
+    INV_S_VOLTAGE                            = 0x0C3B
+    INV_S_CURRENT                            = 0x0C3C
+    INV_S_FREQUENCY                          = GRID_FREQUENCY
+    INV_S_POWER                              = 0x0C3D
+    INV_T_VOLTAGE                            = L3_VOLTAGE            # 0x0C42
+    INV_T_CURRENT                            = L3_CURRENT            # 0x0C43
+    INV_T_POWER                              = 0x0C44
+    IV_SCAN_COMMAND                          = START_I_V_SCAN        # 0x0FC3
+    IV_SCAN_STATUS                           = I_V_SCAN_STATUS       # 0x0C36
+    IV_DATA_BASE                             = 0x1388
+    IV_POINTS_PER_STRING                     = 100
+    IV_REGS_PER_STRING                       = 200
+
+    # DER / Control registers
+    DER_POWER_FACTOR_SET                     = 0x07D0
+    DER_ACTION_MODE                          = 0x07D1
+    DER_REACTIVE_POWER_PCT                   = 0x07D2
+    DER_ACTIVE_POWER_PCT                     = 0x07D3
+    INVERTER_ON_OFF                          = 0x0834
+
 
 
 class IVScanCommand:

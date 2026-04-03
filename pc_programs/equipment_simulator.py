@@ -1380,7 +1380,7 @@ class KstarSimulator:
 
     def _init_iv_scan_data(self):
         """Pre-populate IV curve data in FC04 registers 5000-7399."""
-        from common.kstar_registers import generate_iv_voltage_data, generate_iv_current_data
+        from common.Kstar_PV_60kw_registers import generate_iv_voltage_data, generate_iv_current_data
         mppt_count = 3
         strings_per_mppt = 4
         data_points = KstarRegisters.IV_POINTS_PER_STRING  # 100

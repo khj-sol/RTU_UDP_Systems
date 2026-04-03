@@ -271,6 +271,33 @@ class RegisterMap:
     S_PHASE_CURRENT                          = L2_CURRENT
     T_PHASE_CURRENT                          = L3_CURRENT
 
+    # =========================================================================
+    # Simulator / backward-compat aliases
+    # =========================================================================
+    INVERTER_MODE                            = 0x13AE
+    ERROR_CODE1                              = 0x13AF
+    ERROR_CODE2                              = 0x13B1
+    R_PHASE_VOLTAGE                          = A_B_LINEVOLTAGE_PHASE_AVOLTAGE  # 0x139B
+    S_PHASE_VOLTAGE                          = B_C_LINE_VOLTAGE_PHASE_BVOLTAGE  # 0x139C
+    T_PHASE_VOLTAGE                          = C_A_LINE_VOLTAGE_PHASE_CVOLTAGE  # 0x139D
+    INNER_TEMP                               = TEMPERATURE                # 0x0024
+    TOTAL_ENERGY                             = CUMULATIVE_ENERGY          # 0x138C
+    MPPT1_VOLTAGE                            = MPPT_1_VOLTAGE             # 0x1393
+    MPPT1_CURRENT                            = MPPT_1_CURRENT             # 0x1394
+    MPPT3_VOLTAGE                            = MPPT_3_VOLTAGE             # 0x1397
+    MPPT3_CURRENT                            = MPPT_3_CURRENT             # 0x1398
+    STRING5_CURRENT                          = STRING_5_CURRENT           # 0x1B69
+    STRING6_CURRENT                          = STRING_6_CURRENT           # 0x1B6A
+    STRING7_CURRENT                          = STRING_7_CURRENT           # 0x1B6B
+    STRING8_CURRENT                          = STRING_8_CURRENT           # 0x1B6C
+
+    # DER / Control registers
+    DER_POWER_FACTOR_SET                     = 0x07D0
+    DER_ACTION_MODE                          = 0x07D1
+    DER_REACTIVE_POWER_PCT                   = 0x07D2
+    DER_ACTIVE_POWER_PCT                     = 0x07D3
+    INVERTER_ON_OFF                          = 0x0834
+
 
 
 class InverterMode:

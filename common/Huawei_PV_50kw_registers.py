@@ -914,6 +914,27 @@ class RegisterMap:
     S_PHASE_CURRENT                          = L2_CURRENT
     T_PHASE_CURRENT                          = L3_CURRENT
 
+    # =========================================================================
+    # Simulator / backward-compat aliases
+    # =========================================================================
+    RUNNING_STATUS                           = DEVICE_STATUS           # 0x7D59
+    INTERNAL_TEMP                            = INTERNALTEMPERATURE     # 0x7D57
+    ACCUMULATED_ENERGY                       = ACCUMULATEDPOWERGENERATION  # 0x7D6A
+    ACTIVE_POWER                             = ACTIVEPOWER             # 0x7D50
+    FAULT_CODE_1                             = FAULT_CODE              # 0x7D5A
+    GRID_FREQUENCY                           = 0x7D55
+    INPUT_POWER                              = DCPOWER                 # 0x7D40
+    PHASE_A_VOLTAGE                          = POWERGRIDPHASE_AVOLTAGE  # 0x7D45
+    PHASE_A_CURRENT                          = POWERGRIDPHASE_ACURRENT  # 0x7D48
+    PV_STRING_BASE                           = PV1VOLTAGE              # 0x7D10
+
+    # DER / Control registers
+    DER_POWER_FACTOR_SET                     = 0x07D0
+    DER_ACTION_MODE                          = 0x07D1
+    DER_REACTIVE_POWER_PCT                   = 0x07D2
+    DER_ACTIVE_POWER_PCT                     = 0x07D3
+    INVERTER_ON_OFF                          = 0x0834
+
 
 
 class InverterMode:
@@ -1868,7 +1889,12 @@ class ErrorCode64:
 
 
 class HuaweiStatusConverter:
-    """Huawei INVERTER_MODE register already contains InverterMode values."""
+    """Huawei DEVICE_STATUS (0x7D59) value constants."""
+    STATUS_STANDBY_INIT            = 0x0000
+    STATUS_STANDBY_SUNLIGHT        = 0x0002
+    STATUS_ON_GRID                 = 0x0200
+    STATUS_ON_GRID_DERATING        = 0x0201
+    STATUS_ON_GRID_TEMP            = 0x0202
 
     @classmethod
     def to_inverter_mode(cls, raw):

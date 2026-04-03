@@ -103,6 +103,39 @@ class RegisterMap:
 
     # --- Standard handler compatibility aliases (H01 Body Type 4 required) ---
 
+    # =========================================================================
+    # Simulator / backward-compat aliases
+    # =========================================================================
+    INVERTER_MODE                            = 시스템동작상태              # 0x7549
+    INNER_TEMP                               = 방열판_온도_인버터_내부온도     # 0x758B
+    ERROR_CODE1                              = SW_FAULT_STATUS_ALARM_1    # 0x754C
+    ERROR_CODE2                              = HW_FAULT_STATUS_ALARM_2    # 0x754D
+    AC_POWER                                 = 유효전력종합_ACTIVE_POWER    # 0x755F
+    TOTAL_ENERGY                             = CUMULATIVE_ENERGY          # 0x7569
+    MPPT1_VOLTAGE                            = 인버터_DC전압_PV_VOLTAGE    # 0x7555
+    MPPT1_CURRENT                            = 태양전지_전류                # 0x7557
+    STRING1_CURRENT                          = 태양전지1_전류_STRING_1_CURRENT  # 0x759B
+    STRING2_CURRENT                          = 태양전지2_전류_STRING_2_CURRENT  # 0x75A1
+
+    # Phase voltage/current (use backup addresses — FC03 Holding)
+    R_PHASE_VOLTAGE                          = 0x0070
+    S_PHASE_VOLTAGE                          = 0x0071
+    T_PHASE_VOLTAGE                          = 0x0072
+    R_PHASE_CURRENT                          = 0x0073
+    S_PHASE_CURRENT                          = 0x0074
+    T_PHASE_CURRENT                          = 0x0075
+    MPPT2_VOLTAGE                            = 0x0042
+    MPPT2_CURRENT                            = 0x0043
+    STRING3_CURRENT                          = 0x0062
+    STRING4_CURRENT                          = 0x0063
+
+    # DER / Control registers
+    DER_POWER_FACTOR_SET                     = 0x07D0
+    DER_ACTION_MODE                          = 0x07D1
+    DER_REACTIVE_POWER_PCT                   = 0x07D2
+    DER_ACTIVE_POWER_PCT                     = 0x07D3
+    INVERTER_ON_OFF                          = 0x0834
+
 
 
 class InverterMode:
