@@ -179,6 +179,7 @@ async def stage1_run(body: dict):
                 'review_count': result['review_count'],
                 'iv_scan': result['meta'].get('iv_scan', False),
                 'iv_data_points': result['meta'].get('iv_data_points', 0),
+                'info_match': result.get('info_match', {'model': False, 'sn': False}),
                 'suggestions': result.get('suggestions', {}),
             })
         except asyncio.CancelledError:
@@ -276,6 +277,7 @@ async def apply_suggestion(body: dict):
                 'review_count': result['review_count'],
                 'iv_scan': result['meta'].get('iv_scan', False),
                 'iv_data_points': result['meta'].get('iv_data_points', 0),
+                'info_match': result.get('info_match', {'model': False, 'sn': False}),
                 'suggestions': result.get('suggestions', {}),
             })
         except NotRegisterMapError as e:

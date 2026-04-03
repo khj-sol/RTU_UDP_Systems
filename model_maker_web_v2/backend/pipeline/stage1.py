@@ -2605,6 +2605,8 @@ def run_stage1(
     sheet_count = 4 + (1 if meta['iv_scan'] and iv_info.get('supported') else 0)
     log(f'Stage 1 완료: {output_name} ({sheet_count}시트)', 'ok')
 
+    info_match = suggestions.pop('_info_match', {'model': False, 'sn': False})
+
     return {
         'output_path': output_path,
         'output_name': output_name,
@@ -2614,6 +2616,7 @@ def run_stage1(
         'h01_match': {'matched': h01_matched, 'total': h01_total, 'table': h01_match_table},
         'der_match': {'matched': der_matched, 'total': der_total},
         'iv_info': iv_info,
+        'info_match': info_match,
         'suggestions': suggestions,
     }
 
@@ -2823,6 +2826,9 @@ def _build_all_suggestions(h01_table: list, categorized: dict,
         if cands:
             suggestions['iv_scan'] = _make_suggestion('iv_scan', cands)
             if log: log(f'  제안: IV Scan 후보 {len(cands)}개')
+
+    # INFO 매칭 여부 반환용
+    suggestions['_info_match'] = {'model': has_model, 'sn': has_sn}
 
     return suggestions
 
