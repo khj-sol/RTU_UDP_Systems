@@ -172,6 +172,13 @@ async def _handle_h01_async(rtu_id: int, device_key: tuple, parsed: dict):
     """Save H01 data to DB and broadcast via WebSocket."""
     dev_type, dev_num = device_key
 
+    # Skip hidden (deleted) RTUs entirely — no DB update, no WS broadcast
+    _rtu_check = await database.get_rtu(rtu_id)
+    if _rtu_check and _rtu_check.get('hidden'):
+        with engine._lock:
+            engine.rtu_registry.pop(rtu_id, None)  # remove from memory too
+        return
+
     # Upsert RTU in database + detect online recovery
     rtu_state = engine.rtu_registry.get(rtu_id)
     if rtu_state:
@@ -255,6 +262,11 @@ _PERIODIC_CONTROL_EVENTS = {"control_check", "control_result"}
 
 async def _handle_event_async(rtu_id: int, event_type: str, detail: str):
     """Save event to DB and broadcast via WebSocket."""
+    # Skip hidden (deleted) RTUs
+    _rtu_chk = await database.get_rtu(rtu_id)
+    if _rtu_chk and _rtu_chk.get('hidden'):
+        return
+
     if event_type in _LOG_ONLY_EVENTS:
         logger.debug(f"[{event_type}] RTU:{rtu_id} {detail}")
         return
