@@ -2489,12 +2489,33 @@ def _build_all_suggestions(h01_table: list, categorized: dict,
             suggestions['info_sn'] = cands
             if log: log(f'  제안: INFO SN 후보 {len(cands)}개')
 
+    # ── 제안 이유 설명 ──
+    _WHY_X = {
+        'status':           '인버터 동작상태(inverter mode/state) 레지스터를 자동 감지 실패. synonym_db에 등록하면 다음 인버터에서 자동 매칭됩니다.',
+        'alarm1':           'Fault/Alarm 코드 레지스터를 자동 감지 실패. 후보 중 가장 적합한 레지스터를 선택해주세요.',
+        'cumulative_energy':'누적발전량(kWh) 레지스터를 자동 감지 실패. 에너지/발전량 관련 레지스터 후보입니다.',
+        'pv_power':         'DC 입력전력(W) 레지스터를 자동 감지 실패. MPPT 전력 합산으로 handler 계산도 가능합니다.',
+        'info_model':       'INFO 시트에 인버터 Model 레지스터가 없습니다. 후보를 선택하거나 건너뛰세요.',
+        'info_sn':          'INFO 시트에 Serial Number 레지스터가 없습니다. 후보를 선택하거나 건너뛰세요.',
+        'status_definitions':'STATUS 레지스터는 감지됐지만 값 정의(0=대기, 1=운전...)가 PDF에서 추출되지 않았습니다.',
+        'alarm_definitions': 'ALARM 레지스터는 감지됐지만 오류코드 정의가 PDF에서 추출되지 않았습니다.',
+        'mppt_detection':   'MPPT 채널 수가 0으로 감지됐습니다. 아래 후보 중 PV 레지스터를 선택하면 재감지합니다.',
+        'iv_scan':          'IV Scan 레지스터가 감지되지 않았습니다. Solarize 프로토콜이 아닌 경우 정상입니다.',
+    }
+
+    def _make_suggestion(why_key, candidates, x_note=''):
+        why = _WHY_X.get(why_key, '')
+        if x_note:
+            why = f'{why}\n[Stage 1 노트: {x_note}]' if why else f'Stage 1 노트: {x_note}'
+        return {'why': why, 'candidates': candidates}
+
     # ── 2. H01: X 필드 ──
     x_fields = [row for row in h01_table if row['status'] == 'X']
     for x_row in x_fields:
         candidates = _suggest_candidates(x_row['field'], all_regs, categorized)
         if candidates:
-            suggestions[x_row['field']] = candidates
+            note = x_row.get('note', '')
+            suggestions[x_row['field']] = _make_suggestion(x_row['field'], candidates, note)
             if log: log(f'  제안: H01 [{x_row["field"]}] 후보 {len(candidates)}개')
 
     # ── 3. STATUS/ALARM 정의 없음 ──
@@ -2503,31 +2524,27 @@ def _build_all_suggestions(h01_table: list, categorized: dict,
                         if getattr(r, 'h01_field', '') == 'inverter_status'
                         and getattr(r, 'value_definitions', None)]
     if status_regs and not status_with_defs:
-        # STATUS 레지스터는 있지만 정의가 없음
-        suggestions['status_definitions'] = [{
-            'addr': '-', 'definition': 'STATUS 레지스터 값 정의 테이블 없음',
-            'score': 0, 'reason': 'PDF에서 Inverter Mode/State 값 정의를 찾지 못함',
-            'source': 'REVIEW',
-        }]
+        cands = [{'addr': '-', 'definition': 'STATUS 레지스터 값 정의 테이블 없음',
+                  'score': 0, 'reason': 'PDF에서 Inverter Mode/State 값 정의를 찾지 못함',
+                  'source': 'REVIEW'}]
+        suggestions['status_definitions'] = _make_suggestion('status_definitions', cands)
         if log: log(f'  제안: STATUS 정의 테이블 미발견')
 
     alarm_regs = categorized.get('ALARM', [])
     alarm_with_defs = [r for r in alarm_regs if getattr(r, 'value_definitions', None)]
     if alarm_regs and not alarm_with_defs:
-        suggestions['alarm_definitions'] = [{
-            'addr': '-', 'definition': 'ALARM 레지스터 값 정의 테이블 없음',
-            'score': 0, 'reason': 'PDF에서 Fault/Error Code 정의를 찾지 못함',
-            'source': 'REVIEW',
-        }]
+        cands = [{'addr': '-', 'definition': 'ALARM 레지스터 값 정의 테이블 없음',
+                  'score': 0, 'reason': 'PDF에서 Fault/Error Code 정의를 찾지 못함',
+                  'source': 'REVIEW'}]
+        suggestions['alarm_definitions'] = _make_suggestion('alarm_definitions', cands)
         if log: log(f'  제안: ALARM 정의 테이블 미발견')
 
     # ── 4. MPPT/String 미감지 ──
     max_mppt = meta.get('max_mppt', 0)
-    max_string = meta.get('max_string', 0)
     if max_mppt == 0:
         cands = _suggest_mppt(all_regs)
         if cands:
-            suggestions['mppt_detection'] = cands
+            suggestions['mppt_detection'] = _make_suggestion('mppt_detection', cands)
             if log: log(f'  제안: MPPT 후보 {len(cands)}개')
 
     # ── 5. IV Scan ──
@@ -2536,7 +2553,7 @@ def _build_all_suggestions(h01_table: list, categorized: dict,
     if not iv_scan and not has_iv_regs:
         cands = _suggest_iv_scan(all_regs)
         if cands:
-            suggestions['iv_scan'] = cands
+            suggestions['iv_scan'] = _make_suggestion('iv_scan', cands)
             if log: log(f'  제안: IV Scan 후보 {len(cands)}개')
 
     return suggestions

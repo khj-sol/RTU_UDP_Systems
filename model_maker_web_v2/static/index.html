@@ -436,31 +436,38 @@
     const groups = document.getElementById('suggest-groups');
     groups.innerHTML = '';
 
-    const actionable = {};  // field → candidates (actually actionable = has real candidates)
-    const infoOnly = {};    // just informational messages
+    const actionable = {};
+    const infoOnly = {};
 
-    for (const [field, cands] of Object.entries(sugg)) {
+    for (const [field, data] of Object.entries(sugg)) {
+      // 새 형식: {why, candidates} / 구형식: 배열
+      const cands = Array.isArray(data) ? data : (data.candidates || []);
+      const why   = Array.isArray(data) ? '' : (data.why || '');
+
       if (cands.length === 1 && cands[0].score === 0) {
-        infoOnly[field] = cands[0];
+        infoOnly[field] = { ...cands[0], why };
       } else {
-        actionable[field] = cands;
+        actionable[field] = { cands, why };
       }
     }
 
     // Actionable 제안 (radio 선택)
-    for (const [field, cands] of Object.entries(actionable)) {
+    for (const [field, { cands, why }] of Object.entries(actionable)) {
       const label = _SUGGEST_LABELS[field] || field;
       const div = document.createElement('div');
       div.className = 'suggest-group';
       div.dataset.field = field;
 
       let html = `<div class="suggest-group-title">⚡ ${label}</div>`;
+      if (why) {
+        html += `<div style="color:#94a3b8;font-size:10px;margin:4px 0 6px;padding:5px 8px;background:#1e2235;border-radius:4px;line-height:1.5">${why.replace(/\n/g,'<br>')}</div>`;
+      }
       cands.slice(0, 5).forEach((c, i) => {
         html += `<div class="suggest-cand">
           <input type="radio" name="sg-${field}" value="${i}" id="sg-${field}-${i}">
           <span class="cand-addr">${c.addr}</span>
           <span class="cand-def">${c.definition}</span>
-          <span class="cand-reason">${c.reason} (${c.score}점)</span>
+          <span class="cand-reason">${c.reason}${c.score > 0 ? ' ('+c.score+'점)' : ''}</span>
         </div>`;
       });
       html += `<button class="suggest-skip-btn" style="margin-top:4px" onclick="skipSuggestion('${field}', this.closest('.suggest-group'))">이 항목 제외</button>`;
@@ -474,8 +481,12 @@
       const div = document.createElement('div');
       div.className = 'suggest-group';
       div.style.borderColor = '#6b7280';
-      div.innerHTML = `<div class="suggest-group-title" style="color:#9ca3af">ℹ ${label}</div>
-        <div style="color:#6b7280;font-size:11px">${info.reason}</div>`;
+      let html = `<div class="suggest-group-title" style="color:#9ca3af">ℹ ${label}</div>`;
+      if (info.why) {
+        html += `<div style="color:#6b7280;font-size:10px;margin-bottom:4px;line-height:1.5">${info.why.replace(/\n/g,'<br>')}</div>`;
+      }
+      html += `<div style="color:#6b7280;font-size:11px">${info.reason}</div>`;
+      div.innerHTML = html;
       groups.appendChild(div);
     }
 
