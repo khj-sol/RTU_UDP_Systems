@@ -217,10 +217,15 @@ class DB:
         await self._maybe_commit()
 
     async def get_rtus(self):
+        # hidden RTU도 표시하되 status='offline' 강제 — 재접속해도 ONLINE이 되지 않음
         async with self.db.execute(
-            "SELECT * FROM rtu_registry WHERE hidden IS NOT 1 ORDER BY rtu_id"
+            "SELECT * FROM rtu_registry ORDER BY rtu_id"
         ) as cursor:
-            return [dict(row) for row in await cursor.fetchall()]
+            rows = [dict(row) for row in await cursor.fetchall()]
+        for r in rows:
+            if r.get('hidden'):
+                r['status'] = 'offline'
+        return rows
 
     async def get_rtu(self, rtu_id: int):
         async with self.db.execute("SELECT * FROM rtu_registry WHERE rtu_id=?", (rtu_id,)) as cursor:

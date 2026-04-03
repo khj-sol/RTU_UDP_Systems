@@ -259,9 +259,10 @@ function OverviewTab({
   rtus,
   onSelectRtu
 }) {
-  const online = rtus.filter(r => r.status === 'online').length;
-  const totalSolar = rtus.reduce((s, r) => s + (r.total_solar_power || 0), 0);
-  const totalGrid = rtus.reduce((s, r) => s + (r.total_grid_power || 0), 0);
+  const activeRtus = rtus.filter(r => !r.hidden);
+  const online = activeRtus.filter(r => r.status === 'online').length;
+  const totalSolar = activeRtus.reduce((s, r) => s + (r.total_solar_power || 0), 0);
+  const totalGrid = activeRtus.reduce((s, r) => s + (r.total_grid_power || 0), 0);
   const hasGrid = totalGrid > 0;
   const gridDisplay = hasGrid ? totalGrid : totalSolar;
   const gridLabel = hasGrid ? "Total Grid Power" : "Total Grid Power (=Solar)";
@@ -310,7 +311,7 @@ function OverviewTab({
     className: "text-gray-400 text-sm"
   }, "Total RTUs"), /*#__PURE__*/React.createElement("div", {
     className: "text-3xl font-bold"
-  }, rtus.length)), /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("div", {
+  }, activeRtus.length)), /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("div", {
     className: "text-gray-400 text-sm"
   }, "Online RTUs"), /*#__PURE__*/React.createElement("div", {
     className: "text-3xl font-bold text-green-400"
@@ -346,17 +347,19 @@ function OverviewTab({
     style: {width: '50px'}
   }))), /*#__PURE__*/React.createElement("tbody", null, rtus.map(r => /*#__PURE__*/React.createElement("tr", {
     key: r.rtu_id,
-    className: "border-b border-gray-700/50 hover:bg-gray-700/30"
+    className: `border-b border-gray-700/50 hover:bg-gray-700/30 ${r.hidden ? 'opacity-40' : ''}`
   }, /*#__PURE__*/React.createElement("td", {
     className: "py-2 text-center cursor-pointer",
     onClick: () => showRtuInfo(r)
   }, /*#__PURE__*/React.createElement("span", {
     className: `inline-block w-2.5 h-2.5 rounded-full ${statusColor(r.status)}`,
-    title: "Click for RTU info"
+    title: r.hidden ? 'Deleted — permanently offline' : 'Click for RTU info'
   })), /*#__PURE__*/React.createElement("td", {
     className: "font-mono cursor-pointer hover:text-blue-400",
     onClick: () => onSelectRtu(r.rtu_id)
-  }, r.rtu_id, " ", r.rtu_type && /*#__PURE__*/React.createElement("span", {
+  }, r.rtu_id, " ", r.hidden ? /*#__PURE__*/React.createElement("span", {
+    className: "ml-1 text-xs px-1.5 py-0.5 rounded bg-gray-600 text-gray-300"
+  }, "DELETED") : r.rtu_type && /*#__PURE__*/React.createElement("span", {
     className: `ml-1 text-xs px-1.5 py-0.5 rounded ${r.rtu_type === 'RIP' ? 'bg-purple-600' : 'bg-teal-600'}`
   }, r.rtu_type)), /*#__PURE__*/React.createElement("td", {
     className: "cursor-pointer hover:text-blue-400",
@@ -2235,7 +2238,7 @@ function App() {
   const [wsEvents, setWsEvents] = useState([]);
   const [wsUpdateCounter, setWsUpdateCounter] = useState(0);
   useWebSocket(useCallback(msg => {
-    if (msg.type === 'rtu_status' || msg.type === 'h01_data') {
+    if (msg.type === 'rtu_status' || msg.type === 'h01_data' || msg.type === 'rtu_offline') {
       fetcher('/rtus').then(d => setRtus(Array.isArray(d?.rtus) ? d.rtus : Array.isArray(d) ? d : [])).catch(() => {});
       setWsUpdateCounter(c => c + 1);
     }
