@@ -93,19 +93,29 @@ def _apply_saved_definitions(categorized: dict, manufacturer: str, log=None):
     status_defs = saved.get('status_definitions', {})
     alarm_codes = saved.get('alarm_codes', {})
 
-    # STATUS: value_definitions 없는 첫 번째 STATUS 레지스터에 적용 (h01_field 무관)
+    # 제어/설정 레지스터를 status 대상에서 제외하기 위한 키워드
+    # ex) "Permanent Mode – Reactive", "Power Factor Mode" 등은 인버터 상태 레지스터가 아님
+    _STATUS_EXCL = ['reactive', 'power factor', 'active power', 'voltage limit',
+                    'current limit', 'frequency limit', 'setting', 'control',
+                    'threshold', 'setpoint', 'permanen', 'fixed', 'droop']
+
+    def _is_control_reg(reg):
+        dl = reg.definition.lower().replace('_', ' ')
+        return any(k in dl for k in _STATUS_EXCL)
+
+    # STATUS: value_definitions 없는 첫 번째 STATUS 레지스터에 적용 (제어 레지스터 제외)
     if status_defs:
         for reg in categorized.get('STATUS', []):
-            if not getattr(reg, 'value_definitions', None):
+            if not getattr(reg, 'value_definitions', None) and not _is_control_reg(reg):
                 reg.value_definitions = status_defs
                 if log:
                     log(f'  정의 파일 적용 (status): {fname} ({len(status_defs)}개)')
                 break
 
-    # ALARM: value_definitions 없는 첫 번째 ALARM에 적용
+    # ALARM: value_definitions 없는 첫 번째 ALARM에 적용 (제어 레지스터 제외)
     if alarm_codes:
         for reg in categorized.get('ALARM', []):
-            if not getattr(reg, 'value_definitions', None):
+            if not getattr(reg, 'value_definitions', None) and not _is_control_reg(reg):
                 reg.value_definitions = alarm_codes
                 if log:
                     log(f'  정의 파일 적용 (alarm): {fname} ({len(alarm_codes)}개)')
