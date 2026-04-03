@@ -1691,6 +1691,7 @@ def run_stage1(
     def log(msg, level='info'):
         if progress:
             progress(msg, level)
+    log('[DEBUG] stage1 v4 로드 확인 (3_MPPT_STRING 5시트 버전)', 'info')
 
     openpyxl = get_openpyxl()
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
