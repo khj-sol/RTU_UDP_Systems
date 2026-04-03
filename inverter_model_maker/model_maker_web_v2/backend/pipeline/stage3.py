@@ -14,7 +14,7 @@ from textwrap import dedent, indent
 from typing import List, Dict, Optional
 
 from . import (
-    PROJECT_ROOT, COMMON_DIR,
+    PROJECT_ROOT, COMMON_DIR, RTU_COMMON_DIR,
     RegisterRow, INVERTER_MODES,
     to_upper_snake, parse_address, detect_channel_number,
     load_synonym_db, save_synonym_db,
@@ -196,6 +196,7 @@ def _load_error_bits_from_reference(manufacturer: str) -> dict:
     patterns = glob.glob(os.path.join(COMMON_DIR, f'REF_{manufacturer}_*_registers.py'))
     patterns += glob.glob(os.path.join(COMMON_DIR, f'{manufacturer}_*_registers.py'))
     patterns += [os.path.join(COMMON_DIR, f'REF_Solarize_PV_registers.py'),
+                 os.path.join(COMMON_DIR, 'Solarize_PV_50kw_registers.py'),
                  os.path.join(COMMON_DIR, 'Solarize_PV_registers.py')]
 
     for fpath in patterns:
@@ -976,8 +977,16 @@ def run_stage3(
     common_path = os.path.join(COMMON_DIR, output_name)
     if all_passed:
         import shutil
+        # 1) Model Maker common/ (레퍼런스용)
         shutil.copy2(output_path, common_path)
         log(f'  레퍼런스 등록: common/{output_name}')
+        # 2) RTU V2_0_0/common/ (즉시 배포용)
+        if os.path.isdir(RTU_COMMON_DIR):
+            rtu_common_path = os.path.join(RTU_COMMON_DIR, output_name)
+            shutil.copy2(output_path, rtu_common_path)
+            log(f'  RTU 배포: V2_0_0/common/{output_name}')
+        else:
+            log(f'  RTU common/ 없음 — 수동 복사 필요: {RTU_COMMON_DIR}', 'warn')
     else:
         failed = [k for k, v in validation.items() if not v]
         log(f'  레퍼런스 미등록 (검증 실패: {failed})', 'warn')

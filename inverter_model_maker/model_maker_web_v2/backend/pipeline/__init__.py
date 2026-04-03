@@ -14,6 +14,8 @@ from typing import Dict, List, Optional, Callable, Any
 _HERE = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.normpath(os.path.join(_HERE, '..', '..', '..'))
 COMMON_DIR = os.path.join(PROJECT_ROOT, 'common')
+# RTU 실제 common/ 디렉토리 (V2_0_0/common/) — Stage 3 결과물을 여기에도 복사
+RTU_COMMON_DIR = os.path.normpath(os.path.join(_HERE, '..', '..', '..', '..', 'common'))
 MODEL_MAKER_DIR = os.path.join(PROJECT_ROOT, 'model_maker')
 UDP_PROTOCOL_DIR = os.path.join(PROJECT_ROOT, 'UDP_SERVER_protocol')
 
