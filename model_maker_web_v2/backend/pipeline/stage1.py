@@ -8,6 +8,11 @@ V2 핵심 변경:
 - 제어 레지스터 완전 제외 (DER-AVM으로만 제어)
 - H01_MATCH 시트 추가: 전체 H01 필드 매칭 상태 표시
 """
+
+
+class NotRegisterMapError(ValueError):
+    """PDF/Excel 파일이 Modbus 레지스터 맵 문서가 아닐 때 발생"""
+    pass
 import os
 import re
 import json
@@ -1691,7 +1696,6 @@ def run_stage1(
     def log(msg, level='info'):
         if progress:
             progress(msg, level)
-
     openpyxl = get_openpyxl()
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
@@ -1810,7 +1814,11 @@ def run_stage1(
     log(f'  {len(registers)}개 레지스터 추출 (원본)')
 
     if not registers:
-        raise ValueError('레지스터를 찾지 못했습니다. PDF/Excel 형식을 확인해주세요.')
+        raise NotRegisterMapError(
+            'Modbus 레지스터(FC03/FC04)를 찾지 못했습니다.\n'
+            '이 파일은 Modbus 프로토콜 문서가 아닌 것 같습니다.\n'
+            '인버터 Modbus Register Map / Protocol 문서를 업로드해주세요.'
+        )
 
     manufacturer = basename.split('_')[0].split(' ')[0]
     log(f'  제조사 (파일명 기반): {manufacturer}')
