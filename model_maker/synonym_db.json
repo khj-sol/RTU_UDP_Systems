@@ -16,7 +16,22 @@
         "Inverter – Part number (PN2)",
         "Inverter – Part number (PN0)",
         "Inverter – Part number (PN1)",
-        "String 7 abnormal alarm"
+        "String 7 abnormal alarm",
+        "Self-Test",
+        "Auto Exclusion",
+        "Grid Faultrecord 5 - day|",
+        "Grid Faultrecord 1 - day|hour",
+        "Grid Faultrecord 2 - day|hour",
+        "Grid Faultrecord 3 - day|hour",
+        "Grid Faultrecord 4 - day|hour",
+        "Self-Test 3",
+        "Self-Test 4",
+        "Residual current leakagedetected is high.",
+        "Line tie relay contacts havewelded or are open.",
+        "String 1 abnormal alarm",
+        "String 2 abnormal alarm",
+        "String 8 abnormal alarm",
+        "String 9 abnormal alarm"
       ]
     },
     "L2_VOLTAGE": {
@@ -33,7 +48,20 @@
         "S_PHASE_VOLTAGE",
         "Grid Voltage Phase B",
         "Zero Power",
-        "Inverter – Part number (PN3)"
+        "Inverter – Part number (PN3)",
+        "Self-Test Fail",
+        "Internal Error E027",
+        "Grid Faultrecord 5 - min|sec",
+        "Grid Faultrecord 1 - min|sec",
+        "Grid Faultrecord 2 - min|sec",
+        "Grid Faultrecord 3 - min|sec",
+        "Grid Faultrecord 4 - min|sec",
+        "Internal Error E026",
+        "Internal Error E028",
+        "Internal Error E029",
+        "Internal Error E030",
+        "Inverter address",
+        "AC current imbalance"
       ]
     },
     "L3_VOLTAGE": {
@@ -50,7 +78,15 @@
         "T_PHASE_VOLTAGE",
         "Grid Voltage Phase C",
         "Grid Fail",
-        "Inverter – Part number (PN4)"
+        "Inverter – Part number (PN4)",
+        "Sensor Test + Meas.Riso",
+        "Sys Month",
+        "Grid Faultrecord 5-value",
+        "Grid Faultrecord 1-value",
+        "Grid Faultrecord 2-value",
+        "Grid Faultrecord 3-value",
+        "Grid Faultrecord 4-value",
+        "Average grid over-voltage (10minutes)"
       ]
     },
     "L1_CURRENT": {
@@ -67,7 +103,8 @@
         "R_PHASE_CURRENT",
         "Grid Current Phase A",
         "Inverter – Part number (PN5)",
-        "String 10 abnormal alarm"
+        "String 10 abnormal alarm",
+        "Vref Error"
       ]
     },
     "L2_CURRENT": {
@@ -83,7 +120,9 @@
         "IAC_S",
         "S_PHASE_CURRENT",
         "Grid Not Present",
-        "Low ambient temperature"
+        "Low ambient temperature",
+        "The ambient temperature fallsbelow - 25 °C (-13 °F)",
+        "Total activepower"
       ]
     },
     "L3_CURRENT": {
@@ -99,7 +138,8 @@
         "IAC_T",
         "T_PHASE_CURRENT",
         "Input OC",
-        "Inverter – Country/Grid standard"
+        "Inverter – Country/Grid standard",
+        "Sys Day"
       ]
     },
     "AC_POWER": {
@@ -113,7 +153,8 @@
         "Pac",
         "Total AC Power",
         "Grid Total Active Power",
-        "Inverter –Transformer type"
+        "Inverter –Transformer type",
+        "Total reactivepower"
       ]
     },
     "POWER_FACTOR": {
@@ -126,7 +167,11 @@
         "AC Power Factor",
         "Sending Parameters",
         "Inverter – Week production – High byte",
-        "Inverter – Year production – High byte"
+        "Inverter – Year production – High byte",
+        "Length of the following fields",
+        "Inverter Status",
+        "OnOff",
+        "Reactive powerpercentage setting"
       ]
     },
     "FREQUENCY": {
@@ -143,7 +188,12 @@
         "Inverter – Year production – Low byte",
         "Excessively high ambient temperature",
         "String 13 abnormal alarm",
-        "Reactive powerpercentagesetting"
+        "Reactive powerpercentagesetting",
+        "Leak Fault",
+        "LCDlanguage",
+        "Grid overvoltage",
+        "Internal ambient temperatureis too high.",
+        "Operating State"
       ]
     },
     "PV_POWER": {
@@ -156,7 +206,16 @@
         "Input Power",
         "Total PV Power",
         "PV_TOTAL_INPUT_POWER",
-        "I_DC_Power"
+        "I_DC_Power",
+        "Pac H",
+        "Pac L",
+        "Pac1 H",
+        "Pac1 L",
+        "Pac2 H",
+        "Pac2 L",
+        "Pac3 L",
+        "Pac3 H",
+        "PV 3 power event warning"
       ]
     },
     "CUMULATIVE_ENERGY": {
@@ -175,7 +234,11 @@
         "Energy Since Commissioning",
         "I_AC_Energy_WH",
         "Total poweryields",
-        "Inverter – Total Energy"
+        "Inverter – Total Energy",
+        "Cap",
+        "WH",
+        "Energy total H",
+        "Energy total L"
       ]
     },
     "DAILY_ENERGY": {
@@ -189,7 +252,10 @@
         "Eac today",
         "Einv day",
         "Energy today",
-        "Inverter – Daily Energy"
+        "Inverter – Daily Energy",
+        "Temperature Fault",
+        "Time total L",
+        "Clamp capacitance under-voltage event is detected."
       ]
     },
     "CUMULATIVE_ENERGY_LOW": {
@@ -222,7 +288,11 @@
         "Inverter Temperature",
         "Cabinet Temperature",
         "Inverter – Inverter Temperature",
-        "Excessively high module temperature"
+        "Excessively high module temperature",
+        "Current Input over threshold (out of measurement range)",
+        "Fan Staucked",
+        "Module temperature is toohigh.",
+        "Clamp capacitance imbalanceevent is detected."
       ]
     },
     "DEVICE_MODEL": {
@@ -319,7 +389,10 @@
       "category": "MONITORING",
       "h01_field": "mppt3_current",
       "synonyms": [
-        "MPPT3_POWER_/_MPPT3_VOLTAGE"
+        "MPPT3_POWER_/_MPPT3_VOLTAGE",
+        "DCA",
+        "mppt3_current",
+        "MPPT 3 current"
       ]
     }
   }
