@@ -475,8 +475,10 @@ def run_stage2(
     total_regs = sum(counts.values()) - counts['REVIEW']
 
     # H01 매칭 (Stage 1에서 가져옴)
-    h01_matched = sum(1 for h in s1['h01_match'] if h['status'] == 'O')
-    h01_total = len(s1['h01_match'])
+    # status '-' = DER 겹침 필드 → 분모 제외 (PDF 매칭 대상 아님)
+    # status 'O' 또는 '~' = 매칭 성공 (HANDLER 계산 포함)
+    h01_matched = sum(1 for h in s1['h01_match'] if h['status'] in ('O', '~'))
+    h01_total   = sum(1 for h in s1['h01_match'] if h['status'] != '-')
 
     # DER 매칭 (고정)
     der_total = len(DER_CONTROL_REGS) + len(DER_MONITOR_REGS)
