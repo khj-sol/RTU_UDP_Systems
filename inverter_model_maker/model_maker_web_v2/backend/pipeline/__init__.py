@@ -181,10 +181,9 @@ def load_reference_patterns() -> Dict[str, Dict[int, str]]:
     """
     patterns = {}
     py_files = glob.glob(os.path.join(COMMON_DIR, '*_registers.py'))
-    py_files += glob.glob(os.path.join(COMMON_DIR, '*_mm_registers.py'))
     for fpath in set(py_files):
         fname = os.path.basename(fpath)
-        proto = fname.replace('_mm_registers.py', '').replace('_registers.py', '')
+        proto = fname.replace('_registers.py', '').lstrip('REF_')
         try:
             spec = importlib.util.spec_from_file_location(f'ref_{proto}', fpath)
             mod = importlib.util.module_from_spec(spec)

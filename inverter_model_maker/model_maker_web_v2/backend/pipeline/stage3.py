@@ -3,7 +3,7 @@
 Stage 3 — Stage 2 Excel → *_registers.py 코드 생성
 
 사용자 점검 완료된 Stage 2 Excel에서 RTU 호환 registers.py 코드를 생성한다.
-레퍼런스(solarize_mm_registers.py)와 동일한 구조를 목표로 한다:
+레퍼런스(REF_Solarize_PV_registers.py)와 동일한 구조를 목표로 한다:
 - 12개 클래스, 9개 모듈 함수, SCALE, DATA_TYPES, FLOAT32_FIELDS
 """
 import os
@@ -188,15 +188,15 @@ def _parse_s2_reg_row(cells, header, category):
 # ─── 레퍼런스 ErrorCode BITS 로딩 ───────────────────────────────────────────
 
 def _load_error_bits_from_reference(manufacturer: str) -> dict:
-    """레퍼런스 *_mm_registers.py에서 ErrorCode BITS 로드"""
+    """레퍼런스 REF_*_registers.py 또는 {제조사}_*_registers.py에서 ErrorCode BITS 로드"""
     import glob
     result = {}
-    patterns = [
-        os.path.join(COMMON_DIR, f'{manufacturer.lower()}_mm_registers.py'),
-        os.path.join(COMMON_DIR, f'{manufacturer.lower()}_registers.py'),
-    ]
-    # 매칭 안 되면 solarize 사용
-    patterns.append(os.path.join(COMMON_DIR, 'solarize_mm_registers.py'))
+    mfr_lower = manufacturer.lower()
+    # REF_ 파일 우선, 그 다음 신규 네이밍, 마지막으로 Solarize REF fallback
+    patterns = glob.glob(os.path.join(COMMON_DIR, f'REF_{manufacturer}_*_registers.py'))
+    patterns += glob.glob(os.path.join(COMMON_DIR, f'{manufacturer}_*_registers.py'))
+    patterns += [os.path.join(COMMON_DIR, f'REF_Solarize_PV_registers.py'),
+                 os.path.join(COMMON_DIR, 'Solarize_PV_registers.py')]
 
     for fpath in patterns:
         if not os.path.exists(fpath):
