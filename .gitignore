@@ -17,3 +17,5 @@ model_maker/comparison_output_all/
 model_maker_web.7z
 model_maker_web/temp/*
 !model_maker_web/temp/.gitkeep
+model_maker_web_v2/temp/*
+!model_maker_web_v2/temp/.gitkeep
