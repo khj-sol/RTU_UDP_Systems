@@ -60,7 +60,29 @@
         "String 21 abnormal alarm",
         "String 22 abnormal alarm",
         "String 23 abnormal alarm",
-        "String 24 abnormal alarm"
+        "String 24 abnormal alarm",
+        "STRING_1_ABNORMAL_ALARM",
+        "STRING_2_ABNORMAL_ALARM",
+        "STRING_3_ABNORMAL_ALARM",
+        "STRING_4_ABNORMAL_ALARM",
+        "STRING_5_ABNORMAL_ALARM",
+        "STRING_6_ABNORMAL_ALARM",
+        "STRING_7_ABNORMAL_ALARM",
+        "STRING_8_ABNORMAL_ALARM",
+        "STRING_9_ABNORMAL_ALARM",
+        "STRING_11_ABNORMAL_ALARM",
+        "STRING_12_ABNORMAL_ALARM",
+        "STRING_14_ABNORMAL_ALARM",
+        "STRING_15_ABNORMAL_ALARM",
+        "STRING_16_ABNORMAL_ALARM",
+        "STRING_17_ABNORMAL_ALARM",
+        "STRING_18_ABNORMAL_ALARM",
+        "STRING_19_ABNORMAL_ALARM",
+        "STRING_20_ABNORMAL_ALARM",
+        "STRING_21_ABNORMAL_ALARM",
+        "STRING_22_ABNORMAL_ALARM",
+        "STRING_23_ABNORMAL_ALARM",
+        "STRING_24_ABNORMAL_ALARM"
       ]
     },
     "L2_VOLTAGE": {
@@ -98,7 +120,8 @@
         "CEI0-21",
         "DUBAI-MV800",
         "DC지락",
-        "Communicate fault"
+        "Communicate fault",
+        "COMMUNICATE_FAULT"
       ]
     },
     "L3_VOLTAGE": {
@@ -155,7 +178,8 @@
         "String Test Threshold",
         "Northern Ireland-MV480",
         "LeakagecurrentRCD",
-        "Northern Ireland-MV800"
+        "Northern Ireland-MV800",
+        "STRING_10_ABNORMAL_ALARM"
       ]
     },
     "L2_CURRENT": {
@@ -279,7 +303,8 @@
         "Reserve",
         "RD1699/661",
         "전체 상태",
-        "Grid high voltage"
+        "Grid high voltage",
+        "STRING_13_ABNORMAL_ALARM"
       ]
     },
     "PV_POWER": {
@@ -324,7 +349,18 @@
         "ELECTRIC RULE NO.21-LV208",
         "ELECTRIC RULE NO.21-LV240",
         "TotalDCInputPower",
-        "PV3 abnormal"
+        "PV3 abnormal",
+        "PV1_ABNORMAL",
+        "PV2_ABNORMAL",
+        "PV4_ABNORMAL",
+        "PV5_ABNORMAL",
+        "PV6_ABNORMAL",
+        "PV7_ABNORMAL",
+        "PV8_ABNORMAL",
+        "PV9_ABNORMAL",
+        "PV10_ABNORMAL",
+        "PV11_ABNORMAL",
+        "PV12_ABNORMAL"
       ]
     },
     "CUMULATIVE_ENERGY": {
@@ -360,7 +396,8 @@
         "누적발전량",
         "적산전력량 Total generation Energy",
         "CUMULATIVE_ENERGY_LOW",
-        "Accumulatedpowergeneration"
+        "Accumulatedpowergeneration",
+        "CUMULATIVE_ENERGY_HIGH"
       ]
     },
     "DAILY_ENERGY": {
@@ -532,7 +569,8 @@
         "MPPT 3 current",
         "MPPT3 Current",
         "PV3 input current",
-        "PV3current"
+        "PV3current",
+        "MPPT_3_CURRENT"
       ]
     }
   }
