@@ -2540,6 +2540,23 @@ def _build_all_suggestions(h01_table: list, categorized: dict,
         sorted_cands = sorted(candidates, key=lambda c: -c['score'])
         top = sorted_cands[0]
 
+        # ── status 특수: BYTE_N 동점 → BYTE_0 자동 할당 ──
+        # ex) INVERTER_STATES_BYTE_0/1/2/3 처럼 같은 기본 이름의 BYTE 레지스터가 여럿일 때
+        if x_row['field'] == 'status' and len(sorted_cands) >= 2:
+            def _byte_base(defn):
+                return re.sub(r'[_ ]?BYTE[_ ]?\d+$', '', defn.upper()).strip('_ ')
+            bases = [_byte_base(c['definition']) for c in sorted_cands]
+            if len(set(bases)) == 1:  # 모두 동일 기본 이름
+                def _byte_num(c):
+                    m = re.search(r'BYTE[_ ]?(\d+)', c['definition'].upper())
+                    return int(m.group(1)) if m else 9999
+                winner = min(sorted_cands, key=_byte_num)
+                _auto_register_synonym('status', winner['definition'])
+                x_row['status'] = '~'
+                x_row['note'] = f'자동 할당(BYTE_0)→synonym_db: {winner["definition"]} ({winner["addr"]})'
+                if log: log(f'  자동 할당: status → {winner["definition"]} (BYTE 패턴)', 'info')
+                continue
+
         # 명확한 단독 우위: 2위와 25점 이상 차이 or 후보 1개, 점수 50 이상, PDF 출처
         second_score = sorted_cands[1]['score'] if len(sorted_cands) >= 2 else -999
         is_clear_winner = top['score'] >= 50 and top['source'] == 'PDF' and \
@@ -2817,7 +2834,7 @@ def _suggest_candidates(x_field: str, all_regs: list, categorized: dict) -> list
         if is_current and not candidates:
             return []
 
-        return sorted(candidates, key=lambda c: -c['score'])[:5]
+        return sorted(candidates, key=lambda c: -c['score'])[:2]
 
     # 일반 필드 (pv_power, cumulative_energy, status, alarm1)
     base_field = x_field.replace('1', '').replace('2', '').replace('3', '')
@@ -2901,8 +2918,14 @@ def _suggest_candidates(x_field: str, all_regs: list, categorized: dict) -> list
             'source': 'HANDLER',
         })
 
-    # 점수순 정렬, 상위 5개
-    return sorted(candidates, key=lambda c: -c['score'])[:5]
+    # status 필드: "model" 단어가 단독으로 포함된 레지스터 제외
+    # (ex. INVERTER_MODEL_IDENTIF 가 "inverter mode" 키워드에 substring 매칭되는 오탐 방지)
+    if x_field == 'status':
+        candidates = [c for c in candidates
+                      if not re.search(r'\bmodel\b', c['definition'].lower())]
+
+    # 점수순 정렬, 상위 2개 (제안 시 1순위·2순위만 표시)
+    return sorted(candidates, key=lambda c: -c['score'])[:2]
 
 
 def _link_definitions_to_registers(categorized: dict, def_tables: dict):
