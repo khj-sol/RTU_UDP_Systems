@@ -33,7 +33,7 @@ from common.protocol_constants import (
     CTRL_INV_ON_OFF, CTRL_INV_ACTIVE_POWER, CTRL_INV_POWER_FACTOR,
     CTRL_INV_REACTIVE_POWER, CTRL_INV_CONTROL_INIT, CTRL_INV_CONTROL_CHECK,
     CTRL_INV_IV_SCAN, CTRL_RTU_REBOOT, CTRL_INV_MODEL, CTRL_RTU_INFO,
-    CONTROL_TYPE_NAMES,
+    CONTROL_TYPE_NAMES, INV_MODEL_NAMES,
     DEFAULT_FTP_HOST, DEFAULT_FTP_PORT, DEFAULT_FTP_USER, DEFAULT_FTP_PASSWORD,
 )
 
@@ -352,9 +352,7 @@ async def save_iv_scan_csv(rtu_id: int):
     iv_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'IVdata')
     os.makedirs(iv_dir, exist_ok=True)
 
-    model_names = {1: 'Solarize', 2: 'Huawei', 3: 'Kstar', 4: 'Solarize_50K',
-                   5: 'Huawei_50K', 6: 'Kstar_60K', 7: 'Sungrow', 8: 'EKOS'}
-    model_str = model_names.get(data['model'], f'Model{data["model"]}')
+    model_str = INV_MODEL_NAMES.get(data['model'], f'Model{data["model"]}').replace(' ', '_')
     ts = datetime.now().strftime('%Y%m%d_%H%M%S')
     fname = f"{ts}-{rtu_id}-{model_str}_IV.csv"
     fpath = os.path.join(iv_dir, fname)
