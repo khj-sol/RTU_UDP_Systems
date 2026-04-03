@@ -74,7 +74,8 @@ async def stage1_upload(
     with open(dest, 'wb') as f:
         shutil.copyfileobj(file.file, f)
 
-    # 새 파일 업로드 → 세션 상태 완전 리셋 (이전 Stage 결과 제거)
+    # 새 파일 업로드 → 진행 중 태스크 취소 + 세션 상태 완전 리셋
+    SessionStore.cancel_running_task(session_id)
     SessionStore.update(
         session_id,
         uploaded_file=dest,
@@ -105,13 +106,19 @@ async def stage1_run(body: dict):
 
     work_dir = SessionStore.get_work_dir(sid)
 
-    # 비동기 실행
+    # 이전 태스크 취소 후 새 태스크 실행
+    SessionStore.cancel_running_task(sid)
+
     async def _run():
         try:
             from .pipeline.stage1 import run_stage1, NotRegisterMapError
             progress = _make_progress_callback(sid, 's1', asyncio.get_running_loop())
             result = await _run_in_thread(
                 run_stage1, uploaded, work_dir, device_type, progress)
+
+            # 태스크 취소로 인해 세션이 리셋된 경우 이벤트 전송 생략
+            if SessionStore.get(sid) is None:
+                return
 
             SessionStore.update(sid,
                                 stage=1,
@@ -130,6 +137,8 @@ async def stage1_run(body: dict):
                 'iv_data_points': result['meta'].get('iv_data_points', 0),
                 'suggestions': result.get('suggestions', {}),
             })
+        except asyncio.CancelledError:
+            pass  # 새 파일 업로드로 인해 취소됨 — 정상
         except NotRegisterMapError as e:
             await ws_manager.send_json(sid, {
                 'event': 'invalid_file',
@@ -145,7 +154,8 @@ async def stage1_run(body: dict):
             })
             traceback.print_exc()
 
-    asyncio.ensure_future(_run())
+    task = asyncio.ensure_future(_run())
+    SessionStore.update(sid, _running_task=task)
     return {'status': 'running', 'session_id': sid}
 
 

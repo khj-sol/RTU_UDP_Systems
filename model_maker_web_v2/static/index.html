@@ -380,16 +380,23 @@
     document.getElementById('btn-s2').disabled = true;
     document.getElementById('btn-s3').disabled = true;
 
-    const fd = new FormData();
-    fd.append('session_id', sessionId);
-    fd.append('file', file);
-    const r = await fetch(`${API}/stage1/upload`, { method: 'POST', body: fd });
-    const d = await r.json();
-    uploadedFilename = d.filename;
-    sessionStorage.setItem('mm_filename', uploadedFilename);   // F5 복원용
-    sessionStorage.setItem('mm_orig_name', file.name);        // F5 복원용
-    drop1.querySelector('p').textContent = `✓ ${file.name}`;
-    document.getElementById('btn-s1').disabled = false;
+    try {
+      const fd = new FormData();
+      fd.append('session_id', sessionId);
+      fd.append('file', file);
+      const r = await fetch(`${API}/stage1/upload`, { method: 'POST', body: fd });
+      if (!r.ok) throw new Error(`업로드 실패: ${r.status}`);
+      const d = await r.json();
+      uploadedFilename = d.filename;
+      sessionStorage.setItem('mm_filename', uploadedFilename);
+      sessionStorage.setItem('mm_orig_name', file.name);
+      drop1.querySelector('p').textContent = `✓ ${file.name}`;
+    } catch (err) {
+      appendLog('s1', `파일 업로드 오류: ${err.message}`, 'err');
+      drop1.querySelector('p').textContent = '파일을 드래그하거나 클릭하여 업로드';
+    } finally {
+      document.getElementById('btn-s1').disabled = !uploadedFilename;
+    }
   }
 
   // ─── Stage 실행 ────────────────────────────────────────────────
