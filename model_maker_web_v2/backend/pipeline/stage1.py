@@ -2516,22 +2516,81 @@ def _build_all_suggestions(h01_table: list, categorized: dict,
             why = f'{why}\n[Stage 1 노트: {x_note}]' if why else f'Stage 1 노트: {x_note}'
         return {'why': why, 'candidates': candidates}
 
-    # ── 2-pre. alarm1 X이고 ALARM 카테고리에 레지스터가 있으면 자동 할당 ──
+    # ── synonym_db value_keywords 로드 ──
+    try:
+        from . import load_synonym_db as _load_db
+        _sdb = _load_db()
+        _sdb_fields = _sdb.get('fields', {})
+        _status_vkw = _sdb_fields.get('status', {}).get('value_keywords', [])
+        _alarm_vkw  = _sdb_fields.get('alarm1', {}).get('value_keywords', [])
+    except Exception:
+        _status_vkw, _alarm_vkw = [], []
+
+    def _rank_by_value_kw(regs_with_defs, stored_kw, field_type):
+        """value_definitions 키워드 매칭으로 레지스터 점수 산출, 내림차순 반환"""
+        scored = []
+        for r in regs_with_defs:
+            vd = getattr(r, 'value_definitions', None) or {}
+            kw_score = _score_by_value_keywords(vd, stored_kw, field_type) if stored_kw else 50
+            scored.append((r, kw_score))
+        return sorted(scored, key=lambda x: -x[1])
+
+    # ── 2-pre-a. alarm1: value_definitions 있는 ALARM 레지스터만 매칭 ──
+    # 정의값(fault code 테이블) 없는 레지스터는 alarm1 후보 제외
     alarm1_row = next((r for r in h01_table if r['field'] == 'alarm1' and r['status'] == 'X'), None)
     if alarm1_row:
         alarm_cat = categorized.get('ALARM', [])
-        # value_definitions 있는 레지스터 우선, 없으면 첫 번째
-        primary_alarm = next((r for r in alarm_cat if getattr(r, 'value_definitions', None)), None)
-        if primary_alarm is None and alarm_cat:
-            primary_alarm = alarm_cat[0]
-        if primary_alarm:
-            _auto_register_synonym('alarm1', primary_alarm.definition)
+        alarm_with_defs = [r for r in alarm_cat if getattr(r, 'value_definitions', None)]
+        if alarm_with_defs:
+            ranked = _rank_by_value_kw(alarm_with_defs, _alarm_vkw, 'alarm')
+            winner, score = ranked[0]
+            _auto_register_synonym('alarm1', winner.definition)
+            _save_value_keywords('alarm1', getattr(winner, 'value_definitions', {}), 'alarm')
             alarm1_row['status'] = '~'
-            alarm1_row['note'] = f'자동 할당→synonym_db: {primary_alarm.definition} ({primary_alarm.address_hex})'
-            if log: log(f'  자동 할당: alarm1 → {primary_alarm.definition} (재실행 시 ✓)', 'info')
+            alarm1_row['note'] = (f'자동 할당(정의표 vkw={score})→synonym_db: '
+                                  f'{winner.definition} ({winner.address_hex})')
+            if log: log(f'  자동 할당: alarm1 → {winner.definition} (정의표 vkw={score})', 'info')
+        # else: value_definitions 없는 ALARM → 할당·제안 없음 (alarm_definitions 섹션에서 안내)
 
-    # ── 2. H01: X 필드 ──
-    x_fields = [row for row in h01_table if row['status'] == 'X']
+    # ── 2-pre-b. status: value_definitions 있는 STATUS 레지스터 직접 매칭 ──
+    # 정의값(mode 테이블: 0=대기, 1=운전...) 없는 레지스터는 status 후보 제외
+    status_row = next((r for r in h01_table if r['field'] == 'status' and r['status'] == 'X'), None)
+    if status_row:
+        status_cat = categorized.get('STATUS', [])
+        status_with_defs = [r for r in status_cat if getattr(r, 'value_definitions', None)]
+        if len(status_with_defs) == 1:
+            # 단 하나 → 자동 할당 + value_keywords 저장
+            winner = status_with_defs[0]
+            _auto_register_synonym('status', winner.definition)
+            _save_value_keywords('status', getattr(winner, 'value_definitions', {}), 'status')
+            status_row['status'] = '~'
+            status_row['note'] = f'자동 할당(정의표)→synonym_db: {winner.definition} ({winner.address_hex})'
+            if log: log(f'  자동 할당: status → {winner.definition} (정의표 직접 매칭)', 'info')
+        elif len(status_with_defs) >= 2:
+            # 여러 개 → value_keywords 기반 점수로 정렬, 상위 2개 제안 or 자동 할당
+            ranked = _rank_by_value_kw(status_with_defs, _status_vkw, 'status')
+            top_reg, top_score = ranked[0]
+            second_score = ranked[1][1] if len(ranked) >= 2 else 0
+            if _status_vkw and top_score >= 70 and (top_score - second_score) >= 20:
+                # value_keywords 기반 명확 우위 → 자동 할당
+                _auto_register_synonym('status', top_reg.definition)
+                _save_value_keywords('status', getattr(top_reg, 'value_definitions', {}), 'status')
+                status_row['status'] = '~'
+                status_row['note'] = (f'자동 할당(정의표 vkw={top_score})→synonym_db: '
+                                      f'{top_reg.definition} ({top_reg.address_hex})')
+                if log: log(f'  자동 할당: status → {top_reg.definition} (vkw={top_score})', 'info')
+            else:
+                # 점수 애매 → 사용자 선택 (상위 2개)
+                cands = [{'addr': r.address_hex, 'definition': r.definition[:50],
+                          'score': s, 'reason': f'값 정의 테이블 포함 (vkw={s})', 'source': 'PDF'}
+                         for r, s in ranked[:2]]
+                suggestions['status'] = _make_suggestion('status', cands, status_row.get('note', ''))
+                if log: log(f'  제안: status 정의표 후보 {len(status_with_defs)}개 (vkw 점수 비슷)')
+        # else (0개): value_definitions 없음 → 제안 안 함 (status_definitions 섹션에서 별도 안내)
+
+    # ── 2. H01: X 필드 (status/alarm1 제외 — 위에서 별도 처리) ──
+    x_fields = [row for row in h01_table
+                if row['status'] == 'X' and row['field'] not in ('status', 'alarm1')]
     for x_row in x_fields:
         candidates = _suggest_candidates(x_row['field'], all_regs, categorized)
         if not candidates:
@@ -2540,36 +2599,17 @@ def _build_all_suggestions(h01_table: list, categorized: dict,
         sorted_cands = sorted(candidates, key=lambda c: -c['score'])
         top = sorted_cands[0]
 
-        # ── status 특수: BYTE_N 동점 → BYTE_0 자동 할당 ──
-        # ex) INVERTER_STATES_BYTE_0/1/2/3 처럼 같은 기본 이름의 BYTE 레지스터가 여럿일 때
-        if x_row['field'] == 'status' and len(sorted_cands) >= 2:
-            def _byte_base(defn):
-                return re.sub(r'[_ ]?BYTE[_ ]?\d+$', '', defn.upper()).strip('_ ')
-            bases = [_byte_base(c['definition']) for c in sorted_cands]
-            if len(set(bases)) == 1:  # 모두 동일 기본 이름
-                def _byte_num(c):
-                    m = re.search(r'BYTE[_ ]?(\d+)', c['definition'].upper())
-                    return int(m.group(1)) if m else 9999
-                winner = min(sorted_cands, key=_byte_num)
-                _auto_register_synonym('status', winner['definition'])
-                x_row['status'] = '~'
-                x_row['note'] = f'자동 할당(BYTE_0)→synonym_db: {winner["definition"]} ({winner["addr"]})'
-                if log: log(f'  자동 할당: status → {winner["definition"]} (BYTE 패턴)', 'info')
-                continue
-
-        # 명확한 단독 우위: 2위와 25점 이상 차이 or 후보 1개, 점수 50 이상, PDF 출처
+        # 명확한 단독 우위: 2위와 25점 이상 차이, 점수 50 이상, PDF 출처
         second_score = sorted_cands[1]['score'] if len(sorted_cands) >= 2 else -999
         is_clear_winner = top['score'] >= 50 and top['source'] == 'PDF' and \
                           (top['score'] - second_score >= 25)
 
         if is_clear_winner:
-            # 자동 할당: synonym_db 등록 + H01 테이블 ~ 로 갱신
             _auto_register_synonym(x_row['field'], top['definition'])
             x_row['status'] = '~'
             x_row['note'] = f'자동 할당→synonym_db: {top["definition"]} ({top["addr"]})'
             if log: log(f'  자동 할당: {x_row["field"]} → {top["definition"]} (재실행 시 ✓)', 'info')
         elif len(sorted_cands) >= 2:
-            # 애매함: 사용자 선택 필요 (최소 2개 후보 보장)
             note = x_row.get('note', '')
             suggestions[x_row['field']] = _make_suggestion(x_row['field'], sorted_cands, note)
             if log: log(f'  제안: H01 [{x_row["field"]}] 후보 {len(sorted_cands)}개 (선택 필요)')
@@ -2720,6 +2760,87 @@ def _auto_register_synonym(field: str, definition: str):
         synonyms = fields[field].setdefault('synonyms', [])
         if key not in synonyms:
             synonyms.append(key)
+            save_synonym_db(db)
+    except Exception:
+        pass
+
+
+# STATUS/ALARM 값 정의 매칭용 불용어 (너무 일반적인 단어 제외)
+_VALUE_KW_STOPWORDS = {
+    'mode', 'state', 'status', 'code', 'type', 'flag', 'value', 'data',
+    'normal', 'the', 'and', 'for', 'with', 'from', 'this', 'that',
+}
+
+# 인버터 상태 특징 키워드 (status value_keywords 점수 가중치)
+_STATUS_VALUE_KW = {
+    'standby', 'running', 'fault', 'grid', 'initial', 'shutdown', 'waiting',
+    'derating', 'mppt', 'islanding', 'charging', 'discharging', 'off',
+    'on', 'idle', 'alarm', 'error', 'check', 'initializing', 'starting',
+}
+
+# 알람/폴트 특징 키워드 (alarm value_keywords 점수 가중치)
+_ALARM_VALUE_KW = {
+    'overcurrent', 'overvoltage', 'undervoltage', 'overtemperature',
+    'overload', 'short', 'ground', 'isolation', 'leakage', 'frequency',
+    'voltage', 'current', 'temperature', 'communication', 'hardware',
+    'software', 'pv', 'grid', 'battery', 'power', 'relay', 'igbt',
+    'eeprom', 'sensor', 'protection', 'warning',
+}
+
+
+def _extract_value_keywords(value_definitions: dict, field_type: str = 'status') -> list:
+    """value_definitions 레이블에서 정규화된 키워드 추출.
+    field_type: 'status' 또는 'alarm'
+    """
+    if not value_definitions or not isinstance(value_definitions, dict):
+        return []
+    ref_set = _STATUS_VALUE_KW if field_type == 'status' else _ALARM_VALUE_KW
+    keywords = set()
+    for label in value_definitions.values():
+        if not label or not isinstance(label, str):
+            continue
+        words = re.findall(r'[a-zA-Z]+', label.lower())
+        for w in words:
+            if len(w) >= 3 and w not in _VALUE_KW_STOPWORDS:
+                # 특징 키워드 집합 기준으로 필터 (너무 많은 단어 저장 방지)
+                if w in ref_set or field_type == 'alarm':
+                    keywords.add(w)
+    return sorted(keywords)
+
+
+def _score_by_value_keywords(value_definitions: dict, stored_keywords: list,
+                              field_type: str = 'status') -> int:
+    """value_definitions 레이블이 synonym_db의 stored_keywords와 얼마나 겹치는지 점수화.
+    Returns: 0~100 (100 = 완벽 매칭)
+    """
+    if not stored_keywords or not value_definitions:
+        return 0
+    reg_kw = set(_extract_value_keywords(value_definitions, field_type))
+    stored_set = set(w.lower() for w in stored_keywords)
+    if not reg_kw:
+        return 0
+    overlap = reg_kw & stored_set
+    # 겹치는 키워드 비율
+    score = int(100 * len(overlap) / max(len(reg_kw), len(stored_set)))
+    return min(score, 100)
+
+
+def _save_value_keywords(field: str, value_definitions: dict, field_type: str = 'status'):
+    """value_definitions 키워드를 synonym_db[field].value_keywords에 누적 저장"""
+    try:
+        from . import load_synonym_db, save_synonym_db
+        db = load_synonym_db()
+        fields = db.setdefault('fields', {})
+        entry = fields.get(field)
+        if isinstance(entry, list):
+            fields[field] = {'category': 'MONITORING', 'h01_field': field, 'synonyms': entry}
+        elif entry is None:
+            fields[field] = {'category': 'MONITORING', 'h01_field': field, 'synonyms': []}
+        new_kw = _extract_value_keywords(value_definitions, field_type)
+        stored = fields[field].setdefault('value_keywords', [])
+        added = [k for k in new_kw if k not in stored]
+        if added:
+            stored.extend(added)
             save_synonym_db(db)
     except Exception:
         pass
