@@ -50,7 +50,7 @@ All batch launchers are in `launchers/`:
 - `START_UDP_SERVER.bat` — 운영 UDP 서버 (auto-restart)
 - `START_TEST_SERVER.bat` — 테스트 UDP 서버
 - `START_SIMULATOR.bat` — 장비 시뮬레이터
-- `START_MODEL_MAKER.bat` — 레지스터맵 생성기 (auto-installs PyMuPDF, openpyxl, anthropic)
+- ~~START_MODEL_MAKER.bat~~ — **Model Maker는 `inverter_model_maker/` 디렉토리로 이전됨**
 - `INSTALL_RTU_DEV.bat` — RTU 원클릭 설치 (305-line comprehensive setup)
 - `SETUP_CM4_BOOT.bat` — CM4 부트 설정
 
@@ -80,7 +80,11 @@ There is no build step, no test runner, and no lint configuration.
 - **`pc_programs/equipment_simulator.py`** — Multi-device Modbus slave simulator (2,633 lines). Config via `simulator_config.json`.
 - **`pc_programs/der_avm_master.py`** — DER-AVM master control utility for testing slave integration.
 - **`web_server_prod/`** — Production dashboard (FastAPI + SQLite WAL + WebSocket + React 18 frontend). Env vars: `RTU_UDP_PORT`, `RTU_WEB_PORT`, `RTU_DB_PATH`, `RTU_FTP_USER`, `RTU_FTP_PASS`. Includes SFTP path whitelist, duplicate detection, rate limiting, data retention, stale RTU detection.
-- **`model_maker/`** — GUI tool for generating register maps from inverter Modbus PDFs. Main file: `modbus_to_udp_mapper.py` (8,500+ lines). 3-stage pipeline (`stage_pipeline.py`) with optional AI assist (`ai_generator.py`).
+- **`inverter_model_maker/`** — 독립 실행 Model Maker 패키지 (다른 PC로 이동 가능). 3종류:
+  - `model_maker/` — GUI 도구 (`START_모델메이커_GUI.bat`)
+  - `model_maker_web/` — 웹 UI v1 포트 8181 (`START_모델메이커_WEB_v1.bat`)
+  - `model_maker_web_v2/` — 웹 UI v2 Stage1/2/3 포트 8082 (`START_모델메이커_WEB_v2.bat`)
+  - 생성된 `*_registers.py`는 `inverter_model_maker/common/` → 프로젝트 `common/`에 복사하면 RTU/시뮬레이터에서 즉시 사용 가능
 
 ### Communication Flow
 
@@ -161,11 +165,11 @@ print(f'Created: {pkg}')
 
 ### 개요
 
-`model_maker/modbus_to_udp_mapper.py`는 인버터 Modbus PDF -> RTU 호환 `*_registers.py` 파일을 자동 생성하는 GUI 도구. 생성된 파일은 `rtu_program/modbus_handler.py`의 동적 로딩(`load_register_module`)으로 즉시 사용 가능.
+`inverter_model_maker/` 디렉토리의 Model Maker 웹 UI v2 (Stage1→2→3)를 사용해 인버터 Modbus PDF → RTU 호환 `*_registers.py` 파일 자동 생성. 생성된 파일을 `common/`에 복사하면 `rtu_program/modbus_handler.py`의 동적 로딩(`load_register_module`)으로 즉시 사용 가능.
 
 ### 새 업체 PDF로 레지스터맵 생성하는 절차
 
-1. **Model Maker 실행**: `START_MODEL_MAKER.bat` 또는 `python -m model_maker.modbus_to_udp_mapper`
+1. **Model Maker 실행**: `inverter_model_maker/START_모델메이커_WEB_v2.bat` → http://localhost:8082
 2. **PDF 로드**: Tab1에서 제조사 Modbus Protocol PDF 열기
 3. **자동 매핑**: Tab2에서 MPPT/String 수 설정 후 "자동 매핑 실행"
 4. **Code Generator**: Tab6에서 설정 후 "Generate Code" -> "Save"
@@ -210,3 +214,10 @@ SCALE = {
 ### 보호 파일
 
 `solarize_registers.py`, `kstar_registers.py`, `huawei_registers.py` 등은 `_PROTECTED_FILES`로 보호되어 Model Maker Save로 덮어쓸 수 없음. 테스트용은 별도 protocol name 사용 (예: `newbrand_test`).
+
+### 생성 파일 배포 절차
+
+1. Model Maker v2 Stage3에서 `{protocol}_registers.py` 생성 → `inverter_model_maker/common/{protocol}_registers.py`에 자동 저장
+2. 해당 파일을 프로젝트 `common/`에 복사: `cp inverter_model_maker/common/{protocol}_registers.py common/`
+3. `config/rs485_ch*.ini`에 `protocol = {protocol}` 추가
+4. RTU `modbus_handler.py`가 `load_register_module('{protocol}')` 자동 로딩

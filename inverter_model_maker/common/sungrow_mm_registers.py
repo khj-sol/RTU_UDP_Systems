@@ -44,9 +44,17 @@ class RegisterMap:
     MPPT4_CURRENT = 0x13A1      # U16, 0.1A
 
     # =========================================================================
-    # STRING Data
+    # STRING Data — Sungrow에는 별도 String 레지스터 없음
+    # STRING1-4는 MPPT Current 주소에 매핑, STRING5-8은 시뮬레이터 전용 placeholder
     # =========================================================================
-    # (no string data registers mapped)
+    STRING1_CURRENT = 0x139B      # = MPPT1_CURRENT
+    STRING2_CURRENT = 0x139D      # = MPPT2_CURRENT
+    STRING3_CURRENT = 0x139F      # = MPPT3_CURRENT
+    STRING4_CURRENT = 0x13A1      # = MPPT4_CURRENT
+    STRING5_CURRENT = 0x1400      # simulator only
+    STRING6_CURRENT = 0x1401      # simulator only
+    STRING7_CURRENT = 0x1402      # simulator only
+    STRING8_CURRENT = 0x1403      # simulator only
 
     # =========================================================================
     # DER-AVM Control Values

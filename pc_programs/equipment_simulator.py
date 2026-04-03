@@ -103,12 +103,12 @@ from common.weather_registers import (
 from common.kstar_registers import KstarRegisters, KstarSystemStatus
 from common.huawei_registers import HuaweiRegisters, HuaweiStatusConverter
 try:
-    from common.ekos2_registers import RegisterMap as EkosRegisters, InverterMode as EkosInverterMode
+    from common.ekos_registers import RegisterMap as EkosRegisters, InverterMode as EkosInverterMode
 except ImportError:
     EkosRegisters = None
     EkosInverterMode = None
 try:
-    from common.sungrow2_registers import RegisterMap as SungrowRegisters, InverterMode as SungrowInverterMode
+    from common.sungrow_registers import RegisterMap as SungrowRegisters, InverterMode as SungrowInverterMode
 except ImportError:
     SungrowRegisters = None
     SungrowInverterMode = None
