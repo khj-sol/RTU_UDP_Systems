@@ -2682,7 +2682,7 @@ def _build_all_suggestions(h01_table: list, categorized: dict,
             if log: log(f'  제안: INFO Model 후보 {len(cands)}개')
 
     if not has_sn:
-        cands = _suggest_info_field(all_regs, 'sn')
+        cands = [c for c in _suggest_info_field(all_regs, 'sn') if c['score'] >= 50]
         if cands:
             suggestions['info_sn'] = cands
             if log: log(f'  제안: INFO SN 후보 {len(cands)}개')
@@ -2840,13 +2840,10 @@ def _build_all_suggestions(h01_table: list, categorized: dict,
             suggestions[x_row['field']] = _make_suggestion(x_row['field'], sorted_cands, note)
             if log: log(f'  제안: H01 [{x_row["field"]}] 후보 {len(sorted_cands)}개 (선택 필요)')
 
-    # ── 3. MPPT/String 미감지 ──
+    # ── 3. MPPT/String 미감지 — Stage 2에서 직접 설정하므로 제안 불필요 ──
     max_mppt = meta.get('max_mppt', 0)
     if max_mppt == 0:
-        cands = _suggest_mppt(all_regs)
-        if cands:
-            suggestions['mppt_detection'] = _make_suggestion('mppt_detection', cands)
-            if log: log(f'  제안: MPPT 후보 {len(cands)}개')
+        if log: log('  MPPT=0 감지 — Stage 2에서 채널 수 직접 입력', 'warn')
 
     # ── 5. IV Scan ──
     iv_scan = meta.get('iv_scan', False)
