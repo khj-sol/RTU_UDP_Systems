@@ -30,6 +30,7 @@ Changes in 1.2.0:
 """
 
 import sqlite3
+import struct
 import time
 import threading
 import logging
@@ -40,6 +41,10 @@ from dataclasses import dataclass
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from common.protocol_constants import *
+
+# 패킷 헤더에서 rtu_id 위치: '>BHIQBBBBb' → offset 3, 4바이트
+_RTU_ID_OFFSET = 3
+_RTU_ID_SIZE   = 4
 
 # Max retry count for response errors
 RESPONSE_MAX_RETRY = 3
@@ -199,6 +204,16 @@ class BackupManager:
                     f"Startup: expired {expired_h01} H01 + {expired_h05} H05 records (>{BACKUP_RETENTION_HOURS}h)")
 
             conn.commit()
+
+    def _patch_rtu_id(self, packet: bytes) -> bytes:
+        """저장된 패킷의 rtu_id를 현재 rtu_id로 교체 (구 ID 백업 전송 방지)"""
+        if len(packet) >= _RTU_ID_OFFSET + _RTU_ID_SIZE:
+            stored_id = struct.unpack_from('>I', packet, _RTU_ID_OFFSET)[0]
+            if stored_id != self.rtu_id:
+                packet = bytearray(packet)
+                struct.pack_into('>I', packet, _RTU_ID_OFFSET, self.rtu_id)
+                packet = bytes(packet)
+        return packet
 
     def clear_all(self):
         """RTU 시작 시 백업 DB 전체 초기화 (구 rtu_id 잔여 데이터 제거)"""
@@ -415,7 +430,7 @@ class BackupManager:
             if row:
                 return {
                     'id': row[0],
-                    'packet': row[1],
+                    'packet': self._patch_rtu_id(row[1]),
                     'device_type': row[2],
                     'device_number': row[3],
                     'sequence': row[4],
@@ -424,7 +439,7 @@ class BackupManager:
         except Exception as e:
             self.logger.error(f"Failed to get H01 backup: {e}")
         return None
-    
+
     def get_h01_backup_by_device(self, device_type: int, device_number: int):
         """Get one H01 backup for specific device
         
@@ -448,7 +463,7 @@ class BackupManager:
             if row:
                 return {
                     'id': row[0],
-                    'packet': row[1],
+                    'packet': self._patch_rtu_id(row[1]),
                     'device_type': row[2],
                     'device_number': row[3],
                     'sequence': row[4],
