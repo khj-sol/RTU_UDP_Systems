@@ -2922,7 +2922,7 @@ def _suggest_candidates(x_field: str, all_regs: list, categorized: dict) -> list
     # (ex. INVERTER_MODEL_IDENTIF 가 "inverter mode" 키워드에 substring 매칭되는 오탐 방지)
     if x_field == 'status':
         candidates = [c for c in candidates
-                      if not re.search(r'\bmodel\b', c['definition'].lower())]
+                      if not re.search(r'\bmodel\b', c['definition'].lower().replace('_', ' '))]
 
     # 점수순 정렬, 상위 2개 (제안 시 1순위·2순위만 표시)
     return sorted(candidates, key=lambda c: -c['score'])[:2]
