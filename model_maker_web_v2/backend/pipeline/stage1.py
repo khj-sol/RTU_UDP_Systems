@@ -1255,7 +1255,7 @@ def assign_h01_field(reg: RegisterRow, synonym_db: dict,
                                               'workingmodes', 'workingmode',
                                               'sysstatemode', 'currentstatus',
                                               'operatingstatus']) or \
-           defn_lower.strip() in ('state', 'running'):
+           defn_lower.strip() in ('state', 'running', 'st'):
             return 'inverter_status'
         return ''
 
@@ -1315,11 +1315,13 @@ def assign_h01_field(reg: RegisterRow, synonym_db: dict,
             return 'cumulative_energy_low'
         return 'cumulative_energy'
     # cumulative_energy HIGH (정수부)
+    if defn_lower.strip() == 'wh':  # SunSpec 텍스트 약어: WH = Total yield
+        return 'cumulative_energy'
     if any(k in defn_lower for k in ['total energy', 'cumulative energy', 'total power yields',
                                       'total poweryields',
                                       'lifetime energy', 'accumulated energy',
                                       'total power generation', 'total powergeneration',
-                                      'total energy yield', 'energy yield',
+                                      'total energy yield', 'energy yield', 'total yield',
                                       'energy produced', 'ac energy', 'ac_energy',
                                       'einv all', 'einv_all',
                                       'eac total', 'eac_total',
@@ -1717,6 +1719,119 @@ def _make_pdf_match_row(h01_field: str, reg, miss_note: str = '') -> dict:
         }
 
 
+# ─── SunSpec 텍스트 형식 파서 (SMA 등) ──────────────────────────────────────
+
+def _parse_sunspec_text_registers(pages: list) -> list:
+    """
+    SMA SunSpec 텍스트 형식 파싱 — 40001+ 10진수 주소 (테이블 없는 형식)
+
+    예시:
+      40200 Active power (W)
+      1
+      int16
+      RO
+    """
+    RE_ADDR = re.compile(r'^(4[0-9]{4})\s+(.+)')
+    KNOWN_TYPES = {
+        'uint16', 'int16', 'uint32', 'int32', 'string',
+        'acc32', 'bitfield32', 'sunssf', 'enum16', 'pad',
+        'float32', 'acc64', 'ipaddr', 'eui48', 'ipv6addr',
+    }
+    SKIP_TYPES = {'pad', 'sunssf'}
+
+    all_lines = []
+    for p in pages:
+        all_lines.extend(p.get('text', '').split('\n'))
+
+    # 독립 주소 행 + 다음 행 설명 병합: "40225\nManufacturer-specific status code (StVnd)..."
+    RE_ADDR_ONLY = re.compile(r'^(4[0-9]{4})\s*$')
+    merged = []
+    i = 0
+    while i < len(all_lines):
+        ln = all_lines[i].strip()
+        mo = RE_ADDR_ONLY.match(ln)
+        if mo and i + 1 < len(all_lines):
+            nxt = all_lines[i + 1].strip()
+            if nxt and nxt[0].isalpha():
+                merged.append(f'{ln} {nxt}')
+                i += 2
+                continue
+        merged.append(all_lines[i])
+        i += 1
+    all_lines = merged
+
+    entries = []
+    for i, line in enumerate(all_lines):
+        m = RE_ADDR.match(line.strip())
+        if m:
+            reg_no = int(m.group(1))
+            desc = m.group(2).strip()
+            entries.append((i, reg_no, desc))
+
+    if not entries:
+        return []
+
+    registers = []
+    seen_addrs = set()
+
+    for idx, (line_i, reg_no, desc) in enumerate(entries):
+        end_i = entries[idx + 1][0] if idx + 1 < len(entries) else min(line_i + 10, len(all_lines))
+
+        # 괄호 안 약어 추출 (첫 번째 영문자로 시작하는 괄호 안 약어)
+        # 예: "Active power (W), in WW_SF (40201)" → abbrev="W"
+        # 예: "Manufacturer (Mn): SMA" → abbrev="Mn"
+        abbrev = None
+        full_desc = desc
+        m_abbrev = re.search(r'\(([A-Za-z][A-Za-z0-9_]{0,15})\)', desc)
+        if m_abbrev:
+            abbrev = m_abbrev.group(1)
+            full_desc = desc[:m_abbrev.start()].strip().rstrip(',').strip()
+
+        dtype = ''
+        reg_count = 1
+        rw = 'RO'
+        for j in range(line_i + 1, end_i):
+            ln = all_lines[j].strip().lower()
+            if ln in KNOWN_TYPES:
+                dtype = ln
+            elif ln.isdigit() and 1 <= int(ln) <= 64:
+                reg_count = int(ln)
+            elif ln in ('ro', 'r', 'rd'):
+                rw = 'RO'
+            elif ln in ('rw', 'r/w', 'rw/'):
+                rw = 'RW'
+
+        if dtype in SKIP_TYPES:
+            continue
+        name = abbrev if abbrev else full_desc
+        if name.lower() == 'pad' or (abbrev and abbrev.lower().endswith('sf')):
+            continue
+
+        # 타입별 레지스터 수 결정
+        if dtype in ('acc32', 'uint32', 'int32'):
+            reg_count = 2
+        elif dtype == 'acc64':
+            reg_count = 4
+
+        addr = reg_no - 1  # SunSpec 주소는 1-based → 0-indexed Modbus
+        if addr in seen_addrs:
+            continue
+        seen_addrs.add(addr)
+
+        reg = RegisterRow(
+            definition=name,
+            address=addr,
+            data_type=dtype.upper() if dtype else '',
+            regs=str(reg_count),
+            rw=rw,
+            comment=full_desc if abbrev else '',
+            fc='03',
+        )
+        registers.append(reg)
+
+    return registers
+
+
 # ─── Stage 1 메인 ───────────────────────────────────────────────────────────
 
 def run_stage1(
@@ -1845,6 +1960,13 @@ def run_stage1(
     log('레지스터 테이블 파싱...')
     registers = extract_registers_from_tables(all_tables, fc_list=fc_list)
     log(f'  {len(registers)}개 레지스터 추출 (원본)')
+
+    # SunSpec 텍스트 형식 폴백 (SMA 등 — 40001+ 10진수 주소 텍스트 형식)
+    if not registers and ext == '.pdf':
+        log('  표준 테이블 없음 → SunSpec 텍스트 형식 시도...')
+        registers = _parse_sunspec_text_registers(pages)
+        if registers:
+            log(f'  SunSpec 텍스트 형식: {len(registers)}개 레지스터 추출')
 
     if not registers:
         raise NotRegisterMapError(
