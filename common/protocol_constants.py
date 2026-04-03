@@ -107,17 +107,15 @@ DEVICE_TYPE_NAMES = {
 # =============================================================================
 # Device Model Numbers
 # =============================================================================
-INV_MODEL_SOLARIZE = 1
-INV_MODEL_HUAWEI = 2
-INV_MODEL_KSTAR = 3
-INV_MODEL_SOLARIZE_50K = 4      # Solarize VK50 (solarize1)
-INV_MODEL_HUAWEI_50K = 5        # Huawei 50K (huawei1)
-INV_MODEL_KSTAR_60K = 6         # Kstar 60K (kstar1)
-INV_MODEL_SUNGROW = 7           # Sungrow (sungrow1)
-INV_MODEL_EKOS = 8              # EKOS (ekos1)
-INV_MODEL_SOLARIZE_VK = 9       # Solarize VK (solarize_vk)
-INV_MODEL_SOLARIZE1_ALT = 10    # Solarize Alt
-INV_MODEL_EKOS2 = 11            # EKOS2
+INV_MODEL_SOLARIZE_50K = 1      # Solarize 50K (solarize)
+INV_MODEL_HUAWEI_50K = 2        # Huawei 50K (huawei)
+INV_MODEL_KSTAR_60K = 3         # Kstar 60K (kstar)
+INV_MODEL_SUNGROW = 4           # Sungrow (sungrow)
+
+# Legacy aliases (backward compat)
+INV_MODEL_SOLARIZE = INV_MODEL_SOLARIZE_50K
+INV_MODEL_HUAWEI = INV_MODEL_HUAWEI_50K
+INV_MODEL_KSTAR = INV_MODEL_KSTAR_60K
 
 RELAY_MODEL_KDU300 = 1
 RELAY_MODEL_VIPAM3500C = 2
@@ -125,17 +123,10 @@ RELAY_MODEL_VIPAM3500C = 2
 WEATHER_MODEL_SEM5046 = 1
 
 INV_MODEL_NAMES = {
-    INV_MODEL_SOLARIZE: "Solarize",
-    INV_MODEL_HUAWEI: "Huawei",
-    INV_MODEL_KSTAR: "Kstar",
     INV_MODEL_SOLARIZE_50K: "Solarize 50K",
     INV_MODEL_HUAWEI_50K: "Huawei 50K",
     INV_MODEL_KSTAR_60K: "Kstar 60K",
     INV_MODEL_SUNGROW: "Sungrow",
-    INV_MODEL_EKOS: "EKOS",
-    INV_MODEL_SOLARIZE_VK: "Solarize",
-    INV_MODEL_SOLARIZE1_ALT: "Solarize",
-    INV_MODEL_EKOS2: "EKOS2",
 }
 
 # =============================================================================
