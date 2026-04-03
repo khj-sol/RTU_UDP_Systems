@@ -244,6 +244,15 @@
       Stage 2 — 필터링 &amp; 매칭 검증
     </div>
     <div class="stage-body">
+      <div id="s2-import-area" style="margin-bottom:12px;">
+        <div style="font-size:11px;color:#9ca3af;text-align:center;margin-bottom:6px;">Stage 1 완료 후 자동 활성화 — 또는 직접 업로드</div>
+        <input type="file" id="s2-excel-input" accept=".xlsx,.xls" style="display:none" onchange="uploadStage1Excel(this)">
+        <button onclick="document.getElementById('s2-excel-input').click()"
+                style="width:100%;padding:7px;background:#1e293b;border:1px dashed #4b5563;border-radius:6px;color:#94a3b8;font-size:12px;cursor:pointer;">
+          📂 Stage 1 Excel 불러오기
+        </button>
+        <div id="s2-import-name" style="font-size:11px;color:#4ade80;margin-top:4px;text-align:center;display:none;"></div>
+      </div>
       <label>MPPT 채널 수</label>
       <input type="number" id="s2-mppt" min="1" max="12" value="4" />
       <label>MPPT당 String 수</label>
@@ -373,6 +382,7 @@
     document.getElementById('s3-download').style.display = 'none';
     document.getElementById('suggest-area').style.display = 'none';
     document.getElementById('suggest-groups').innerHTML = '';
+    document.getElementById('s2-import-name').style.display = 'none';
     document.getElementById('card-s1').className = 'stage-card active';
     document.getElementById('card-s2').className = 'stage-card';
     document.getElementById('card-s3').className = 'stage-card';
@@ -412,6 +422,26 @@
         device_type: document.getElementById('s1-device').value,
       }),
     });
+  }
+
+  async function uploadStage1Excel(input) {
+    const file = input.files[0];
+    if (!file) return;
+    input.value = '';
+    const fd = new FormData();
+    fd.append('session_id', sessionId);
+    fd.append('file', file);
+    try {
+      const r = await fetch(`${API}/stage2/upload`, { method: 'POST', body: fd });
+      if (!r.ok) { const e = await r.json(); throw new Error(e.detail || r.status); }
+      document.getElementById('s2-import-name').textContent = `✓ ${file.name}`;
+      document.getElementById('s2-import-name').style.display = 'block';
+      document.getElementById('card-s2').className = 'stage-card active';
+      document.getElementById('btn-s2').disabled = false;
+      appendLog('s2', `Stage 1 Excel 로드: ${file.name}`, 'ok');
+    } catch (err) {
+      appendLog('s2', `업로드 오류: ${err.message}`, 'err');
+    }
   }
 
   async function runStage2() {
