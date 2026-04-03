@@ -2683,27 +2683,7 @@ def _build_all_suggestions(h01_table: list, categorized: dict,
             suggestions[x_row['field']] = _make_suggestion(x_row['field'], sorted_cands, note)
             if log: log(f'  제안: H01 [{x_row["field"]}] 후보 {len(sorted_cands)}개 (선택 필요)')
 
-    # ── 3. STATUS/ALARM 정의 없음 ──
-    # h01_field 무관하게 STATUS 카테고리 레지스터 중 value_definitions가 있으면 OK
-    status_regs = categorized.get('STATUS', [])
-    status_with_defs = [r for r in status_regs if getattr(r, 'value_definitions', None)]
-    if status_regs and not status_with_defs:
-        cands = [{'addr': '-', 'definition': 'STATUS 레지스터 값 정의 테이블 없음',
-                  'score': 0, 'reason': 'PDF에서 Inverter Mode/State 값 정의를 찾지 못함',
-                  'source': 'REVIEW'}]
-        suggestions['status_definitions'] = _make_suggestion('status_definitions', cands)
-        if log: log(f'  제안: STATUS 정의 테이블 미발견')
-
-    alarm_regs = categorized.get('ALARM', [])
-    alarm_with_defs = [r for r in alarm_regs if getattr(r, 'value_definitions', None)]
-    if alarm_regs and not alarm_with_defs:
-        cands = [{'addr': '-', 'definition': 'ALARM 레지스터 값 정의 테이블 없음',
-                  'score': 0, 'reason': 'PDF에서 Fault/Error Code 정의를 찾지 못함',
-                  'source': 'REVIEW'}]
-        suggestions['alarm_definitions'] = _make_suggestion('alarm_definitions', cands)
-        if log: log(f'  제안: ALARM 정의 테이블 미발견')
-
-    # ── 4. MPPT/String 미감지 ──
+    # ── 3. MPPT/String 미감지 ──
     max_mppt = meta.get('max_mppt', 0)
     if max_mppt == 0:
         cands = _suggest_mppt(all_regs)
