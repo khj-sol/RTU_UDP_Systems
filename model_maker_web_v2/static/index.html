@@ -389,6 +389,8 @@
   }
 
   // ─── 이벤트 핸들러 ─────────────────────────────────────────────
+  let _skipNextSuggestions = false;  // 제안 적용 재실행 후 제안 화면 건너뜀
+
   const _SUGGEST_LABELS = {
     'info_model':          'INFO: Model 레지스터 미발견',
     'info_sn':             'INFO: SN 레지스터 미발견',
@@ -414,15 +416,15 @@
       appendLog('s1', `REVIEW ${msg.review_count}개 — Stage 2에서 확인`, 'warn');
     }
 
-    // 제안 표시
+    // 제안 표시 (적용 후 재실행이면 건너뜀)
     const sugg = msg.suggestions || {};
     const keys = Object.keys(sugg);
-    if (keys.length > 0) {
+    if (keys.length > 0 && !_skipNextSuggestions) {
       appendLog('s1', `후보 제안 ${keys.length}개 항목`, 'warn');
       showSuggestions(sugg);
     } else {
+      _skipNextSuggestions = false;
       document.getElementById('suggest-area').style.display = 'none';
-      // suggestions 없으면 바로 Stage 2 활성화
       document.getElementById('card-s1').className = 'stage-card done';
       document.getElementById('card-s2').className = 'stage-card active';
       document.getElementById('btn-s2').disabled = false;
@@ -543,6 +545,7 @@
       await r.json();
     }
 
+    _skipNextSuggestions = true;  // 재실행 후 제안 화면 건너뜀
     document.getElementById('suggest-area').style.display = 'none';
     clearLog('s1');
   }
