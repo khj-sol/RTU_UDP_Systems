@@ -2527,12 +2527,15 @@ def _build_all_suggestions(h01_table: list, categorized: dict,
         _status_vkw, _alarm_vkw = [], []
 
     def _rank_by_value_kw(regs_with_defs, stored_kw, field_type):
-        """value_definitions 키워드 매칭으로 레지스터 점수 산출, 내림차순 반환"""
+        """value_definitions 키워드 매칭으로 레지스터 점수 산출, 내림차순 반환.
+        점수 0인 레지스터(관련 없는 설정 레지스터 등)는 결과에서 제외.
+        """
         scored = []
         for r in regs_with_defs:
             vd = getattr(r, 'value_definitions', None) or {}
-            kw_score = _score_by_value_keywords(vd, stored_kw, field_type) if stored_kw else 50
-            scored.append((r, kw_score))
+            kw_score = _score_by_value_keywords(vd, stored_kw, field_type)
+            if kw_score > 0:  # 점수 0 = 관련 없는 레지스터 → 제외
+                scored.append((r, kw_score))
         return sorted(scored, key=lambda x: -x[1])
 
     # ── 2-pre-a. alarm1: value_definitions 있는 ALARM 레지스터만 매칭 ──
@@ -2810,18 +2813,28 @@ def _extract_value_keywords(value_definitions: dict, field_type: str = 'status')
 
 def _score_by_value_keywords(value_definitions: dict, stored_keywords: list,
                               field_type: str = 'status') -> int:
-    """value_definitions 레이블이 synonym_db의 stored_keywords와 얼마나 겹치는지 점수화.
-    Returns: 0~100 (100 = 완벽 매칭)
+    """value_definitions 레이블이 stored_keywords 또는 레퍼런스셋과 얼마나 겹치는지 점수화.
+    stored_keywords가 없으면 _STATUS_VALUE_KW/_ALARM_VALUE_KW 레퍼런스셋으로 계산.
+    Returns: 0~100 (0 = 관련 없는 레지스터, 100 = 완벽 매칭)
     """
-    if not stored_keywords or not value_definitions:
+    if not value_definitions:
         return 0
     reg_kw = set(_extract_value_keywords(value_definitions, field_type))
-    stored_set = set(w.lower() for w in stored_keywords)
     if not reg_kw:
         return 0
-    overlap = reg_kw & stored_set
-    # 겹치는 키워드 비율
-    score = int(100 * len(overlap) / max(len(reg_kw), len(stored_set)))
+
+    if stored_keywords:
+        # synonym_db에 누적된 키워드와 비교
+        stored_set = set(w.lower() for w in stored_keywords)
+        overlap = reg_kw & stored_set
+        score = int(100 * len(overlap) / max(len(reg_kw), len(stored_set)))
+    else:
+        # 저장된 키워드 없음 → 내장 레퍼런스셋과 비교
+        # (Permanent/Variable/Reactive 같은 제어설정 레지스터는 점수 0)
+        ref_set = _STATUS_VALUE_KW if field_type == 'status' else _ALARM_VALUE_KW
+        overlap = reg_kw & ref_set
+        score = int(100 * len(overlap) / max(len(reg_kw), 3))
+
     return min(score, 100)
 
 
