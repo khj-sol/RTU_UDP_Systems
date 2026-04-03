@@ -326,8 +326,12 @@
     document.getElementById('review-rows').innerHTML = '';
     document.getElementById('s3-summary').innerHTML = '';
     document.getElementById('s3-download').style.display = 'none';
+    document.getElementById('suggest-area').style.display = 'none';
+    document.getElementById('suggest-groups').innerHTML = '';
+    document.getElementById('card-s1').className = 'stage-card active';
     document.getElementById('card-s2').className = 'stage-card';
     document.getElementById('card-s3').className = 'stage-card';
+    document.getElementById('btn-s1').disabled = true;
     document.getElementById('btn-s2').disabled = true;
     document.getElementById('btn-s3').disabled = true;
 

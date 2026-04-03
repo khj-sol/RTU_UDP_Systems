@@ -74,7 +74,16 @@ async def stage1_upload(
     with open(dest, 'wb') as f:
         shutil.copyfileobj(file.file, f)
 
-    SessionStore.update(session_id, uploaded_file=dest)
+    # 새 파일 업로드 → 세션 상태 완전 리셋 (이전 Stage 결과 제거)
+    SessionStore.update(
+        session_id,
+        uploaded_file=dest,
+        stage=0,
+        stage1_excel=None,
+        stage2_excel=None,
+        registers_py=None,
+        meta={},
+    )
     return {'saved': dest, 'filename': file.filename}
 
 
