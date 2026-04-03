@@ -369,6 +369,25 @@ class RegisterMap:
     T_PHASE_VOLTAGE                          = L3_VOLTAGE
     R_PHASE_CURRENT                          = L1_CURRENT
     T_PHASE_CURRENT                          = L3_CURRENT
+    S_PHASE_VOLTAGE                          = L1_VOLTAGE  # L2 없음 → 대체
+
+    # --- MPPT alias (modbus_handler: MPPT{N}_ 형식) ---
+    MPPT1_VOLTAGE                            = PV1_INPUT_VOLTAGE
+    MPPT1_CURRENT                            = PV1_INPUT_CURRENT
+    MPPT2_VOLTAGE                            = PV2_INPUT_VOLTAGE
+    MPPT2_CURRENT                            = PV2_INPUT_CURRENT
+    MPPT3_VOLTAGE                            = PV3_INPUT_VOLTAGE
+    MPPT3_CURRENT                            = PV3_INPUT_CURRENT
+    PV_VOLTAGE                               = MPPT1_VOLTAGE
+    PV_STRING_COUNT                          = 9
+
+    # --- RTU modbus_handler / simulator 필수 alias ---
+    INNER_TEMP                               = TEMPERATURE
+    DER_POWER_FACTOR_SET                     = 0x07D0
+    DER_ACTION_MODE                          = 0x07D1
+    DER_REACTIVE_POWER_PCT                   = 0x07D2
+    DER_ACTIVE_POWER_PCT                     = 0x07D3
+    INVERTER_ON_OFF                          = 0x0834
 
     # =========================================================================
     # IV Scan Data Registers
@@ -387,61 +406,8 @@ class RegisterMap:
     IV_STRING3_2_CURRENT_BASE             = 0x8300
     IV_STRING3_3_CURRENT_BASE             = 0x8340
 
-    IV_SCAN_DATA_POINTS                      = 100
+    IV_SCAN_DATA_POINTS                      = 64
     IV_TRACKER_BLOCK_SIZE                    = 0x140  # 5 x 64 registers per tracker
-
-    # =========================================================================
-    # Simulator / backward-compat aliases
-    # =========================================================================
-    MODEL_NAME_BASE                          = MACHINE_MODEL        # 0x0C80
-    ARM_VERSION                              = 0x0C90
-    DSP_VERSION                              = 0x0C91
-    SERIAL_NUMBER_BASE                       = 0x0C9C
-    PV1_VOLTAGE                              = PV1_INPUT_VOLTAGE    # 0x0BB8
-    PV1_CURRENT                              = PV1_INPUT_CURRENT    # 0x0BBB
-    PV1_POWER                                = 0x0BD0
-    PV2_POWER                                = 0x0BD1
-    PV3_POWER                                = 0x0BD2
-    CUMULATIVE_PRODUCTION_H                  = 0x0BE2
-    DAILY_PRODUCTION                         = DAILY_POWER_GENERATION0_1KWH  # 0x0CA9
-    CUMULATIVE_PRODUCTION_L                  = CUMULATIVE_ENERGY    # 0x0BDE
-
-    # Block read ranges (decimal addresses for FC04)
-    BLOCK1_START = 3000   # 0x0BB8
-    BLOCK2_START = 3060
-    BLOCK3_START = 3125   # 0x0C35
-    BLOCK4_START = 3200   # 0x0C80
-    SYSTEM_STATUS                            = OPERATING_MODE_OF_THEINVERTER  # 0x0BD6
-    INVERTER_STATUS                          = OPERATING_MODE_OF_THEINVERTER
-    INVERTER_MODE                            = OPERATING_MODE_OF_THEINVERTER
-    RADIATOR_TEMP                            = RADIATOR_TEMPERATURE  # 0x0BD1
-    CHASSIS_TEMP                             = TEMPERATURE           # 0x0BD2
-    INNER_TEMP                               = RADIATOR_TEMPERATURE
-    TOTAL_ENERGY_LOW                         = CUMULATIVE_ENERGY
-    GRID_R_VOLTAGE                           = L1_VOLTAGE            # 0x0BC7
-    GRID_FREQUENCY                           = RS_PHASE_GRID_FREQUENCY  # 0x0BC9
-    INV_R_VOLTAGE                            = L1_VOLTAGE
-    INV_R_CURRENT                            = R_PHASE_GRID_TIED_CURRENT  # 0x0BCC
-    INV_R_POWER                              = I_V_SCAN_STATUS       # 0x0C36 (shared)
-    INV_S_VOLTAGE                            = 0x0C3B
-    INV_S_CURRENT                            = 0x0C3C
-    INV_S_FREQUENCY                          = GRID_FREQUENCY
-    INV_S_POWER                              = 0x0C3D
-    INV_T_VOLTAGE                            = L3_VOLTAGE            # 0x0C42
-    INV_T_CURRENT                            = L3_CURRENT            # 0x0C43
-    INV_T_POWER                              = 0x0C44
-    IV_SCAN_COMMAND                          = START_I_V_SCAN        # 0x0FC3
-    IV_SCAN_STATUS                           = I_V_SCAN_STATUS       # 0x0C36
-    IV_DATA_BASE                             = 0x1388
-    IV_POINTS_PER_STRING                     = 100
-    IV_REGS_PER_STRING                       = 200
-
-    # DER / Control registers
-    DER_POWER_FACTOR_SET                     = 0x07D0
-    DER_ACTION_MODE                          = 0x07D1
-    DER_REACTIVE_POWER_PCT                   = 0x07D2
-    DER_ACTIVE_POWER_PCT                     = 0x07D3
-    INVERTER_ON_OFF                          = 0x0834
 
 
 
@@ -719,7 +685,7 @@ def get_mppt_registers(mppt_num):
     return (base, base + 1, base + 2, base + 3)
 
 
-def get_iv_tracker_voltage_registers(tracker_num, data_points=100):
+def get_iv_tracker_voltage_registers(tracker_num, data_points=64):
     """Return {'base', 'count', 'end'} for IV voltage block of a tracker (1-3)."""
     if tracker_num < 1 or tracker_num > 3:
         raise ValueError(f"Tracker number must be 1-3, got {tracker_num}")
@@ -727,7 +693,7 @@ def get_iv_tracker_voltage_registers(tracker_num, data_points=100):
     return {'base': base, 'count': data_points, 'end': base + data_points - 1}
 
 
-def get_iv_string_current_registers(mppt_num, string_num, data_points=100):
+def get_iv_string_current_registers(mppt_num, string_num, data_points=64):
     """Return {'base', 'count', 'end'} for IV current block of a string (string_num 1-3)."""
     if mppt_num < 1 or mppt_num > 3:
         raise ValueError(f"MPPT number must be 1-3, got {mppt_num}")
@@ -759,13 +725,13 @@ def get_iv_string_mapping(total_strings=9, strings_per_mppt=3):
     return mapping
 
 
-def generate_iv_voltage_data(voc, v_min, data_points=100):
+def generate_iv_voltage_data(voc, v_min, data_points=64):
     """Generate IV scan voltage array (U16, 0.1V units, ascending v_min->voc)."""
     step = (voc - v_min) / max(data_points - 1, 1)
     return [int((v_min + step * i) * 10) & 0xFFFF for i in range(data_points)]
 
 
-def generate_iv_current_data(isc, voc, v_min, data_points=100):
+def generate_iv_current_data(isc, voc, v_min, data_points=64):
     """Generate IV scan current array (U16, 0.01A units) using IV curve approximation."""
     step = (voc - v_min) / max(data_points - 1, 1)
     regs = []
@@ -1101,104 +1067,3 @@ FLOAT32_FIELDS: set = set()
 # True: String별 전류 레지스터 있음 (Solarize, Senergy, Kstar 등)
 # False: String 전류 레지스터 없음 (Huawei 등 — PV 전류만 제공)
 STRING_CURRENT_MONITOR = True
-
-
-# =============================================================================
-# RTU handler compatibility — KstarSystemStatus + block-read helper functions
-# =============================================================================
-
-class KstarSystemStatus:
-    """System Status register value definitions"""
-    INITIALIZE        = 0
-    STAND_BY          = 1
-    STARTING          = 2
-    SELF_CHECK        = 3
-    RUNNING           = 4
-    RECOVERY_FAULT    = 5
-    PERMANENT_FAULT   = 6
-    UPGRADING         = 7
-    SELF_CHARGING     = 8
-    SELF_CHECK_TIMEOUT = 9
-    FAN_CHECK         = 10
-
-    _STATUS_MAP = {
-        0: "Initialize", 1: "Stand-by", 2: "Starting",
-        3: "Self-check",  4: "Running",  5: "Recovery Fault",
-        6: "Permanent Fault", 7: "Upgrading", 8: "Self Charging",
-        9: "Self Check Timeout", 10: "Fan Check",
-    }
-
-    @classmethod
-    def to_string(cls, status):
-        return cls._STATUS_MAP.get(status, f"Unknown({status})")
-
-    @classmethod
-    def is_running(cls, status):
-        return status == cls.RUNNING
-
-
-def calc_pv_total_power(block1_data):
-    """Calculate PV total power (W) from Block1 register array."""
-    base = RegisterMap.BLOCK1_START
-    p1 = block1_data[RegisterMap.PV1_POWER - base]
-    p2 = block1_data[RegisterMap.PV2_POWER - base]
-    p3 = block1_data[RegisterMap.PV3_POWER - base]
-    return p1 + p2 + p3
-
-
-def calc_ac_total_power(block3_data):
-    """Calculate AC total power (W) from Block3 register array."""
-    base = RegisterMap.BLOCK3_START
-    def to_s16(v):
-        return v - 0x10000 if v >= 0x8000 else v
-    r = to_s16(block3_data[RegisterMap.INV_R_POWER - base])
-    s = to_s16(block3_data[RegisterMap.INV_S_POWER - base])
-    t = to_s16(block3_data[RegisterMap.INV_T_POWER - base])
-    return r + s + t
-
-
-def get_mppt_data(block1_data, mppt_num):
-    """Get voltage/current/power for MPPT number (1~3) from Block1 array."""
-    if mppt_num < 1 or mppt_num > 3:
-        raise ValueError(f"MPPT number must be 1-3, got {mppt_num}")
-    base = RegisterMap.BLOCK1_START
-    v_regs = [RegisterMap.PV1_VOLTAGE, RegisterMap.PV2_INPUT_VOLTAGE, RegisterMap.PV3_INPUT_VOLTAGE]
-    i_regs = [RegisterMap.PV1_CURRENT, RegisterMap.PV2_INPUT_CURRENT, RegisterMap.PV3_INPUT_CURRENT]
-    p_regs = [RegisterMap.PV1_POWER,   RegisterMap.PV2_POWER,         RegisterMap.PV3_POWER]
-    idx = mppt_num - 1
-    raw_v = block1_data[v_regs[idx] - base]
-    raw_i = block1_data[i_regs[idx] - base]
-    raw_p = block1_data[p_regs[idx] - base]
-    return {
-        'voltage': raw_v * SCALE['pv_voltage'],
-        'current': raw_i * SCALE['pv_current'],
-        'power':   raw_p * SCALE.get('pv_power', 1),
-        'raw_voltage': raw_v,
-        'raw_current': raw_i,
-    }
-
-
-def get_string_currents(block1_data, strings_per_mppt=3):
-    """Get per-string currents (divided from MPPT current) from Block1 array."""
-    base = RegisterMap.BLOCK1_START
-    i_regs = [RegisterMap.PV1_CURRENT, RegisterMap.PV2_INPUT_CURRENT, RegisterMap.PV3_INPUT_CURRENT]
-    result = []
-    for mppt_idx in range(3):
-        raw_mppt_i = block1_data[i_regs[mppt_idx] - base]
-        divided_raw = raw_mppt_i // strings_per_mppt
-        for s in range(strings_per_mppt):
-            result.append({
-                'string_num':  mppt_idx * strings_per_mppt + s + 1,
-                'mppt_num':    mppt_idx + 1,
-                'current':     divided_raw * SCALE['pv_current'],
-                'raw_current': divided_raw,
-            })
-    return result
-
-
-def get_cumulative_energy_wh(block1_data):
-    """Get cumulative energy (Wh) from Block1 array. Unit: raw x 0.1 kWh → Wh = raw x 100."""
-    base = RegisterMap.BLOCK1_START
-    low  = block1_data[RegisterMap.CUMULATIVE_PRODUCTION_L - base]
-    high = block1_data[RegisterMap.CUMULATIVE_PRODUCTION_H - base]
-    return registers_to_u32(low, high) * 100

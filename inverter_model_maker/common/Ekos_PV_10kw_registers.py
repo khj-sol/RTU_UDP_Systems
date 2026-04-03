@@ -102,6 +102,21 @@ class RegisterMap:
     GRID_STATUS_ALARM3                       = 0x7597  # U16
 
     # --- Standard handler compatibility aliases (H01 Body Type 4 required) ---
+    S_PHASE_VOLTAGE                          = 전압종합  # L2 없음 → 대체
+
+    # --- MPPT alias (modbus_handler: MPPT{N}_ 형식) ---
+    MPPT1_VOLTAGE                            = 인버터_DC전압_PV_VOLTAGE
+    PV_VOLTAGE                               = MPPT1_VOLTAGE
+    PV_STRING_COUNT                          = 2
+
+    # --- RTU modbus_handler / simulator 필수 alias ---
+    INNER_TEMP                               = PV_MPPPT온도
+    INVERTER_MODE                            = INVERTER_STATUS
+    DER_POWER_FACTOR_SET                     = 0x07D0
+    DER_ACTION_MODE                          = 0x07D1
+    DER_REACTIVE_POWER_PCT                   = 0x07D2
+    DER_ACTIVE_POWER_PCT                     = 0x07D3
+    INVERTER_ON_OFF                          = 0x0834
 
 
 
@@ -272,7 +287,7 @@ def get_mppt_registers(mppt_num):
     return (base, base + 1, base + 2, base + 3)
 
 
-def get_iv_tracker_voltage_registers(tracker_num, data_points=0):
+def get_iv_tracker_voltage_registers(tracker_num, data_points=64):
     """Return {'base', 'count', 'end'} for IV voltage block of a tracker (1-1)."""
     if tracker_num < 1 or tracker_num > 1:
         raise ValueError(f"Tracker number must be 1-1, got {tracker_num}")
@@ -280,7 +295,7 @@ def get_iv_tracker_voltage_registers(tracker_num, data_points=0):
     return {'base': base, 'count': data_points, 'end': base + data_points - 1}
 
 
-def get_iv_string_current_registers(mppt_num, string_num, data_points=0):
+def get_iv_string_current_registers(mppt_num, string_num, data_points=64):
     """Return {'base', 'count', 'end'} for IV current block of a string (string_num 1-2)."""
     if mppt_num < 1 or mppt_num > 1:
         raise ValueError(f"MPPT number must be 1-1, got {mppt_num}")
@@ -312,13 +327,13 @@ def get_iv_string_mapping(total_strings=2, strings_per_mppt=2):
     return mapping
 
 
-def generate_iv_voltage_data(voc, v_min, data_points=0):
+def generate_iv_voltage_data(voc, v_min, data_points=64):
     """Generate IV scan voltage array (U16, 0.1V units, ascending v_min->voc)."""
     step = (voc - v_min) / max(data_points - 1, 1)
     return [int((v_min + step * i) * 10) & 0xFFFF for i in range(data_points)]
 
 
-def generate_iv_current_data(isc, voc, v_min, data_points=0):
+def generate_iv_current_data(isc, voc, v_min, data_points=64):
     """Generate IV scan current array (U16, 0.01A units) using IV curve approximation."""
     step = (voc - v_min) / max(data_points - 1, 1)
     regs = []

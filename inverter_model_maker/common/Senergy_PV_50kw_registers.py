@@ -219,11 +219,23 @@ class RegisterMap:
 
     # --- Standard handler compatibility aliases (H01 Body Type 4 required) ---
     R_PHASE_VOLTAGE                          = L1_VOLTAGE
-    S_PHASE_VOLTAGE                          = L2_VOLTAGE
     T_PHASE_VOLTAGE                          = L3_VOLTAGE
     R_PHASE_CURRENT                          = L1_CURRENT
     S_PHASE_CURRENT                          = L2_CURRENT
     T_PHASE_CURRENT                          = L3_CURRENT
+    S_PHASE_VOLTAGE                          = L2_VOLTAGE  # L2 없음 → 대체
+
+    # --- MPPT alias (modbus_handler: MPPT{N}_ 형식) ---
+    PV_VOLTAGE                               = MPPT1_VOLTAGE
+    PV_STRING_COUNT                          = 8
+
+    # --- RTU modbus_handler / simulator 필수 alias ---
+    INNER_TEMP                               = TEMPERATURE
+    DER_POWER_FACTOR_SET                     = 0x07D0
+    DER_ACTION_MODE                          = 0x07D1
+    DER_REACTIVE_POWER_PCT                   = 0x07D2
+    DER_ACTIVE_POWER_PCT                     = 0x07D3
+    INVERTER_ON_OFF                          = 0x0834
 
     # =========================================================================
     # IV Scan Data Registers

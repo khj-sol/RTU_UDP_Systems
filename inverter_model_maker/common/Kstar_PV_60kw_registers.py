@@ -369,6 +369,25 @@ class RegisterMap:
     T_PHASE_VOLTAGE                          = L3_VOLTAGE
     R_PHASE_CURRENT                          = L1_CURRENT
     T_PHASE_CURRENT                          = L3_CURRENT
+    S_PHASE_VOLTAGE                          = L1_VOLTAGE  # L2 없음 → 대체
+
+    # --- MPPT alias (modbus_handler: MPPT{N}_ 형식) ---
+    MPPT1_VOLTAGE                            = PV1_INPUT_VOLTAGE
+    MPPT1_CURRENT                            = PV1_INPUT_CURRENT
+    MPPT2_VOLTAGE                            = PV2_INPUT_VOLTAGE
+    MPPT2_CURRENT                            = PV2_INPUT_CURRENT
+    MPPT3_VOLTAGE                            = PV3_INPUT_VOLTAGE
+    MPPT3_CURRENT                            = PV3_INPUT_CURRENT
+    PV_VOLTAGE                               = MPPT1_VOLTAGE
+    PV_STRING_COUNT                          = 9
+
+    # --- RTU modbus_handler / simulator 필수 alias ---
+    INNER_TEMP                               = TEMPERATURE
+    DER_POWER_FACTOR_SET                     = 0x07D0
+    DER_ACTION_MODE                          = 0x07D1
+    DER_REACTIVE_POWER_PCT                   = 0x07D2
+    DER_ACTIVE_POWER_PCT                     = 0x07D3
+    INVERTER_ON_OFF                          = 0x0834
 
     # =========================================================================
     # IV Scan Data Registers
@@ -387,7 +406,7 @@ class RegisterMap:
     IV_STRING3_2_CURRENT_BASE             = 0x8300
     IV_STRING3_3_CURRENT_BASE             = 0x8340
 
-    IV_SCAN_DATA_POINTS                      = 100
+    IV_SCAN_DATA_POINTS                      = 64
     IV_TRACKER_BLOCK_SIZE                    = 0x140  # 5 x 64 registers per tracker
 
 
@@ -666,7 +685,7 @@ def get_mppt_registers(mppt_num):
     return (base, base + 1, base + 2, base + 3)
 
 
-def get_iv_tracker_voltage_registers(tracker_num, data_points=100):
+def get_iv_tracker_voltage_registers(tracker_num, data_points=64):
     """Return {'base', 'count', 'end'} for IV voltage block of a tracker (1-3)."""
     if tracker_num < 1 or tracker_num > 3:
         raise ValueError(f"Tracker number must be 1-3, got {tracker_num}")
@@ -674,7 +693,7 @@ def get_iv_tracker_voltage_registers(tracker_num, data_points=100):
     return {'base': base, 'count': data_points, 'end': base + data_points - 1}
 
 
-def get_iv_string_current_registers(mppt_num, string_num, data_points=100):
+def get_iv_string_current_registers(mppt_num, string_num, data_points=64):
     """Return {'base', 'count', 'end'} for IV current block of a string (string_num 1-3)."""
     if mppt_num < 1 or mppt_num > 3:
         raise ValueError(f"MPPT number must be 1-3, got {mppt_num}")
@@ -706,13 +725,13 @@ def get_iv_string_mapping(total_strings=9, strings_per_mppt=3):
     return mapping
 
 
-def generate_iv_voltage_data(voc, v_min, data_points=100):
+def generate_iv_voltage_data(voc, v_min, data_points=64):
     """Generate IV scan voltage array (U16, 0.1V units, ascending v_min->voc)."""
     step = (voc - v_min) / max(data_points - 1, 1)
     return [int((v_min + step * i) * 10) & 0xFFFF for i in range(data_points)]
 
 
-def generate_iv_current_data(isc, voc, v_min, data_points=100):
+def generate_iv_current_data(isc, voc, v_min, data_points=64):
     """Generate IV scan current array (U16, 0.01A units) using IV curve approximation."""
     step = (voc - v_min) / max(data_points - 1, 1)
     regs = []

@@ -908,30 +908,27 @@ class RegisterMap:
 
     # --- Standard handler compatibility aliases (H01 Body Type 4 required) ---
     R_PHASE_VOLTAGE                          = L1_VOLTAGE
-    S_PHASE_VOLTAGE                          = L2_VOLTAGE
     T_PHASE_VOLTAGE                          = L3_VOLTAGE
     R_PHASE_CURRENT                          = L1_CURRENT
     S_PHASE_CURRENT                          = L2_CURRENT
     T_PHASE_CURRENT                          = L3_CURRENT
+    S_PHASE_VOLTAGE                          = L2_VOLTAGE  # L2 없음 → 대체
 
-    # =========================================================================
-    # Simulator / backward-compat aliases
-    # =========================================================================
-    RUNNING_STATUS                           = DEVICE_STATUS           # 0x7D59
-    INTERNAL_TEMP                            = INTERNALTEMPERATURE     # 0x7D57
-    ACCUMULATED_ENERGY                       = ACCUMULATEDPOWERGENERATION  # 0x7D6A
-    ACTIVE_POWER                             = ACTIVEPOWER             # 0x7D50
-    FAULT_CODE_1                             = FAULT_CODE              # 0x7D5A
-    GRID_FREQUENCY                           = 0x7D55
-    INPUT_POWER                              = DCPOWER                 # 0x7D40
-    PHASE_A_VOLTAGE                          = POWERGRIDPHASE_AVOLTAGE  # 0x7D45
-    PHASE_A_CURRENT                          = POWERGRIDPHASE_ACURRENT  # 0x7D48
-    PHASE_B_CURRENT                          = POWERGRIDPHASE_BCURRENT  # 0x7D4A
-    PHASE_C_CURRENT                          = POWERGRIDPHASE_CCURRENT  # 0x7D4C
-    PV_STRING_BASE                           = PV1VOLTAGE              # 0x7D10
-    PV_STRING_COUNT                          = 16                       # 8 strings × (V+I)
+    # --- MPPT alias (modbus_handler: MPPT{N}_ 형식) ---
+    MPPT1_VOLTAGE                            = PV1VOLTAGE
+    MPPT1_CURRENT                            = PV1CURRENT
+    MPPT2_VOLTAGE                            = PV2VOLTAGE
+    MPPT2_CURRENT                            = PV2CURRENT
+    MPPT3_VOLTAGE                            = PV3VOLTAGE
+    MPPT3_CURRENT                            = PV3CURRENT
+    MPPT4_VOLTAGE                            = PV4VOLTAGE
+    MPPT4_CURRENT                            = PV4CURRENT
+    PV_VOLTAGE                               = MPPT1_VOLTAGE
+    PV_STRING_COUNT                          = 4
 
-    # DER / Control registers
+    # --- RTU modbus_handler / simulator 필수 alias ---
+    INNER_TEMP                               = TEMPERATURE
+    INVERTER_MODE                            = DEVICE_STATUS
     DER_POWER_FACTOR_SET                     = 0x07D0
     DER_ACTION_MODE                          = 0x07D1
     DER_REACTIVE_POWER_PCT                   = 0x07D2
@@ -1892,12 +1889,7 @@ class ErrorCode64:
 
 
 class HuaweiStatusConverter:
-    """Huawei DEVICE_STATUS (0x7D59) value constants."""
-    STATUS_STANDBY_INIT            = 0x0000
-    STATUS_STANDBY_SUNLIGHT        = 0x0002
-    STATUS_ON_GRID                 = 0x0200
-    STATUS_ON_GRID_DERATING        = 0x0201
-    STATUS_ON_GRID_TEMP            = 0x0202
+    """Huawei INVERTER_MODE register already contains InverterMode values."""
 
     @classmethod
     def to_inverter_mode(cls, raw):
@@ -1966,7 +1958,7 @@ def get_mppt_registers(mppt_num):
     return (base, base + 1, base + 2, base + 3)
 
 
-def get_iv_tracker_voltage_registers(tracker_num, data_points=0):
+def get_iv_tracker_voltage_registers(tracker_num, data_points=64):
     """Return {'base', 'count', 'end'} for IV voltage block of a tracker (1-4)."""
     if tracker_num < 1 or tracker_num > 4:
         raise ValueError(f"Tracker number must be 1-4, got {tracker_num}")
@@ -1974,7 +1966,7 @@ def get_iv_tracker_voltage_registers(tracker_num, data_points=0):
     return {'base': base, 'count': data_points, 'end': base + data_points - 1}
 
 
-def get_iv_string_current_registers(mppt_num, string_num, data_points=0):
+def get_iv_string_current_registers(mppt_num, string_num, data_points=64):
     """Return {'base', 'count', 'end'} for IV current block of a string (string_num 1-0)."""
     if mppt_num < 1 or mppt_num > 4:
         raise ValueError(f"MPPT number must be 1-4, got {mppt_num}")
@@ -2006,13 +1998,13 @@ def get_iv_string_mapping(total_strings=0, strings_per_mppt=0):
     return mapping
 
 
-def generate_iv_voltage_data(voc, v_min, data_points=0):
+def generate_iv_voltage_data(voc, v_min, data_points=64):
     """Generate IV scan voltage array (U16, 0.1V units, ascending v_min->voc)."""
     step = (voc - v_min) / max(data_points - 1, 1)
     return [int((v_min + step * i) * 10) & 0xFFFF for i in range(data_points)]
 
 
-def generate_iv_current_data(isc, voc, v_min, data_points=0):
+def generate_iv_current_data(isc, voc, v_min, data_points=64):
     """Generate IV scan current array (U16, 0.01A units) using IV curve approximation."""
     step = (voc - v_min) / max(data_points - 1, 1)
     regs = []
@@ -2781,47 +2773,3 @@ FLOAT32_FIELDS: set = set()
 # True: String별 전류 레지스터 있음 (Solarize, Senergy, Kstar 등)
 # False: String 전류 레지스터 없음 (Huawei 등 — PV 전류만 제공)
 STRING_CURRENT_MONITOR = False
-
-
-# =============================================================================
-# RTU handler compatibility — helper functions
-# =============================================================================
-
-def s16(val: int) -> int:
-    """Convert unsigned U16 register value to signed S16."""
-    return val - 0x10000 if val >= 0x8000 else val
-
-
-def get_pv_string_data(regs: list) -> list:
-    """Parse 16 consecutive registers (PV_STRING_BASE..+15) into 8 per-string dicts.
-    Layout: [V1, I1, V2, I2, ..., V8, I8]"""
-    result = []
-    for i in range(8):
-        v = regs[i * 2]
-        c = s16(regs[i * 2 + 1])
-        result.append({'voltage': max(0, v), 'current': max(0, c)})
-    return result
-
-
-def get_mppt_from_strings(pv_data: list) -> list:
-    """Derive 4 MPPT values from 8 PV string measurements (MPPT_n = PV(2n-1)+PV(2n))."""
-    mppt = []
-    for i in range(4):
-        s1 = pv_data[i * 2]
-        s2 = pv_data[i * 2 + 1]
-        if s1['voltage'] > 0 and s2['voltage'] > 0:
-            mppt_v = (s1['voltage'] + s2['voltage']) // 2
-        else:
-            mppt_v = max(s1['voltage'], s2['voltage'])
-        mppt.append({'voltage': mppt_v, 'current': s1['current'] + s2['current']})
-    return mppt
-
-
-def get_string_currents(pv_data: list) -> list:
-    """Extract string currents for H01 string array (0.01A unit)."""
-    return [p['current'] for p in pv_data]
-
-
-def get_cumulative_energy_wh(hi: int, lo: int) -> int:
-    """Convert accumulated energy U32 register pair to Wh (register unit: 1 kWh)."""
-    return registers_to_u32(hi, lo) * 1000

@@ -223,11 +223,23 @@ class RegisterMap:
 
     # --- Standard handler compatibility aliases (H01 Body Type 4 required) ---
     R_PHASE_VOLTAGE                          = L1_VOLTAGE
-    S_PHASE_VOLTAGE                          = L2_VOLTAGE
     T_PHASE_VOLTAGE                          = L3_VOLTAGE
     R_PHASE_CURRENT                          = L1_CURRENT
     S_PHASE_CURRENT                          = L2_CURRENT
     T_PHASE_CURRENT                          = L3_CURRENT
+    S_PHASE_VOLTAGE                          = L2_VOLTAGE  # L2 없음 → 대체
+
+    # --- MPPT alias (modbus_handler: MPPT{N}_ 형식) ---
+    PV_VOLTAGE                               = MPPT1_VOLTAGE
+    PV_STRING_COUNT                          = 8
+
+    # --- RTU modbus_handler / simulator 필수 alias ---
+    INNER_TEMP                               = TEMPERATURE
+    DER_POWER_FACTOR_SET                     = 0x07D0
+    DER_ACTION_MODE                          = 0x07D1
+    DER_REACTIVE_POWER_PCT                   = 0x07D2
+    DER_ACTIVE_POWER_PCT                     = 0x07D3
+    INVERTER_ON_OFF                          = 0x0834
 
     # =========================================================================
     # IV Scan Data Registers
@@ -248,58 +260,6 @@ class RegisterMap:
 
     IV_SCAN_DATA_POINTS                      = 64
     IV_TRACKER_BLOCK_SIZE                    = 0x140  # 5 x 64 registers per tracker
-
-    # =========================================================================
-    # Simulator / backward-compat aliases
-    # =========================================================================
-    DEVICE_MODEL                             = DEVICE_MODEL_NAME
-    SERIAL_NUMBER                            = DEVICE_SERIAL_NUMBER
-    MPPT_COUNT                               = MPPT_NUMBER
-    NOMINAL_POWER_LOW                        = NOMINAL_ACTIVE_POWER_LOW_WORD
-    NOMINAL_POWER_HIGH                       = NOMINAL_ACTIVE_POWER_HIGH_WORD
-    INNER_TEMP                               = TEMPERATURE
-    TOTAL_ENERGY_LOW                         = CUMULATIVE_ENERGY
-    TOTAL_ENERGY_HIGH                        = CUMULATIVE_ENERGY_HIGH
-    MPPT1_POWER_LOW                          = MPPT1_POWER
-    MPPT2_POWER_LOW                          = MPPT2_POWER
-    MPPT3_POWER_LOW                          = MPPT3_POWER
-    MPPT4_POWER_LOW                          = MPPT4_POWER
-    PV_POWER_LOW                             = PV_POWER
-    GRID_POWER_LOW                           = AC_POWER
-
-    # DER / Control registers
-    DER_POWER_FACTOR_SET                     = 0x07D0  # S16
-    DER_ACTION_MODE                          = 0x07D1  # U16
-    DER_REACTIVE_POWER_PCT                   = 0x07D2  # S16
-    DER_ACTIVE_POWER_PCT                     = 0x07D3  # U16
-    INVERTER_ON_OFF                          = 0x0834  # U16
-
-    # IV Scan control
-    IV_CURVE_SCAN                            = 0x600D  # U16
-
-    # DEA / Smart-meter data
-    DEA_L1_CURRENT_LOW                       = 0x03E8  # U16
-    DEA_L1_CURRENT_HIGH                      = 0x03E9
-    DEA_L2_CURRENT_LOW                       = 0x03EA
-    DEA_L2_CURRENT_HIGH                      = 0x03EB
-    DEA_L3_CURRENT_LOW                       = 0x03EC
-    DEA_L3_CURRENT_HIGH                      = 0x03ED
-    DEA_L1_VOLTAGE_LOW                       = 0x03EE
-    DEA_L1_VOLTAGE_HIGH                      = 0x03EF
-    DEA_L2_VOLTAGE_LOW                       = 0x03F0
-    DEA_L2_VOLTAGE_HIGH                      = 0x03F1
-    DEA_L3_VOLTAGE_LOW                       = 0x03F2
-    DEA_L3_VOLTAGE_HIGH                      = 0x03F3
-    DEA_TOTAL_ACTIVE_POWER_LOW               = 0x03F4
-    DEA_TOTAL_ACTIVE_POWER_HIGH              = 0x03F5
-    DEA_TOTAL_REACTIVE_POWER_LOW             = 0x03F6
-    DEA_TOTAL_REACTIVE_POWER_HIGH            = 0x03F7
-    DEA_POWER_FACTOR_LOW                     = 0x03F8
-    DEA_POWER_FACTOR_HIGH                    = 0x03F9
-    DEA_FREQUENCY_LOW                        = 0x03FA
-    DEA_FREQUENCY_HIGH                       = 0x03FB
-    DEA_STATUS_FLAG_LOW                      = 0x03FC
-    DEA_STATUS_FLAG_HIGH                     = 0x03FD
 
 
 

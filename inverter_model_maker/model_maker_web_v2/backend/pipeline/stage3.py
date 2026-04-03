@@ -337,6 +337,20 @@ def _gen_register_map(regs_by_cat: dict, mppt: int, total_strings: int,
 
     # Standard handler compatibility aliases (H01 Body Type 4 required)
     lines.append('    # --- Standard handler compatibility aliases (H01 Body Type 4 required) ---')
+    # Sungrow 등: A_B_LINEVOLTAGE_PHASE_AVOLTAGE → L1_VOLTAGE 먼저 생성 (downstream 의존)
+    _phase_src_aliases = [
+        ('L1_VOLTAGE', 'A_B_LINEVOLTAGE_PHASE_AVOLTAGE'),
+        ('L2_VOLTAGE', 'B_C_LINE_VOLTAGE_PHASE_BVOLTAGE'),
+        ('L3_VOLTAGE', 'C_A_LINE_VOLTAGE_PHASE_CVOLTAGE'),
+        ('L1_CURRENT', 'A_PHASE_CURRENT'),
+        ('L2_CURRENT', 'B_PHASE_CURRENT'),
+        ('L3_CURRENT', 'C_PHASE_CURRENT'),
+    ]
+    for alias, src in _phase_src_aliases:
+        if src in all_defined and alias not in all_defined:
+            lines.append(f'    {alias:40s} = {src}')
+            all_defined.add(alias)
+
     compat_aliases = [
         ('R_PHASE_VOLTAGE', 'L1_VOLTAGE'), ('T_PHASE_VOLTAGE', 'L3_VOLTAGE'),
         ('R_PHASE_CURRENT', 'L1_CURRENT'), ('S_PHASE_CURRENT', 'L2_CURRENT'),
@@ -351,26 +365,50 @@ def _gen_register_map(regs_by_cat: dict, mppt: int, total_strings: int,
             lines.append(f'    {alias:40s} = {src}')
             all_defined.add(alias)
 
-    # S_PHASE_VOLTAGE: L2_VOLTAGE 없으면 L1_VOLTAGE로 대체 (단상/Sungrow 등)
+    # S_PHASE_VOLTAGE: L2_VOLTAGE 없으면 순서대로 대체 (단상/Sungrow/한글 인버터 등)
     if 'S_PHASE_VOLTAGE' not in all_defined:
-        fallback = next((x for x in ['L2_VOLTAGE', 'L1_VOLTAGE', 'R_PHASE_VOLTAGE'] if x in all_defined), None)
+        fallback = next((x for x in [
+            'L2_VOLTAGE', 'L1_VOLTAGE', 'R_PHASE_VOLTAGE',
+            'AC_VOLTAGE', 'GRID_VOLTAGE', '전압종합',  # 단상/한글 인버터 대체
+        ] if x in all_defined), None)
         if fallback:
             lines.append(f'    {"S_PHASE_VOLTAGE":40s} = {fallback}  # L2 없음 → 대체')
             all_defined.add('S_PHASE_VOLTAGE')
 
     # MPPT{N}_VOLTAGE/CURRENT aliases (handler: MPPTn_, 생성파일: MPPT_N_)
+    # 지원 네이밍: MPPT_N_(Sungrow), PV{N}VOLTAGE(Huawei), PV{N}_INPUT_VOLTAGE(Kstar),
+    #              PV{N}_VOLTAGE(generic), 한글이름_PV_VOLTAGE(Ekos)
     lines.append('')
     lines.append('    # --- MPPT alias (modbus_handler: MPPT{N}_ 형식) ---')
     for i in range(1, 17):
-        src_v = f'MPPT_{i}_VOLTAGE'
-        src_c = f'MPPT_{i}_CURRENT'
-        if src_v in all_defined:
-            lines.append(f'    {"MPPT%d_VOLTAGE" % i:40s} = {src_v}')
-            all_defined.add(f'MPPT{i}_VOLTAGE')
-        if src_c in all_defined:
-            lines.append(f'    {"MPPT%d_CURRENT" % i:40s} = {src_c}')
-            all_defined.add(f'MPPT{i}_CURRENT')
-        if src_v not in all_defined:
+        v_candidates = [
+            f'MPPT_{i}_VOLTAGE',       # Sungrow/standard
+            f'PV{i}VOLTAGE',           # Huawei (no separator)
+            f'PV{i}_VOLTAGE',          # generic
+            f'PV{i}_INPUT_VOLTAGE',    # Kstar
+        ]
+        c_candidates = [
+            f'MPPT_{i}_CURRENT',
+            f'PV{i}CURRENT',
+            f'PV{i}_CURRENT',
+            f'PV{i}_INPUT_CURRENT',
+        ]
+        src_v = next((c for c in v_candidates if c in all_defined), None)
+        src_c = next((c for c in c_candidates if c in all_defined), None)
+
+        # MPPT1 마지막 수단: 이름 끝에 _PV_VOLTAGE 포함 (한글 인버터 등)
+        if src_v is None and i == 1:
+            src_v = next((n for n in sorted(all_defined) if n.endswith('_PV_VOLTAGE')), None)
+
+        alias_v = f'MPPT{i}_VOLTAGE'
+        alias_c = f'MPPT{i}_CURRENT'
+        if src_v and alias_v not in all_defined:
+            lines.append(f'    {alias_v:40s} = {src_v}')
+            all_defined.add(alias_v)
+        if src_c and alias_c not in all_defined:
+            lines.append(f'    {alias_c:40s} = {src_c}')
+            all_defined.add(alias_c)
+        if src_v is None:
             break  # 연속되지 않으면 중단
 
     # PV_VOLTAGE: 대표 PV 전압 (MPPT1 또는 PV_INPUT_VOLTAGE)
@@ -382,8 +420,10 @@ def _gen_register_map(regs_by_cat: dict, mppt: int, total_strings: int,
                 break
 
     # PV_STRING_COUNT: 실제 string 수 (mppt × strings_per_mppt)
+    # strings_per_mppt=0 이면 1로 기본값 (Huawei 등 개별 string 없는 경우)
     if 'PV_STRING_COUNT' not in all_defined:
-        _sc = mppt * strings_per_mppt if (mppt and strings_per_mppt) else 0
+        _spm = strings_per_mppt if strings_per_mppt > 0 else 1
+        _sc = mppt * _spm if mppt > 0 else 0
         if _sc > 0:
             lines.append(f'    {"PV_STRING_COUNT":40s} = {_sc}')
             all_defined.add('PV_STRING_COUNT')
@@ -419,6 +459,14 @@ def _gen_register_map(regs_by_cat: dict, mppt: int, total_strings: int,
                 lines.append(f'    INNER_TEMP                               = {_tc}')
                 all_defined.add('INNER_TEMP')
                 break
+        else:
+            # 한글 인버터 마지막 수단: 이름에 '온도' 포함, 모듈/외기/AD채널 제외
+            _tc = next((n for n in sorted(all_defined)
+                        if '온도' in n and '모듈' not in n and 'AD_CH' not in n
+                        and '외기' not in n), None)
+            if _tc:
+                lines.append(f'    INNER_TEMP                               = {_tc}')
+                all_defined.add('INNER_TEMP')
 
     # INVERTER_MODE — 운전 상태 레지스터 후보 중 존재하는 첫 번째 사용
     if 'INVERTER_MODE' not in all_defined:
