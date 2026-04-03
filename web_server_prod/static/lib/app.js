@@ -32,27 +32,16 @@ const fmtTime = ts => {
 };
 const statusColor = s => s === 'online' ? 'bg-green-500' : s === 'offline' ? 'bg-red-500' : 'bg-yellow-500';
 const MODEL_NAMES = {
-  1: 'Solarize',
-  2: 'Huawei',
-  3: 'Kstar',
-  4: 'Solarize 50K',
-  5: 'Huawei 50K',
-  6: 'Kstar 60K',
-  7: 'Sungrow',
-  8: 'EKOS',
-  9: 'Senergy',
-  10: 'Solarize',
-  11: 'EKOS2',
+  1: 'Solarize 50K',
+  2: 'Huawei 50K',
+  3: 'Kstar 60K',
+  4: 'Sungrow',
 };
 const MODEL_COLORS = {
-  1: 'bg-blue-600',
-  2: 'bg-orange-600',
-  3: 'bg-purple-600',
-  4: 'bg-blue-500',
-  5: 'bg-orange-500',
-  6: 'bg-purple-500',
-  7: 'bg-teal-600',
-  8: 'bg-cyan-600'
+  1: 'bg-blue-500',
+  2: 'bg-orange-500',
+  3: 'bg-purple-500',
+  4: 'bg-teal-600',
 };
 const INVERTER_STATUS = {
   0x00: 'Initial',
