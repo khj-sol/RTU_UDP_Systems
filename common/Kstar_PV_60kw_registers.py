@@ -400,8 +400,17 @@ class RegisterMap:
     PV1_VOLTAGE                              = PV1_INPUT_VOLTAGE    # 0x0BB8
     PV1_CURRENT                              = PV1_INPUT_CURRENT    # 0x0BBB
     PV1_POWER                                = 0x0BD0
+    PV2_POWER                                = 0x0BD1
+    PV3_POWER                                = 0x0BD2
+    CUMULATIVE_PRODUCTION_H                  = 0x0BE2
     DAILY_PRODUCTION                         = DAILY_POWER_GENERATION0_1KWH  # 0x0CA9
     CUMULATIVE_PRODUCTION_L                  = CUMULATIVE_ENERGY    # 0x0BDE
+
+    # Block read ranges (decimal addresses for FC04)
+    BLOCK1_START = 3000   # 0x0BB8
+    BLOCK2_START = 3060
+    BLOCK3_START = 3125   # 0x0C35
+    BLOCK4_START = 3200   # 0x0C80
     SYSTEM_STATUS                            = OPERATING_MODE_OF_THEINVERTER  # 0x0BD6
     INVERTER_STATUS                          = OPERATING_MODE_OF_THEINVERTER
     INVERTER_MODE                            = OPERATING_MODE_OF_THEINVERTER
@@ -1092,3 +1101,104 @@ FLOAT32_FIELDS: set = set()
 # True: String별 전류 레지스터 있음 (Solarize, Senergy, Kstar 등)
 # False: String 전류 레지스터 없음 (Huawei 등 — PV 전류만 제공)
 STRING_CURRENT_MONITOR = True
+
+
+# =============================================================================
+# RTU handler compatibility — KstarSystemStatus + block-read helper functions
+# =============================================================================
+
+class KstarSystemStatus:
+    """System Status register value definitions"""
+    INITIALIZE        = 0
+    STAND_BY          = 1
+    STARTING          = 2
+    SELF_CHECK        = 3
+    RUNNING           = 4
+    RECOVERY_FAULT    = 5
+    PERMANENT_FAULT   = 6
+    UPGRADING         = 7
+    SELF_CHARGING     = 8
+    SELF_CHECK_TIMEOUT = 9
+    FAN_CHECK         = 10
+
+    _STATUS_MAP = {
+        0: "Initialize", 1: "Stand-by", 2: "Starting",
+        3: "Self-check",  4: "Running",  5: "Recovery Fault",
+        6: "Permanent Fault", 7: "Upgrading", 8: "Self Charging",
+        9: "Self Check Timeout", 10: "Fan Check",
+    }
+
+    @classmethod
+    def to_string(cls, status):
+        return cls._STATUS_MAP.get(status, f"Unknown({status})")
+
+    @classmethod
+    def is_running(cls, status):
+        return status == cls.RUNNING
+
+
+def calc_pv_total_power(block1_data):
+    """Calculate PV total power (W) from Block1 register array."""
+    base = RegisterMap.BLOCK1_START
+    p1 = block1_data[RegisterMap.PV1_POWER - base]
+    p2 = block1_data[RegisterMap.PV2_POWER - base]
+    p3 = block1_data[RegisterMap.PV3_POWER - base]
+    return p1 + p2 + p3
+
+
+def calc_ac_total_power(block3_data):
+    """Calculate AC total power (W) from Block3 register array."""
+    base = RegisterMap.BLOCK3_START
+    def to_s16(v):
+        return v - 0x10000 if v >= 0x8000 else v
+    r = to_s16(block3_data[RegisterMap.INV_R_POWER - base])
+    s = to_s16(block3_data[RegisterMap.INV_S_POWER - base])
+    t = to_s16(block3_data[RegisterMap.INV_T_POWER - base])
+    return r + s + t
+
+
+def get_mppt_data(block1_data, mppt_num):
+    """Get voltage/current/power for MPPT number (1~3) from Block1 array."""
+    if mppt_num < 1 or mppt_num > 3:
+        raise ValueError(f"MPPT number must be 1-3, got {mppt_num}")
+    base = RegisterMap.BLOCK1_START
+    v_regs = [RegisterMap.PV1_VOLTAGE, RegisterMap.PV2_INPUT_VOLTAGE, RegisterMap.PV3_INPUT_VOLTAGE]
+    i_regs = [RegisterMap.PV1_CURRENT, RegisterMap.PV2_INPUT_CURRENT, RegisterMap.PV3_INPUT_CURRENT]
+    p_regs = [RegisterMap.PV1_POWER,   RegisterMap.PV2_POWER,         RegisterMap.PV3_POWER]
+    idx = mppt_num - 1
+    raw_v = block1_data[v_regs[idx] - base]
+    raw_i = block1_data[i_regs[idx] - base]
+    raw_p = block1_data[p_regs[idx] - base]
+    return {
+        'voltage': raw_v * SCALE['pv_voltage'],
+        'current': raw_i * SCALE['pv_current'],
+        'power':   raw_p * SCALE.get('pv_power', 1),
+        'raw_voltage': raw_v,
+        'raw_current': raw_i,
+    }
+
+
+def get_string_currents(block1_data, strings_per_mppt=3):
+    """Get per-string currents (divided from MPPT current) from Block1 array."""
+    base = RegisterMap.BLOCK1_START
+    i_regs = [RegisterMap.PV1_CURRENT, RegisterMap.PV2_INPUT_CURRENT, RegisterMap.PV3_INPUT_CURRENT]
+    result = []
+    for mppt_idx in range(3):
+        raw_mppt_i = block1_data[i_regs[mppt_idx] - base]
+        divided_raw = raw_mppt_i // strings_per_mppt
+        for s in range(strings_per_mppt):
+            result.append({
+                'string_num':  mppt_idx * strings_per_mppt + s + 1,
+                'mppt_num':    mppt_idx + 1,
+                'current':     divided_raw * SCALE['pv_current'],
+                'raw_current': divided_raw,
+            })
+    return result
+
+
+def get_cumulative_energy_wh(block1_data):
+    """Get cumulative energy (Wh) from Block1 array. Unit: raw x 0.1 kWh → Wh = raw x 100."""
+    base = RegisterMap.BLOCK1_START
+    low  = block1_data[RegisterMap.CUMULATIVE_PRODUCTION_L - base]
+    high = block1_data[RegisterMap.CUMULATIVE_PRODUCTION_H - base]
+    return registers_to_u32(low, high) * 100

@@ -34,7 +34,7 @@ from modbus_handler import MultiDeviceHandler
 from backup_manager import BackupManager
 from der_avm_slave import DerAvmSlave, DerAvmSlaveSimulation
 from der_avm_registers import DerAvmRegisters, DER_AVM_COMM_TIMEOUT
-from common.solarize_registers import InverterMode, ErrorCode1, ErrorCode2, ErrorCode3
+from common.Solarize_PV_50kw_registers import InverterMode, ErrorCode1, ErrorCode2, ErrorCode3
 
 # ─── UDP Constants ────────────────────────────────────────────────────────────
 UDP_RECV_TIMEOUT    = 10.0    # seconds to wait for ACK (H05 etc)
@@ -684,7 +684,7 @@ class RTUClient:
 
         Runs in separate thread to avoid blocking _receive_loop.
         """
-        from common.solarize_registers import IVScanStatus
+        from common.Solarize_PV_50kw_registers import IVScanStatus
 
         string_count = inv_cfg.get('string_count', 8)
         self.logger.info(f"IV Scan started for INV{dev_num} ({string_count} strings)")

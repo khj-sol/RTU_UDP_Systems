@@ -2778,3 +2778,47 @@ FLOAT32_FIELDS: set = set()
 # True: String별 전류 레지스터 있음 (Solarize, Senergy, Kstar 등)
 # False: String 전류 레지스터 없음 (Huawei 등 — PV 전류만 제공)
 STRING_CURRENT_MONITOR = False
+
+
+# =============================================================================
+# RTU handler compatibility — helper functions
+# =============================================================================
+
+def s16(val: int) -> int:
+    """Convert unsigned U16 register value to signed S16."""
+    return val - 0x10000 if val >= 0x8000 else val
+
+
+def get_pv_string_data(regs: list) -> list:
+    """Parse 16 consecutive registers (PV_STRING_BASE..+15) into 8 per-string dicts.
+    Layout: [V1, I1, V2, I2, ..., V8, I8]"""
+    result = []
+    for i in range(8):
+        v = regs[i * 2]
+        c = s16(regs[i * 2 + 1])
+        result.append({'voltage': max(0, v), 'current': max(0, c)})
+    return result
+
+
+def get_mppt_from_strings(pv_data: list) -> list:
+    """Derive 4 MPPT values from 8 PV string measurements (MPPT_n = PV(2n-1)+PV(2n))."""
+    mppt = []
+    for i in range(4):
+        s1 = pv_data[i * 2]
+        s2 = pv_data[i * 2 + 1]
+        if s1['voltage'] > 0 and s2['voltage'] > 0:
+            mppt_v = (s1['voltage'] + s2['voltage']) // 2
+        else:
+            mppt_v = max(s1['voltage'], s2['voltage'])
+        mppt.append({'voltage': mppt_v, 'current': s1['current'] + s2['current']})
+    return mppt
+
+
+def get_string_currents(pv_data: list) -> list:
+    """Extract string currents for H01 string array (0.01A unit)."""
+    return [p['current'] for p in pv_data]
+
+
+def get_cumulative_energy_wh(hi: int, lo: int) -> int:
+    """Convert accumulated energy U32 register pair to Wh (register unit: 1 kWh)."""
+    return registers_to_u32(hi, lo) * 1000

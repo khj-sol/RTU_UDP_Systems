@@ -130,17 +130,17 @@ sys.path.append(libdir)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import importlib as _importlib
-from common.solarize_registers import RegisterMap, InverterMode, SCALE, registers_to_u32
+from common.Solarize_PV_50kw_registers import RegisterMap, InverterMode, SCALE, registers_to_u32
 
-# --- solarize_registers 모듈 참조 (fallback 용) ---
-import common.solarize_registers as _default_reg_module
-from common.kstar_registers import (
-    KstarRegisters, KstarSystemStatus, KstarStatusConverter, SCALE as KSTAR_SCALE,
+# --- Solarize_PV_50kw_registers 모듈 참조 (fallback 용) ---
+import common.Solarize_PV_50kw_registers as _default_reg_module
+from common.Kstar_PV_60kw_registers import (
+    RegisterMap as KstarRegisters, KstarSystemStatus, KstarStatusConverter, SCALE as KSTAR_SCALE,
     calc_pv_total_power, calc_ac_total_power, get_mppt_data,
     get_string_currents, get_cumulative_energy_wh,
 )
-from common.huawei_registers import (
-    HuaweiRegisters, HuaweiStatusConverter, SCALE as HUAWEI_SCALE,
+from common.Huawei_PV_50kw_registers import (
+    RegisterMap as HuaweiRegisters, HuaweiStatusConverter, SCALE as HUAWEI_SCALE,
     get_pv_string_data, get_mppt_from_strings,
     get_string_currents as huawei_get_string_currents,
     get_cumulative_energy_wh as huawei_get_cumulative_energy_wh,
@@ -490,7 +490,7 @@ class ModbusHandlerHAT:
                 if dtype == 'u32':
                     return self.reg_to_u32(result[0], result[1])
                 else:
-                    from common.solarize_registers import registers_to_s32 as _s32
+                    from common.Solarize_PV_50kw_registers import registers_to_s32 as _s32
                     return _s32(result[0], result[1])
             return None
         elif dtype == 's16':
@@ -983,7 +983,7 @@ class ModbusHandlerHAT:
         try:
             _get_iv = getattr(self.reg_module, 'get_iv_string_mapping', None)
             if _get_iv is None:
-                from common.solarize_registers import get_iv_string_mapping as _get_iv
+                from common.Solarize_PV_50kw_registers import get_iv_string_mapping as _get_iv
 
             # Get register mapping for this string
             mappings = _get_iv()
@@ -2266,7 +2266,7 @@ class ModbusHandlerSerial:
                 if dtype == 'u32':
                     return self.reg_to_u32(result[0], result[1])
                 else:
-                    from common.solarize_registers import registers_to_s32 as _s32
+                    from common.Solarize_PV_50kw_registers import registers_to_s32 as _s32
                     return _s32(result[0], result[1])
             return None
         elif dtype == 's16':
