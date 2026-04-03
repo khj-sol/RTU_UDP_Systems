@@ -37,24 +37,43 @@ from .rules import (
 
 # ─── PDF 추출 ─────────────────────────────────────────────────────────────────
 
-def extract_pdf_text_and_tables(pdf_path: str) -> List[dict]:
-    """PyMuPDF로 PDF 페이지별 텍스트+테이블 추출"""
+def extract_pdf_text_and_tables(pdf_path: str, log=None) -> List[dict]:
+    """PyMuPDF로 PDF 페이지별 텍스트+테이블 추출.
+    log: 진행 상황 콜백 (선택). find_tables()는 스레드 타임아웃(5s/페이지)으로 행 방지.
+    """
     import fitz
     import logging
+    import concurrent.futures
     logging.getLogger('fitz').setLevel(logging.ERROR)
     fitz.TOOLS.mupdf_display_errors(False)
     doc = fitz.open(pdf_path)
+    total = len(doc)
     pages = []
+    if log:
+        log(f'  PDF 열기 완료: {total}페이지')
     try:
         for i, page in enumerate(doc):
             text = page.get_text()
             tables = []
-            for tab in page.find_tables():
-                try:
-                    tables.append(tab.extract())
-                except Exception:
-                    pass
+            # find_tables()는 복잡한 PDF에서 무한 대기할 수 있음 → 5초 타임아웃
+            try:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                    future = ex.submit(lambda p=page: list(p.find_tables()))
+                    tab_list = future.result(timeout=5)
+                for tab in tab_list:
+                    try:
+                        tables.append(tab.extract())
+                    except Exception:
+                        pass
+            except concurrent.futures.TimeoutError:
+                if log:
+                    log(f'  ⚠ p{i+1} find_tables 타임아웃 — 텍스트만 사용', 'warn')
+            except Exception:
+                pass
             pages.append({'page': i + 1, 'text': text, 'tables': tables})
+            # 10페이지마다 진행 로그
+            if log and (i + 1) % 10 == 0:
+                log(f'  PDF 파싱 중... {i+1}/{total}페이지')
     finally:
         doc.close()
     return pages
@@ -1713,8 +1732,8 @@ def run_stage1(
     all_tables = []
 
     if ext == '.pdf':
-        pages = extract_pdf_text_and_tables(input_path)
-        log(f'  PDF {len(pages)}페이지 추출')
+        pages = extract_pdf_text_and_tables(input_path, log=log)
+        log(f'  PDF {len(pages)}페이지 추출 완료')
 
         # Input Register (FC04) 섹션 키워드
         _INPUT_START = [
