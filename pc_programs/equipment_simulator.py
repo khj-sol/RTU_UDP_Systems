@@ -87,7 +87,7 @@ except ImportError as e:
     print("Install: pip install pymodbus")
     sys.exit(1)
 
-from common.solarize_registers import (
+from common.Solarize_PV_50kw_registers import (
     RegisterMap, InverterMode, SCALE,
     IVScanCommand, IVScanStatus,
     generate_iv_voltage_data, generate_iv_current_data,
@@ -100,15 +100,15 @@ from common.REF_weather_registers import (
     wind_speed_to_raw, wind_direction_to_raw, module_temp_to_raw,
     accum_radiation_to_raw
 )
-from common.kstar_registers import KstarRegisters, KstarSystemStatus
-from common.huawei_registers import HuaweiRegisters, HuaweiStatusConverter
+from common.Kstar_PV_60kw_registers import RegisterMap as KstarRegisters
+from common.Huawei_PV_50kw_registers import RegisterMap as HuaweiRegisters, HuaweiStatusConverter
 try:
-    from common.ekos_registers import RegisterMap as EkosRegisters, InverterMode as EkosInverterMode
+    from common.Ekos_PV_10kw_registers import RegisterMap as EkosRegisters, InverterMode as EkosInverterMode
 except ImportError:
     EkosRegisters = None
     EkosInverterMode = None
 try:
-    from common.sungrow_registers import RegisterMap as SungrowRegisters, InverterMode as SungrowInverterMode
+    from common.Sungrow_PV_50kw_registers import RegisterMap as SungrowRegisters, InverterMode as SungrowInverterMode
 except ImportError:
     SungrowRegisters = None
     SungrowInverterMode = None
@@ -2282,7 +2282,7 @@ class EquipmentSimulator:
                     name = d['name']
 
                     if dtype == 'inverter':
-                        fc = "FC04" if d['protocol'].startswith('kstar') else "FC03"
+                        fc = "FC04" if d['protocol'].lower().startswith('kstar') else "FC03"
                         print(f"\n  [{name.upper()}] Slave ID: {sid} | {fc}")
                         print("-" * 80)
                         status = cur.get('on_off', cur.get('status', 'N/A'))
@@ -2433,9 +2433,9 @@ def _generate_rtu_config(devices, inv_models):
             feat = features.get(model_id, {'iv_scan': False, 'kdn': False})
 
             # Determine mppt/string defaults by protocol
-            if proto.startswith('kstar'):
+            if proto.lower().startswith('kstar'):
                 mppt, string = 3, 9
-            elif proto.startswith('huawei'):
+            elif proto.lower().startswith('huawei'):
                 mppt, string = 4, 8
             else:
                 mppt, string = 4, 8
@@ -2655,7 +2655,7 @@ def _interactive_setup():
     print("\n" + "=" * 70)
     print("  Device Configuration:")
     for d in devices:
-        fc = "FC04" if d['protocol'].startswith('kstar') else "FC03"
+        fc = "FC04" if d['protocol'].lower().startswith('kstar') else "FC03"
         if d['type'] != 'inverter':
             fc = "FC03"
         print(f"    [Slave {d['slave_id']}] {d['type'].title():10s} - {d['name']} ({fc})")
