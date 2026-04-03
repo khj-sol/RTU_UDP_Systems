@@ -88,7 +88,7 @@ async def lifespan(app: FastAPI):
     await shutdown()
 
 
-app = FastAPI(title="RTU Dashboard", version="1.1.0", lifespan=lifespan)
+app = FastAPI(title="RTU Dashboard", version="1.2.0", lifespan=lifespan)
 
 engine = UDPEngine(listen_port=UDP_PORT)
 database = DB(db_path=DB_PATH)

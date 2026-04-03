@@ -2228,6 +2228,11 @@ function App() {
   const [rtus, setRtus] = useState([]);
   const [selectedRtu, setSelectedRtu] = useState('');
   const [rawPackets, setRawPackets] = useState([]);
+  const [serverVersion, setServerVersion] = useState('');
+
+  useEffect(() => {
+    fetcher('/health').then(d => { if (d?.version) setServerVersion('v' + d.version); }).catch(() => {});
+  }, []);
 
   // Load RTUs
   useEffect(() => {
@@ -2275,8 +2280,8 @@ function App() {
   }, "RTU"), " UDP System Dashboard"), /*#__PURE__*/React.createElement("div", {
     className: "flex items-center gap-4 text-sm text-gray-400"
   }, /*#__PURE__*/React.createElement("span", {
-    className: "text-xs text-gray-500 font-mono"
-  }, "v2.2.0"), /*#__PURE__*/React.createElement("span", {
+    className: "text-sm text-gray-300 font-mono font-semibold"
+  }, serverVersion), /*#__PURE__*/React.createElement("span", {
     id: "header-clock"
   }), /*#__PURE__*/React.createElement("span", {
     className: "flex items-center gap-2"
