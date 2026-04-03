@@ -43,3 +43,14 @@ class SessionStore:
         path = os.path.join(TEMP_DIR, sid)
         os.makedirs(path, exist_ok=True)
         return path
+
+    @classmethod
+    def cancel_running_task(cls, sid: str):
+        """진행 중인 stage 태스크 취소 (새 파일 업로드 시 호출)"""
+        s = cls._sessions.get(sid)
+        if not s:
+            return
+        task = s.get('_running_task')
+        if task and not task.done():
+            task.cancel()
+        s.pop('_running_task', None)
