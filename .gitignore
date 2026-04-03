@@ -19,3 +19,9 @@ model_maker_web/temp/*
 !model_maker_web/temp/.gitkeep
 model_maker_web_v2/temp/*
 !model_maker_web_v2/temp/.gitkeep
+inverter_model_maker/model_maker_web/temp/*
+!inverter_model_maker/model_maker_web/temp/.gitkeep
+inverter_model_maker/model_maker_web_v2/temp/*
+!inverter_model_maker/model_maker_web_v2/temp/.gitkeep
+inverter_model_maker/model_maker_web_v2/results/*/
+!inverter_model_maker/model_maker_web_v2/results/_success_index.json
