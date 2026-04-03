@@ -69,14 +69,13 @@ def _apply_saved_definitions(categorized: dict, manufacturer: str, log=None):
     status_defs = saved.get('status_definitions', {})
     alarm_codes = saved.get('alarm_codes', {})
 
-    # STATUS: value_definitions 없는 inverter_status 레지스터에 적용
+    # STATUS: value_definitions 없는 첫 번째 STATUS 레지스터에 적용 (h01_field 무관)
     if status_defs:
         for reg in categorized.get('STATUS', []):
-            if getattr(reg, 'h01_field', '') == 'inverter_status':
-                if not getattr(reg, 'value_definitions', None):
-                    reg.value_definitions = status_defs
-                    if log:
-                        log(f'  정의 파일 적용 (status): {fname} ({len(status_defs)}개)')
+            if not getattr(reg, 'value_definitions', None):
+                reg.value_definitions = status_defs
+                if log:
+                    log(f'  정의 파일 적용 (status): {fname} ({len(status_defs)}개)')
                 break
 
     # ALARM: value_definitions 없는 첫 번째 ALARM에 적용
@@ -2877,13 +2876,13 @@ def _suggest_candidates(x_field: str, all_regs: list, categorized: dict) -> list
 
 def _link_definitions_to_registers(categorized: dict, def_tables: dict):
     """정의 테이블을 STATUS/ALARM 레지스터에 연결"""
-    # STATUS: h01_field='inverter_status'인 레지스터에 가장 적합한 mode_table 연결
+    # STATUS: 첫 번째 STATUS 레지스터에 가장 적합한 mode_table 연결 (h01_field 무관)
     status_reg = None
     for reg in categorized.get('STATUS', []):
-        if getattr(reg, 'h01_field', '') == 'inverter_status':
+        if not getattr(reg, 'value_definitions', None):
             status_reg = reg
             break
-    if status_reg and not getattr(status_reg, 'value_definitions', None):
+    if status_reg:
         addr = status_reg.address if isinstance(status_reg.address, int) else 0
         best_def = None
         for d in def_tables['status_defs']:
