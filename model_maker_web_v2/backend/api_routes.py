@@ -243,6 +243,33 @@ async def apply_suggestion(body: dict):
 
 # ─── Stage 2 ─────────────────────────────────────────────────────────────────
 
+@router.post('/stage2/upload')
+async def stage2_upload(
+    session_id: str = Form(...),
+    file: UploadFile = File(...),
+):
+    """Stage 1 Excel 직접 업로드 → PDF 없이 Stage 2 시작"""
+    s = SessionStore.get(session_id)
+    if not s:
+        raise HTTPException(404, 'session not found')
+
+    fname = file.filename or ''
+    if not fname.lower().endswith(('.xlsx', '.xls')):
+        raise HTTPException(400, 'Stage 1 Excel (.xlsx) 파일만 업로드 가능합니다')
+
+    work_dir = SessionStore.get_work_dir(session_id)
+    dest = os.path.join(work_dir, fname)
+    with open(dest, 'wb') as f:
+        shutil.copyfileobj(file.file, f)
+
+    SessionStore.update(session_id,
+                        stage1_excel=dest,
+                        stage=1,
+                        stage2_excel=None,
+                        registers_py=None)
+    return {'saved': dest, 'filename': fname}
+
+
 @router.post('/stage2/run')
 async def stage2_run(body: dict):
     """
