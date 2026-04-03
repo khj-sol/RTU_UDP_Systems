@@ -154,7 +154,13 @@ async def apply_suggestion(body: dict):
         from .pipeline import load_synonym_db, save_synonym_db
         db = load_synonym_db()
         fields = db.setdefault('fields', {})
-        synonyms = fields.setdefault(field, [])
+        # 기존 항목이 list이면 dict 형식으로 변환 (구버전 호환)
+        entry = fields.get(field)
+        if isinstance(entry, list):
+            fields[field] = {'category': 'MONITORING', 'h01_field': field, 'synonyms': entry}
+        elif entry is None:
+            fields[field] = {'category': 'MONITORING', 'h01_field': field, 'synonyms': []}
+        synonyms = fields[field].setdefault('synonyms', [])
         key = definition.upper().replace(' ', '_')
         if key not in synonyms:
             synonyms.append(key)
