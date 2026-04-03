@@ -270,10 +270,25 @@ class RegisterMap:
 
     # --- Standard handler compatibility aliases (H01 Body Type 4 required) ---
     R_PHASE_VOLTAGE                          = L1_VOLTAGE
+    S_PHASE_VOLTAGE                          = L1_VOLTAGE  # Sungrow: L2 전압 없음 → L1로 대체
     T_PHASE_VOLTAGE                          = L3_VOLTAGE
     R_PHASE_CURRENT                          = L1_CURRENT
     S_PHASE_CURRENT                          = L2_CURRENT
     T_PHASE_CURRENT                          = L3_CURRENT
+
+    # --- MPPT alias (modbus_handler: MPPT{N}_VOLTAGE / MPPT{N}_CURRENT) ---
+    MPPT1_VOLTAGE                            = MPPT_1_VOLTAGE      # 0x1393
+    MPPT1_CURRENT                            = MPPT_1_CURRENT      # 0x1394
+    MPPT2_VOLTAGE                            = MPPT_2_VOLTAGE      # 0x1395
+    MPPT2_CURRENT                            = MPPT_2_CURRENT      # 0x1396
+    MPPT3_VOLTAGE                            = MPPT_3_VOLTAGE      # 0x1397
+    MPPT3_CURRENT                            = MPPT_3_CURRENT      # 0x1398
+    MPPT4_VOLTAGE                            = MPPT_4_VOLTAGE      # 0x13FB
+    MPPT4_CURRENT                            = MPPT_4_CURRENT      # 0x13FC
+
+    # --- PV alias ---
+    PV_VOLTAGE                               = MPPT_1_VOLTAGE      # 대표값: MPPT1 전압
+    PV_STRING_COUNT                          = 8                   # 4MPPT × 2strings
 
     # --- RTU modbus_handler / simulator 필수 alias ---
     INNER_TEMP                               = TEMPERATURE         # 0x0024
