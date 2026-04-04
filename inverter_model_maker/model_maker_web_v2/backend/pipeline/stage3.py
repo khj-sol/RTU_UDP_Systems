@@ -922,12 +922,13 @@ def generate_iv_current_data(isc, voc, v_min, data_points={iv_data_points}):
 
 
 def _gen_read_blocks(all_regs: List[RegisterRow], fc_code: int = 3,
-                     gap_tolerance: int = 4) -> str:
+                     gap_tolerance: int = 32) -> str:
     """RTU 배치 읽기용 READ_BLOCKS 생성.
 
     모니터링/상태/알람 레지스터를 연속 블록으로 묶어 Modbus 트랜잭션 수를 최소화.
     FLOAT32/U32/S32는 2개 레지스터를 차지한다.
     fc_code: 3=FC03 Holding Registers, 4=FC04 Input Registers
+    gap_tolerance: 이 간격(레지스터 수) 이하의 빈 공간은 같은 블록으로 병합 (기본 32)
     """
     read_cats = {'MONITORING', 'STATUS', 'ALARM'}
     two_reg_types = {'FLOAT32', 'U32', 'S32'}
@@ -977,18 +978,33 @@ def _gen_read_blocks(all_regs: List[RegisterRow], fc_code: int = 3,
     return '\n'.join(lines)
 
 
-def _gen_data_parser(mppt_count: int, total_strings: int) -> str:
+def _gen_data_parser(all_regs: List[RegisterRow], mppt_count: int, total_strings: int) -> str:
     """H01 출력 필드 → RegisterMap 속성명 매핑 DATA_PARSER 생성.
 
     modbus_handler._read_inverter_data_dynamic()이 이 매핑을 사용하여
     레지스터 파일에 의존하지 않고 H01 필드를 읽는다.
     RegisterMap 속성명은 _gen_register_map()이 생성하는 표준 alias와 일치해야 한다.
+
+    Stage2에서 h01_field 매칭된 레지스터가 있으면 그 이름을 우선 사용하고,
+    없으면 _gen_register_map()이 항상 보장하는 표준 alias를 사용한다.
     """
+    # Stage2 H01 매칭 결과: h01_field → RegisterMap 속성명
+    h01_to_reg: dict = {}
+    for reg in all_regs:
+        h01 = getattr(reg, 'h01_field', '') or ''
+        if h01 and h01 not in h01_to_reg:
+            name = to_upper_snake(reg.definition)
+            if name:
+                h01_to_reg[h01] = name
+
     lines = ['\n', '# H01 출력 필드 → RegisterMap 속성명 매핑',
              '# modbus_handler._read_inverter_data_dynamic()이 이 매핑을 사용한다.',
              'DATA_PARSER = {']
-    # 기본 스칼라 필드
-    _base = [
+
+    # RTU 기본 12개 필드 — _gen_register_map()이 항상 보장하는 alias 사용
+    # Stage2 매칭 결과가 있으면 우선 사용, 없으면 표준 alias
+    _required = [
+        ('mode',              'INVERTER_MODE'),
         ('r_voltage',         'R_PHASE_VOLTAGE'),
         ('s_voltage',         'S_PHASE_VOLTAGE'),
         ('t_voltage',         'T_PHASE_VOLTAGE'),
@@ -996,23 +1012,27 @@ def _gen_data_parser(mppt_count: int, total_strings: int) -> str:
         ('s_current',         'S_PHASE_CURRENT'),
         ('t_current',         'T_PHASE_CURRENT'),
         ('frequency',         'FREQUENCY'),
-        ('pv_power',          'PV_POWER'),
         ('ac_power',          'AC_POWER'),
-        ('power_factor',      'POWER_FACTOR'),
-        ('mode',              'INVERTER_MODE'),
-        ('alarm1',            'ERROR_CODE1'),
-        ('alarm2',            'ERROR_CODE2'),
+        ('temperature',       'INNER_TEMP'),
         ('cumulative_energy', 'TOTAL_ENERGY'),
+        ('alarm1',            'ERROR_CODE1'),
     ]
-    for h01, reg in _base:
-        lines.append(f"    '{h01:20s}': '{reg}',")
-    # MPPT
+    for h01, default_alias in _required:
+        alias = h01_to_reg.get(h01, default_alias)
+        lines.append(f"    '{h01:20s}': '{alias}',")
+
+    # MPPT 동적 필드
     for n in range(1, mppt_count + 1):
-        lines.append(f"    'mppt{n}_voltage'        : 'MPPT{n}_VOLTAGE',")
-        lines.append(f"    'mppt{n}_current'        : 'MPPT{n}_CURRENT',")
-    # String 전류
+        alias_v = h01_to_reg.get(f'mppt{n}_voltage', f'MPPT{n}_VOLTAGE')
+        alias_c = h01_to_reg.get(f'mppt{n}_current', f'MPPT{n}_CURRENT')
+        lines.append(f"    'mppt{n}_voltage'        : '{alias_v}',")
+        lines.append(f"    'mppt{n}_current'        : '{alias_c}',")
+
+    # String 전류 동적 필드
     for n in range(1, total_strings + 1):
-        lines.append(f"    'string{n}_current'      : 'STRING{n}_CURRENT',")
+        alias = h01_to_reg.get(f'string{n}_current', f'STRING{n}_CURRENT')
+        lines.append(f"    'string{n}_current'      : '{alias}',")
+
     lines.append('}')
     lines.append('')
     return '\n'.join(lines)
@@ -1394,6 +1414,24 @@ def run_stage3(
         cat = reg.category or 'MONITORING'
         regs_by_cat.setdefault(cat, []).append(reg)
 
+    # ── MONITORING 필터: RTU가 실제 사용하는 레지스터만 유지 ──────────────────────
+    # Stage2 H01 매칭(h01_field 설정) 또는 MPPT/String/PV 채널 패턴에 해당하는
+    # 레지스터만 RegisterMap에 포함하고, 설정·네트워크·라이선스 등 불필요 레지스터 제거.
+    _MPPT_STR_PAT = re.compile(r'^(MPPT|STRING|PV)\d+', re.IGNORECASE)
+    mon_regs = regs_by_cat.get('MONITORING', [])
+    if len(mon_regs) > 50:  # 레지스터가 많을 때만 필터 적용 (소규모 PDF는 그대로)
+        essential_mon = [
+            r for r in mon_regs
+            if (getattr(r, 'h01_field', '') or
+                _MPPT_STR_PAT.match(to_upper_snake(r.definition or '')))
+        ]
+        if essential_mon:  # 필터 결과가 비어있지 않을 때만 교체
+            log(f'  MONITORING 필터: {len(mon_regs)} → {len(essential_mon)} '
+                f'(RTU 미사용 레지스터 {len(mon_regs) - len(essential_mon)}개 제거)')
+            regs_by_cat['MONITORING'] = essential_mon
+            _excluded_ids = {id(r) for r in mon_regs} - {id(r) for r in essential_mon}
+            all_regs = [r for r in all_regs if id(r) not in _excluded_ids]
+
     # MPPT / String 수
     mppt_count = 0
     total_strings = 0
@@ -1487,7 +1525,7 @@ def run_stage3(
         _gen_data_types(all_regs),
         _gen_string_current_monitor(all_regs),
         _gen_read_blocks(all_regs),
-        _gen_data_parser(mppt_count, total_strings),
+        _gen_data_parser(all_regs, mppt_count, total_strings),
     ]
     code = '\n'.join(p for p in code_parts if p)
 
