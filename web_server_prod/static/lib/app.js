@@ -522,9 +522,9 @@ function RelayCard({
     className: "text-gray-400"
   }, "T P:"), " ", fmt((d.t_power || 0) / 1000, 2), " kW"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
     className: "text-gray-400"
-  }, "Total P:"), " ", fmt((d.total_power || 0) / 1000, 2), " kW"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+  }, "Total P:"), " ", fmt((d.total_active_power || 0) / 1000, 2), " kW"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
     className: "text-gray-400"
-  }, "PF:"), " ", fmt(d.power_factor, 3)), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+  }, "PF:"), " ", fmt(d.avg_power_factor, 3)), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
     className: "text-gray-400"
   }, "Freq:"), " ", fmt(d.frequency), " Hz"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
     className: "text-gray-400"
@@ -571,7 +571,7 @@ function WeatherCard({
     className: "text-gray-400"
   }, "Module T4:"), " ", fmt(d.module_temp_4), " \xB0C"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
     className: "text-gray-400"
-  }, "Humidity:"), " ", fmt(d.humidity), " %"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+  }, "Humidity:"), " ", fmt(d.air_humidity), " %"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
     className: "text-gray-400"
   }, "Pressure:"), " ", fmt(d.air_pressure, 0), " hPa"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
     className: "text-gray-400"
@@ -1313,7 +1313,7 @@ function HistoryTab({
     color: '#3B82F6',
     data: rev.map(d => ({
       time: d.timestamp,
-      value: (d.total_power || 0) / 1000
+      value: (d.total_active_power || 0) / 1000
     }))
   }] : [], [rev, deviceType]);
   const relayEnergySeries = useMemo(() => deviceType === 'relay' ? [{
@@ -1583,7 +1583,7 @@ function HistoryTab({
     className: "text-right"
   }, fmt(d.air_temp, 1)), /*#__PURE__*/React.createElement("td", {
     className: "text-right"
-  }, fmt(d.humidity, 1)), /*#__PURE__*/React.createElement("td", {
+  }, fmt(d.air_humidity, 1)), /*#__PURE__*/React.createElement("td", {
     className: "text-right"
   }, fmt(d.air_pressure, 1)), /*#__PURE__*/React.createElement("td", {
     className: "text-right"
@@ -1605,13 +1605,13 @@ function HistoryTab({
     className: "text-right"
   }, fmt(d.t_voltage)), /*#__PURE__*/React.createElement("td", {
     className: "text-right font-medium"
-  }, fmt((d.total_power || 0) / 1000, 2)), /*#__PURE__*/React.createElement("td", {
+  }, fmt((d.total_active_power || 0) / 1000, 2)), /*#__PURE__*/React.createElement("td", {
     className: "text-right text-yellow-400"
   }, fmt((d.inverter_power || 0) / 1000, 2)), /*#__PURE__*/React.createElement("td", {
     className: "text-right text-green-400"
   }, fmt((d.load_power || 0) / 1000, 2)), /*#__PURE__*/React.createElement("td", {
     className: "text-right"
-  }, fmt(d.power_factor, 3)), /*#__PURE__*/React.createElement("td", {
+  }, fmt(d.avg_power_factor, 3)), /*#__PURE__*/React.createElement("td", {
     className: "text-right"
   }, fmt(d.frequency)), /*#__PURE__*/React.createElement("td", {
     className: "text-right"

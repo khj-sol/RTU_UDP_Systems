@@ -75,7 +75,7 @@ class DB:
                 rtu_id INTEGER, device_number INTEGER,
                 r_voltage REAL, s_voltage REAL, t_voltage REAL,
                 r_current REAL, s_current REAL, t_current REAL,
-                total_power REAL, power_factor REAL, frequency REAL,
+                total_active_power REAL, avg_power_factor REAL, frequency REAL,
                 received_energy REAL, sent_energy REAL,
                 do_status INTEGER, di_status INTEGER,
                 inverter_power REAL, load_power REAL,
@@ -83,7 +83,8 @@ class DB:
         # Migrate: add columns if missing (existing DB)
         for col, typ in [('received_energy','REAL'), ('sent_energy','REAL'),
                          ('do_status','INTEGER'), ('di_status','INTEGER'),
-                         ('inverter_power','REAL'), ('load_power','REAL')]:
+                         ('inverter_power','REAL'), ('load_power','REAL'),
+                         ('total_active_power','REAL'), ('avg_power_factor','REAL')]:
             try:
                 _validate_sql_col(col, typ)
                 await self.db.execute(f"ALTER TABLE relay_data ADD COLUMN {col} {typ} DEFAULT 0")
@@ -97,7 +98,7 @@ class DB:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
                 rtu_id INTEGER, device_number INTEGER,
-                air_temp REAL, humidity REAL, air_pressure REAL,
+                air_temp REAL, air_humidity REAL, air_pressure REAL,
                 wind_speed REAL, wind_direction REAL,
                 module_temp_1 REAL, module_temp_2 REAL,
                 module_temp_3 REAL, module_temp_4 REAL,
@@ -126,6 +127,16 @@ class DB:
             await self.db.execute("ALTER TABLE event_log ADD COLUMN body_type INTEGER DEFAULT 0")
         except Exception:
             pass
+        # Rename columns for field name standardization (existing DBs)
+        for rename_sql in [
+            "ALTER TABLE relay_data RENAME COLUMN total_power TO total_active_power",
+            "ALTER TABLE relay_data RENAME COLUMN power_factor TO avg_power_factor",
+            "ALTER TABLE weather_data RENAME COLUMN humidity TO air_humidity",
+        ]:
+            try:
+                await self.db.execute(rename_sql)
+            except Exception:
+                pass
 
         await self.db.execute("""
             CREATE TABLE IF NOT EXISTS control_status (
@@ -363,7 +374,7 @@ class DB:
                 timestamp, rtu_id, device_number,
                 r_voltage, s_voltage, t_voltage,
                 r_current, s_current, t_current,
-                total_power, power_factor, frequency,
+                total_active_power, avg_power_factor, frequency,
                 received_energy, sent_energy, do_status, di_status,
                 inverter_power, load_power,
                 backup, original_timestamp
@@ -371,7 +382,7 @@ class DB:
         """, (ts, rtu_id, parsed.get('device_number', 0),
               parsed.get('r_voltage', 0), parsed.get('s_voltage', 0), parsed.get('t_voltage', 0),
               parsed.get('r_current', 0), parsed.get('s_current', 0), parsed.get('t_current', 0),
-              parsed.get('total_power', 0), parsed.get('power_factor', 0), parsed.get('frequency', 0),
+              parsed.get('total_active_power', 0), parsed.get('avg_power_factor', 0), parsed.get('frequency', 0),
               parsed.get('received_energy', 0), parsed.get('sent_energy', 0),
               parsed.get('do_status', 0), parsed.get('di_status', 0),
               parsed.get('inverter_power', 0), parsed.get('load_power', 0),
@@ -406,7 +417,7 @@ class DB:
         await self.db.execute("""
             INSERT INTO weather_data (
                 timestamp, rtu_id, device_number,
-                air_temp, humidity, air_pressure,
+                air_temp, air_humidity, air_pressure,
                 wind_speed, wind_direction,
                 module_temp_1, module_temp_2, module_temp_3, module_temp_4,
                 horizontal_radiation, horizontal_accum,
@@ -414,7 +425,7 @@ class DB:
                 backup, original_timestamp
             ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (ts, rtu_id, parsed.get('device_number', 0),
-              parsed.get('air_temp', 0), parsed.get('humidity', 0), parsed.get('air_pressure', 0),
+              parsed.get('air_temp', 0), parsed.get('air_humidity', 0), parsed.get('air_pressure', 0),
               parsed.get('wind_speed', 0), parsed.get('wind_direction', 0),
               parsed.get('module_temp_1', 0), parsed.get('module_temp_2', 0),
               parsed.get('module_temp_3', 0), parsed.get('module_temp_4', 0),
