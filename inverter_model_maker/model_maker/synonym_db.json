@@ -82,7 +82,26 @@
         "STRING_21_ABNORMAL_ALARM",
         "STRING_22_ABNORMAL_ALARM",
         "STRING_23_ABNORMAL_ALARM",
-        "STRING_24_ABNORMAL_ALARM"
+        "STRING_24_ABNORMAL_ALARM",
+        "reserveundefined",
+        "Lithium battery wake-up flagLithium battery wake upsign bit",
+        "Alarm information No.2CharacterWarning message word 2",
+        "battery capacityBatt Capacity",
+        "MCU test flagMCU test flag",
+        "LCDtest flagLCD test flag",
+        "Switch stateTurn off/on status",
+        "AC side relay statusAC realy status",
+        "Alarm information No.1CharacterWarning message word 1",
+        "Fault information No.1CharacterFault information word 1",
+        "Fault information No.2CharacterFault information word 2",
+        "Fault information No.4CharacterFault information word 4",
+        "No. 11 7 bytes",
+        "No. 14 5 bytes",
+        "No. 14 7 bytes",
+        "No. 14 9 bytes",
+        "Debug Data",
+        "battery temperaturebattery temperature",
+        "battery voltagebattery voltage"
       ]
     },
     "L2_VOLTAGE": {
@@ -121,7 +140,10 @@
         "DUBAI-MV800",
         "DC지락",
         "Communicate fault",
-        "COMMUNICATE_FAULT"
+        "COMMUNICATE_FAULT",
+        "reserveundefined",
+        "Empty v_",
+        "Battery internal resistancebattery resistance value"
       ]
     },
     "L3_VOLTAGE": {
@@ -179,7 +201,9 @@
         "Northern Ireland-MV480",
         "LeakagecurrentRCD",
         "Northern Ireland-MV800",
-        "STRING_10_ABNORMAL_ALARM"
+        "STRING_10_ABNORMAL_ALARM",
+        "battery capacityShut Downbattery capacity ShutDown",
+        "Fault information No.3CharacterFault information word 3"
       ]
     },
     "L2_CURRENT": {
@@ -220,7 +244,8 @@
         "Battery VoltageCalibration Factor",
         "Cameroon-MV480",
         "CTratedcurrent",
-        "Cameroon-MV800"
+        "Cameroon-MV800",
+        "battery capacityLowBattbattery capacityLowBatt"
       ]
     },
     "AC_POWER": {
@@ -237,7 +262,8 @@
         "Inverter –Transformer type",
         "Total reactivepower",
         "Grid total Reactive Power",
-        "Overfrequency powerreduction percentage"
+        "Overfrequency powerreduction percentage",
+        "battery voltageShut Downbattery voltageShutDown"
       ]
     },
     "POWER_FACTOR": {
@@ -269,7 +295,10 @@
         "Custom-MV800-50Hz",
         "VDE-AR-N4110",
         "VDE-AR-N4110-MV480",
-        "VDE-AR-N4110-MV800"
+        "VDE-AR-N4110-MV800",
+        "Smart Load Open Delay",
+        "Grid1 I_",
+        "Grid2 I_"
       ]
     },
     "FREQUENCY": {
@@ -360,7 +389,12 @@
         "PV9_ABNORMAL",
         "PV10_ABNORMAL",
         "PV11_ABNORMAL",
-        "PV12_ABNORMAL"
+        "PV12_ABNORMAL",
+        "Battery output powerBattery output power",
+        "PV1input powerPV1 input power",
+        "PV2input powerPV2 input power",
+        "PV3input powerPV3 input power",
+        "PV4input powerPV4 input power"
       ]
     },
     "CUMULATIVE_ENERGY": {
@@ -571,6 +605,22 @@
         "PV3 input current",
         "PV3current",
         "MPPT_3_CURRENT"
+      ]
+    },
+    "alarm1": {
+      "category": "MONITORING",
+      "h01_field": "alarm1",
+      "synonyms": [
+        "MPPTROAD_NUMBERMPPT_NUMBER"
+      ],
+      "value_keywords": [
+        "error",
+        "failure",
+        "fan",
+        "grid",
+        "phase",
+        "reserved",
+        "wrong"
       ]
     }
   }
