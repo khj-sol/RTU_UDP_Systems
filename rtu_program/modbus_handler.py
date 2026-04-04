@@ -304,17 +304,26 @@ def _init_reg_attrs(handler, reg_module):
             if handler.status_converter is not None:
                 break
 
-    # Detect non-Solarize register layout: if AC_POWER address differs from
-    # the hardcoded Solarize default (0x1037), use dynamic register reading.
+    # Block read: READ_BLOCKS + DATA_PARSER 구조가 있으면 블록 단위 읽기 사용
+    handler.read_blocks = getattr(mod, 'READ_BLOCKS', None)
+    handler.data_parser = getattr(mod, 'DATA_PARSER', None)
+    handler.fc_code = getattr(mod, 'FC_CODE', 3)
+    handler.use_block_read = bool(
+        handler.read_blocks and handler.data_parser
+    )
+
+    # Dynamic read: 블록 읽기 없고 DATA_TYPES 있고 Solarize 주소가 아닌 경우
     rm = handler.RegMap
     solarize_ac_power = 0x1037
     handler.use_dynamic_read = (
-        handler.reg_data_types is not None
+        not handler.use_block_read
+        and handler.reg_data_types is not None
         and hasattr(rm, 'AC_POWER')
         and rm.AC_POWER != solarize_ac_power
     )
     _log = logging.getLogger('modbus_handler')
     _log.info(f"_init_reg_attrs: slave={getattr(handler, 'slave_id', '?')} "
+              f"block={handler.use_block_read} "
               f"data_types={handler.reg_data_types is not None} "
               f"AC_POWER={hex(rm.AC_POWER) if hasattr(rm, 'AC_POWER') else 'N/A'} "
               f"dynamic={handler.use_dynamic_read}")
@@ -698,9 +707,192 @@ class ModbusHandlerHAT:
             self.logger.error(traceback.format_exc())
             return None
 
+    def _format_h01_from_raw(self, physical: dict) -> dict:
+        """물리값 dict(SI 단위)를 H01 패킷 형식 dict로 변환.
+
+        physical 값은 DATA_PARSER scale 적용 후의 물리 SI 단위:
+          전압 V, 전류 A, 전력 W, 주파수 Hz, 에너지 kWh
+
+        반환 dict는 read_inverter_data() 의 표준 출력 형식과 동일.
+        """
+        data = {}
+
+        # AC Phase 전압 (V → V integer)
+        for key, field in [('r_voltage', 'R_PHASE_VOLTAGE'),
+                           ('s_voltage', 'S_PHASE_VOLTAGE'),
+                           ('t_voltage', 'T_PHASE_VOLTAGE')]:
+            val = physical.get(field)
+            data[key] = int(val) if val is not None else 0
+
+        # AC Phase 전류 (A → 0.1A integer)
+        for key, field in [('r_current', 'R_PHASE_CURRENT'),
+                           ('s_current', 'S_PHASE_CURRENT'),
+                           ('t_current', 'T_PHASE_CURRENT')]:
+            val = physical.get(field)
+            data[key] = int(val * 10) if val is not None else 0
+
+        # 주파수 (Hz → 0.1Hz integer)
+        val = physical.get('FREQUENCY')
+        data['frequency'] = int(val * 10) if val is not None else 600
+
+        # AC 전력 (W integer)
+        val = physical.get('AC_POWER')
+        data['ac_power'] = int(val) if val is not None else 0
+
+        # PV 전력 (W integer)
+        val = physical.get('PV_POWER')
+        data['pv_power'] = int(val) if val is not None else 0
+
+        # 역률 (-1.0~1.0 → -1000~1000 integer)
+        val = physical.get('POWER_FACTOR')
+        if val is not None:
+            pf = int(val * 1000)
+            data['power_factor'] = max(-1000, min(1000, pf))
+        else:
+            data['power_factor'] = 1000
+
+        # 누적 발전량 (kWh → Wh integer)
+        val = physical.get('TOTAL_ENERGY')
+        data['cumulative_energy'] = int(val * 1000) if val is not None else 0
+
+        # MPPT 데이터 (raw register 형식: voltage=0.1V, current=0.01A)
+        mppt_data = []
+        for i in range(1, 9):
+            v = physical.get(f'MPPT{i}_VOLTAGE')
+            c = physical.get(f'MPPT{i}_CURRENT')
+            if v is None and c is None:
+                break
+            mppt_data.append({
+                'voltage': int(v * 10) if v is not None else 0,   # V → 0.1V raw
+                'current': int(c * 100) if c is not None else 0,  # A → 0.01A raw
+            })
+        data['mppt'] = mppt_data
+
+        # PV 전압/전류 (MPPT 데이터에서 계산)
+        if mppt_data:
+            connected = [m for m in mppt_data if m['voltage'] >= 1000]  # >= 100V (0.1V)
+            data['pv_voltage'] = (int(sum(m['voltage'] for m in connected) /
+                                      len(connected) / 10) if connected else 0)
+            data['pv_current'] = int(sum(m['current'] for m in mppt_data) / 10)
+        else:
+            pv_v = physical.get('PV_VOLTAGE')
+            pv_c = physical.get('PV_CURRENT')
+            data['pv_voltage'] = int(pv_v) if pv_v is not None else 0
+            data['pv_current'] = int(pv_c * 10) if pv_c is not None else 0
+
+        # String 전류 (A → 0.01A raw)
+        strings = []
+        for i in range(1, 17):
+            val = physical.get(f'STRING{i}_CURRENT')
+            if val is None:
+                break
+            strings.append(int(val * 100))  # A → 0.01A
+        data['strings'] = strings
+
+        # 인버터 모드/상태
+        mode_val = physical.get('INVERTER_MODE')
+        if mode_val is not None:
+            raw_mode = int(mode_val)
+            if self.status_converter and hasattr(self.status_converter, 'to_inverter_mode'):
+                mode = self.status_converter.to_inverter_mode(raw_mode)
+            else:
+                mode = raw_mode
+            data['mode'] = mode
+            if mode == self.InvMode.ON_GRID:
+                data['status'] = INV_STATUS_ON_GRID
+            elif mode in (self.InvMode.STANDBY, self.InvMode.INITIAL,
+                          self.InvMode.SHUTDOWN):
+                data['status'] = INV_STATUS_STANDBY
+            elif mode == self.InvMode.FAULT:
+                data['status'] = INV_STATUS_FAULT
+            else:
+                data['status'] = INV_STATUS_STANDBY
+        else:
+            data['mode'] = self.InvMode.ON_GRID
+            data['status'] = INV_STATUS_ON_GRID
+
+        # 알람 코드
+        data['alarm1'] = int(physical.get('ERROR_CODE1', 0) or 0)
+        data['alarm2'] = int(physical.get('ERROR_CODE2', 0) or 0)
+        data['alarm3'] = 0
+
+        return data
+
+    def _read_inverter_data_blocks(self):
+        """READ_BLOCKS/DATA_PARSER 기반 블록 단위 인버터 데이터 읽기.
+
+        연속된 레지스터를 한 번에 읽어 효율적으로 데이터 수집.
+        FLOAT32, U32, S32, U16, S16 모두 지원.
+        반환 dict 형식은 read_inverter_data() 표준과 동일.
+        """
+        import struct as _struct
+
+        if not self.connected or not self.master:
+            return None
+
+        try:
+            fc = getattr(self, 'fc_code', 3)
+            read_blocks = getattr(self, 'read_blocks', []) or []
+            data_parser = getattr(self, 'data_parser', {}) or {}
+
+            # 블록 단위 읽기
+            block_data: dict = {}
+            for i, (start_addr, count) in enumerate(read_blocks):
+                if fc == 4:
+                    result = self.master.read_input_registers(
+                        start_addr, count, self.slave_id)
+                else:
+                    result = self.master.read_holding_registers(
+                        start_addr, count, self.slave_id)
+                block_data[i] = list(result) if result else [0] * count
+
+            # DATA_PARSER로 물리값 변환
+            physical: dict = {}
+            for field, (blk_idx, offset, dtype, scale) in data_parser.items():
+                block = block_data.get(blk_idx, [])
+                if not block or offset >= len(block):
+                    continue
+                try:
+                    dtype_up = dtype.upper()
+                    if dtype_up == 'FLOAT32':
+                        if offset + 1 >= len(block):
+                            continue
+                        lo, hi = block[offset], block[offset + 1]
+                        packed = _struct.pack('>HH', lo, hi)
+                        val = _struct.unpack('>f', packed)[0]
+                        if val != val or abs(val) > 1e12:  # NaN/Inf 제거
+                            continue
+                    elif dtype_up in ('U32', 'S32'):
+                        if offset + 1 >= len(block):
+                            continue
+                        val = self.reg_to_u32(block[offset], block[offset + 1])
+                        if dtype_up == 'S32' and val >= 0x80000000:
+                            val -= 0x100000000
+                    elif dtype_up == 'S16':
+                        val = block[offset]
+                        if val >= 0x8000:
+                            val -= 0x10000
+                    else:  # U16 default
+                        val = block[offset]
+                    physical[field] = val * scale if scale != 1.0 else val
+                except Exception:
+                    continue
+
+            self._check_stats_log()
+            return self._format_h01_from_raw(physical)
+
+        except Exception as e:
+            self.logger.error(f"Block read error slave={self.slave_id}: {e}")
+            return None
+
     def read_inverter_data(self):
         """Read inverter data via Modbus"""
-        # Use dynamic register reading for non-Solarize protocols
+        # 1순위: READ_BLOCKS/DATA_PARSER 블록 읽기
+        if getattr(self, 'use_block_read', False):
+            self.logger.info(f"[INV slave={self.slave_id}] Block read active")
+            return self._read_inverter_data_blocks()
+
+        # 2순위: DATA_TYPES 기반 동적 읽기 (비-Solarize)
         dyn = getattr(self, 'use_dynamic_read', False)
         if dyn:
             self.logger.info(f"[INV slave={self.slave_id}] Dynamic read active")
@@ -2287,9 +2479,20 @@ class ModbusHandlerSerial:
         # Reuse HAT's dynamic reader -- it calls self._read_reg / self._read_typed_value
         return ModbusHandlerHAT._read_inverter_data_dynamic(self)
 
+    def _read_inverter_data_blocks(self):
+        """READ_BLOCKS/DATA_PARSER 기반 블록 읽기 (Serial 버전 — HAT 로직 위임)."""
+        return ModbusHandlerHAT._read_inverter_data_blocks(self)
+
+    def _format_h01_from_raw(self, physical):
+        """물리값 → H01 형식 변환 (Serial 버전 — HAT 로직 위임)."""
+        return ModbusHandlerHAT._format_h01_from_raw(self, physical)
+
     def read_inverter_data(self):
         """Read inverter data via pymodbus (same logic as HAT version)"""
-        # Use dynamic register reading for non-Solarize protocols
+        # 1순위: Block read
+        if getattr(self, 'use_block_read', False):
+            return self._read_inverter_data_blocks()
+        # 2순위: Dynamic read
         if getattr(self, 'use_dynamic_read', False):
             return self._read_inverter_data_dynamic()
 

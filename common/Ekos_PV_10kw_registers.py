@@ -103,9 +103,14 @@ class RegisterMap:
 
     # --- Standard handler compatibility aliases (H01 Body Type 4 required) ---
     S_PHASE_VOLTAGE                          = 전압종합  # L2 없음 → 대체
+    R_PHASE_VOLTAGE                          = 전압종합  # L1 없음 → 종합 전압 대체
+    R_PHASE_CURRENT                          = 전류종합  # L1 없음 → 종합 전류 대체
+    AC_POWER                                 = 유효전력종합_ACTIVE_POWER  # H01 canonical
+    TOTAL_ENERGY                             = CUMULATIVE_ENERGY         # H01 canonical
 
     # --- MPPT alias (modbus_handler: MPPT{N}_ 형식) ---
     MPPT1_VOLTAGE                            = 인버터_DC전압_PV_VOLTAGE
+    MPPT1_CURRENT                            = 태양전지_전류
     PV_VOLTAGE                               = MPPT1_VOLTAGE
     PV_STRING_COUNT                          = 2
 

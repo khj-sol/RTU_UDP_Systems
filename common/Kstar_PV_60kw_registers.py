@@ -364,6 +364,41 @@ class RegisterMap:
     T_VOLTAGE                                = L3_VOLTAGE
     T_CURRENT                                = L3_CURRENT
 
+    # --- KstarModbusHandler 블록 읽기 호환 상수 ---
+    # Block1: FC04, 0x0BB8~0x0BF3 (PV입력, 계통 전압/전류, 전력, 상태, 에너지)
+    BLOCK1_START   = 0x0BB8   # 3000
+    BLOCK1_COUNT   = 60
+    # Block2: Block1과 동일 범위 재사용 (주파수, R상 전압/전류 접근)
+    BLOCK2_START   = 0x0BB8
+    BLOCK2_COUNT   = 60
+    # Block3: FC04, 0x0C35~0x0C52 (S/T 상, AC 전력)
+    BLOCK3_START   = 0x0C35   # 3125
+    BLOCK3_COUNT   = 30
+
+    # PV MPPT 주소 별칭 (연속 배열: MPPT_num – 1 offset)
+    PV1_VOLTAGE    = 0x0BB8   # = PV1_INPUT_VOLTAGE
+    PV1_CURRENT    = 0x0BBB   # = PV1_INPUT_CURRENT
+
+    # 계통 연계 주소 별칭
+    SYSTEM_STATUS  = 0x0BD6   # = OPERATING_MODE_OF_THEINVERTER
+    GRID_FREQUENCY = 0x0BC9   # = RS_PHASE_GRID_FREQUENCY
+    INV_R_VOLTAGE  = 0x0BC7   # = L1_VOLTAGE
+    INV_R_CURRENT  = 0x0BCC   # = R_PHASE_GRID_TIED_CURRENT
+    INV_S_VOLTAGE  = 0x0C38   # Block3 내 S상 전압 (펌웨어 버전마다 다를 수 있음)
+    INV_S_CURRENT  = 0x0BCD   # = S_PHASE_GRID_TIED_CURRENT (Block1 내)
+    INV_T_VOLTAGE  = 0x0C42   # = L3_VOLTAGE (Block3 내)
+    INV_T_CURRENT  = 0x0C43   # = L3_CURRENT (Block3 내)
+
+    # 알람/에러 코드 별칭
+    DSP_ALARM_CODE_L  = 0x0BD3   # = DSP_ALARM_CODE (Block1 내 offset 27)
+    DSP_ALARM_CODE_H  = 0x0BD4   # = DSP_ERROR_CODE 시작 (Block1 내 offset 28)
+    DSP_ERROR_CODE_L  = 0x0BD4   # = DSP_ERROR_CODE (Block1 내 offset 28)
+
+    # H01 canonical aliases
+    TOTAL_ENERGY      = 0x0BDE   # = CUMULATIVE_ENERGY (U32, 0.1kWh)
+    INVERTER_MODE     = 0x0BD6   # = SYSTEM_STATUS
+    AC_POWER          = 0x0C4E   # Block3 내 AC 전력
+
     # --- Standard handler compatibility aliases (H01 Body Type 4 required) ---
     R_PHASE_VOLTAGE                          = L1_VOLTAGE
     T_PHASE_VOLTAGE                          = L3_VOLTAGE
@@ -615,16 +650,123 @@ class ErrorCode8:
 
 
 
+class KstarSystemStatus:
+    """Kstar 인버터 동작 모드 코드 (OPERATING_MODE_OF_THEINVERTER 레지스터)."""
+    STARTING  = 0x00
+    STANDBY   = 0x01
+    RUNNING   = 0x02
+    FAULT     = 0x03
+    SHUTDOWN  = 0x04
+
+    @classmethod
+    def to_solarize(cls, raw):
+        """Kstar 상태 코드 → Solarize InverterMode 변환."""
+        # Solarize InverterMode: 0=INITIAL,1=STANDBY,3=ON_GRID,5=FAULT,9=SHUTDOWN
+        mapping = {
+            cls.RUNNING:  0x03,  # ON_GRID
+            cls.STANDBY:  0x01,  # STANDBY
+            cls.STARTING: 0x00,  # INITIAL
+            cls.FAULT:    0x05,  # FAULT
+            cls.SHUTDOWN: 0x09,  # SHUTDOWN
+        }
+        return mapping.get(raw, 0x01)  # 기본값 STANDBY
+
+
 class KstarStatusConverter:
-    """Kstar INVERTER_MODE register already contains InverterMode values."""
+    """Kstar INVERTER_MODE register — KstarSystemStatus를 통해 Solarize 모드로 변환."""
 
     @classmethod
     def to_inverter_mode(cls, raw):
-        return raw
+        return KstarSystemStatus.to_solarize(raw)
+
+    @classmethod
+    def to_solarize(cls, raw):
+        return KstarSystemStatus.to_solarize(raw)
 
 
 # Dynamic-loader alias required by modbus_handler.load_register_module
 StatusConverter = KstarStatusConverter
+
+
+# ─── KstarModbusHandler 헬퍼 함수 ────────────────────────────────────────────
+
+def calc_pv_total_power(b1) -> int:
+    """Block1 데이터에서 PV 총 전력(W) 계산.
+
+    Block1 기준:
+      offset 0-2: PV1~PV3 전압 (0.1V 단위)
+      offset 3-5: PV1~PV3 전류 (0.01A 단위)
+    """
+    if not b1 or len(b1) < 6:
+        return 0
+    total_w = 0
+    for i in range(3):
+        v = b1[i] * 0.1      # 0.1V → V
+        c = b1[i + 3] * 0.01 # 0.01A → A
+        total_w += int(v * c)
+    return total_w
+
+
+def calc_ac_total_power(b3) -> int:
+    """Block3 데이터에서 AC 총 전력(W) 계산.
+
+    AC_POWER = 0x0C4E, BLOCK3_START = 0x0C35, offset = 25
+    """
+    offset = RegisterMap.AC_POWER - RegisterMap.BLOCK3_START
+    if b3 and len(b3) > offset:
+        raw = b3[offset]
+        return int(raw)  # W
+    return 0
+
+
+def get_mppt_data(b1, mppt_num: int) -> dict:
+    """Block1 데이터에서 특정 MPPT 채널 데이터 추출 (mppt_num = 1~3).
+
+    Returns:
+        dict with 'voltage' (raw 0.1V), 'current' (raw 0.01A), 'power' (W)
+    """
+    if not b1 or mppt_num < 1 or mppt_num > 3:
+        return {'voltage': 0, 'current': 0, 'power': 0}
+    v_offset = mppt_num - 1        # PV1_VOLTAGE + (mppt_num - 1)
+    c_offset = mppt_num - 1 + 3   # PV1_CURRENT + (mppt_num - 1)
+    v = b1[v_offset] if v_offset < len(b1) else 0
+    c = b1[c_offset] if c_offset < len(b1) else 0
+    return {
+        'voltage': v,
+        'current': c,
+        'power': int(v * 0.1 * c * 0.01),
+    }
+
+
+def get_string_currents(b1, strings_per_mppt: int = 3) -> list:
+    """Block1 데이터에서 스트링 전류 목록 추출.
+
+    PV1_STRING_CURRENT_1 = 0x0BF8, BLOCK1_START = 0x0BB8, offset = 64
+    Block1_COUNT = 60이라 범위 밖이므로 MPPT 전류로 균등 분배.
+    """
+    result = []
+    for mppt_idx in range(3):
+        c_offset = mppt_idx + 3  # PV1~PV3 CURRENT offset
+        mppt_current = b1[c_offset] if b1 and c_offset < len(b1) else 0
+        per_string = mppt_current // max(1, strings_per_mppt)
+        for _ in range(strings_per_mppt):
+            result.append({'string_num': len(result) + 1, 'raw_current': per_string})
+    return result
+
+
+def get_cumulative_energy_wh(b1) -> int:
+    """Block1 데이터에서 누적 발전량(Wh) 추출.
+
+    CUMULATIVE_ENERGY = 0x0BDE (U32), BLOCK1_START = 0x0BB8
+    Low word offset = 38, High word offset = 39
+    Scale: 0.1 kWh → multiply by 100 to get Wh
+    """
+    lo_offset = RegisterMap.CUMULATIVE_ENERGY - RegisterMap.BLOCK1_START      # 38
+    hi_offset = lo_offset + 1
+    if b1 and len(b1) > hi_offset:
+        kwh_x10 = (b1[hi_offset] << 16) | b1[lo_offset]
+        return int(kwh_x10 * 100)  # 0.1kWh → Wh
+    return 0
 
 
 

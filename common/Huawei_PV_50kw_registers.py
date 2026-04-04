@@ -927,13 +927,22 @@ class RegisterMap:
     PV_STRING_COUNT                          = 4
 
     # --- RTU modbus_handler / simulator 필수 alias ---
-    INNER_TEMP                               = TEMPERATURE
-    INVERTER_MODE                            = DEVICE_STATUS
+    INNER_TEMP                               = INTERNALTEMPERATURE   # 0x7D57
+    INVERTER_MODE                            = DEVICE_STATUS         # 0x7D59
     DER_POWER_FACTOR_SET                     = 0x07D0
     DER_ACTION_MODE                          = 0x07D1
     DER_REACTIVE_POWER_PCT                   = 0x07D2
     DER_ACTIVE_POWER_PCT                     = 0x07D3
     INVERTER_ON_OFF                          = 0x0834
+
+    # --- modbus_handler HuaweiModbusHandler 필수 alias ---
+    PV_STRING_BASE                           = PV1VOLTAGE            # 0x7D10
+    INPUT_POWER                              = DCPOWER               # 0x7D40  S32, 1W
+    PHASE_A_VOLTAGE                          = POWERGRIDPHASE_AVOLTAGE  # 0x7D45  U16, 1V
+    PHASE_A_CURRENT                          = POWERGRIDPHASE_ACURRENT  # 0x7D48  S32, 0.001A
+    ACTIVE_POWER                             = ACTIVEPOWER           # 0x7D50  S32, 1W
+    ACCUMULATED_ENERGY                       = ACCUMULATEDPOWERGENERATION  # 0x7D6A  U32, kWh/100
+    GRID_FREQUENCY                           = 0x7D55               # U16, 0.01Hz
 
 
 
@@ -1935,6 +1944,56 @@ def registers_to_s32(low, high):
     if value >= 0x80000000:
         value -= 0x100000000
     return value
+
+
+def s16(val):
+    """U16 → S16 sign conversion"""
+    val = int(val) & 0xFFFF
+    return val - 0x10000 if val >= 0x8000 else val
+
+
+def get_pv_string_data(regs):
+    """PV 스트링 레지스터 블록 → string 데이터 리스트 변환.
+
+    regs: PV1VOLTAGE 시작 레지스터 목록 (V, I 쌍 반복)
+    각 항목: {'voltage': raw 0.1V 단위 S16, 'current': raw 0.01A 단위 S16}
+    """
+    result = []
+    for i in range(0, len(regs) - 1, 2):
+        v = s16(regs[i])
+        c = s16(regs[i + 1])
+        result.append({'voltage': max(0, v), 'current': max(0, c)})
+    return result
+
+
+def get_mppt_from_strings(pv_data):
+    """인접 스트링 2개를 MPPT 채널 1개로 그룹화.
+
+    반환: [{'voltage': 대표전압(0.1V), 'current': 합산전류(0.01A)}, ...]
+    """
+    mppt_list = []
+    for i in range(0, len(pv_data), 2):
+        pair = pv_data[i: i + 2]
+        voltages = [p['voltage'] for p in pair if p['voltage'] > 0]
+        currents = [p['current'] for p in pair]
+        mppt_v = int(sum(voltages) / len(voltages)) if voltages else 0
+        mppt_c = sum(currents)
+        mppt_list.append({'voltage': mppt_v, 'current': mppt_c})
+    return mppt_list
+
+
+def get_string_currents(pv_data):
+    """스트링별 전류 리스트 반환 (raw 0.01A 단위)."""
+    return [p['current'] for p in pv_data]
+
+
+def get_cumulative_energy_wh(low, high):
+    """누적발전량 U32 (scale kWh/100) → Wh 변환.
+
+    ACCUMULATEDPOWERGENERATION: raw / 100 = kWh  →  raw * 10 = Wh
+    """
+    raw = registers_to_u32(low, high)
+    return raw * 10
 
 
 def get_string_registers(string_num):
