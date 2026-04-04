@@ -709,6 +709,169 @@ STRING_CURRENT_MONITOR = {has_string}
 '''
 
 
+# ─── RTU 통신 블록 생성 ──────────────────────────────────────────────────────
+
+# H01 canonical field name → standard alias mapping
+_H01_FIELD_ALIASES: dict = {
+    'R_PHASE_VOLTAGE': 'R_PHASE_VOLTAGE',
+    'S_PHASE_VOLTAGE': 'S_PHASE_VOLTAGE',
+    'T_PHASE_VOLTAGE': 'T_PHASE_VOLTAGE',
+    'R_PHASE_CURRENT': 'R_PHASE_CURRENT',
+    'S_PHASE_CURRENT': 'S_PHASE_CURRENT',
+    'T_PHASE_CURRENT': 'T_PHASE_CURRENT',
+    'AC_POWER': 'AC_POWER',
+    'PV_POWER': 'PV_POWER',
+    'FREQUENCY': 'FREQUENCY',
+    'POWER_FACTOR': 'POWER_FACTOR',
+    'TOTAL_ENERGY': 'TOTAL_ENERGY',
+    'CUMULATIVE_ENERGY': 'TOTAL_ENERGY',
+    'INVERTER_MODE': 'INVERTER_MODE',
+    'WORK_STATE': 'INVERTER_MODE',
+    'RUNNING_STATUS': 'INVERTER_MODE',
+    'DEVICE_STATUS': 'INVERTER_MODE',
+    'ERROR_CODE1': 'ERROR_CODE1',
+    'ERROR_CODE2': 'ERROR_CODE2',
+    **{f'MPPT{i}_VOLTAGE': f'MPPT{i}_VOLTAGE' for i in range(1, 9)},
+    **{f'MPPT{i}_CURRENT': f'MPPT{i}_CURRENT' for i in range(1, 9)},
+    **{f'PV{i}_VOLTAGE': f'MPPT{i}_VOLTAGE' for i in range(1, 9)},
+    **{f'PV{i}_CURRENT': f'MPPT{i}_CURRENT' for i in range(1, 9)},
+    **{f'STRING{i}_CURRENT': f'STRING{i}_CURRENT' for i in range(1, 17)},
+}
+
+
+def _compute_blocks_and_parser(monitoring_regs: List[RegisterRow], fc_code: int = 3):
+    """모니터링 레지스터를 연속 블록으로 그룹화하여 READ_BLOCKS, DATA_PARSER 생성.
+
+    Args:
+        monitoring_regs: MONITORING 카테고리 RegisterRow 목록
+        fc_code: Modbus Function Code (3=Holding, 4=Input)
+
+    Returns:
+        (read_blocks, data_parser)
+        read_blocks: [(start_addr, count), ...]
+        data_parser: {canonical_field: (block_idx, offset, dtype_str, scale_float)}
+    """
+    MAX_GAP = 8  # 이 갭 이하면 같은 블록으로 묶음
+
+    # 유효 엔트리 추출 (비정수/TEXT/ASCII/STRINGING 제외)
+    entries = []  # (addr, canonical_name, dtype, scale_float, reg_size)
+    seen_canonical = {}  # canonical_name → already seen?
+
+    for reg in monitoring_regs:
+        try:
+            addr = parse_address(reg.address)
+        except Exception:
+            addr = None
+        if addr is None or addr <= 0:
+            continue
+
+        name = to_upper_snake(reg.definition)
+        if not name:
+            continue
+
+        dtype = (reg.data_type or 'U16').upper()
+        if dtype in ('TEXT', 'ASCII', 'STRINGING', 'STRING'):
+            continue
+
+        # h01_field 우선 → H01_ALIASES 테이블 → 원래 이름
+        h01 = getattr(reg, 'h01_field', '') or ''
+        if h01:
+            canonical = h01
+        else:
+            canonical = _H01_FIELD_ALIASES.get(name, name)
+
+        if canonical in seen_canonical:
+            continue  # 중복 canonical 스킵 (첫 번째 우선)
+        seen_canonical[canonical] = True
+
+        # scale 파싱: reg.scale 문자열에서 첫 번째 숫자 추출
+        scale_val = 1.0
+        for token in str(reg.scale or '1').split():
+            try:
+                scale_val = float(token)
+                break
+            except ValueError:
+                continue
+
+        reg_size = 2 if dtype in ('U32', 'S32', 'FLOAT32') else 1
+        entries.append((addr, canonical, dtype, scale_val, reg_size))
+
+    if not entries:
+        return [], {}
+
+    entries.sort(key=lambda x: x[0])
+
+    # 연속 블록 그룹화
+    blocks = []  # [(blk_start, blk_end, [(addr, canonical, dtype, scale, reg_size)])]
+    cur_start = cur_end = None
+    cur_entries = []
+
+    for addr, canonical, dtype, scale_val, reg_size in entries:
+        if cur_start is None:
+            cur_start, cur_end = addr, addr + reg_size - 1
+            cur_entries = [(addr, canonical, dtype, scale_val, reg_size)]
+        elif addr <= cur_end + MAX_GAP + 1:
+            cur_entries.append((addr, canonical, dtype, scale_val, reg_size))
+            cur_end = max(cur_end, addr + reg_size - 1)
+        else:
+            blocks.append((cur_start, cur_end, cur_entries))
+            cur_start, cur_end = addr, addr + reg_size - 1
+            cur_entries = [(addr, canonical, dtype, scale_val, reg_size)]
+
+    if cur_start is not None:
+        blocks.append((cur_start, cur_end, cur_entries))
+
+    # READ_BLOCKS / DATA_PARSER 구성
+    read_blocks = []
+    data_parser = {}
+
+    for blk_idx, (blk_start, blk_end, blk_entries) in enumerate(blocks):
+        blk_count = blk_end - blk_start + 1
+        read_blocks.append((blk_start, blk_count))
+
+        for addr, canonical, dtype, scale_val, reg_size in blk_entries:
+            # U32/S32의 _HIGH 워드 엔트리 스킵 (이미 LOW에서 처리)
+            if canonical.endswith('_HIGH') and dtype in ('U32', 'S32'):
+                continue
+            offset = addr - blk_start
+            data_parser[canonical] = (blk_idx, offset, dtype, scale_val)
+
+    return read_blocks, data_parser
+
+
+def _gen_rtu_comm(monitoring_regs: List[RegisterRow], fc_code: int = 3) -> str:
+    """FC_CODE, READ_BLOCKS, DATA_PARSER 코드 섹션 생성."""
+    read_blocks, data_parser = _compute_blocks_and_parser(monitoring_regs, fc_code)
+
+    fc_comment = 'Holding Registers (FC03)' if fc_code == 3 else 'Input Registers (FC04)'
+    lines = [
+        '',
+        '# ─────────────────────────────────────────────────────────────────────────',
+        '# RTU 블록 통신 설정 — modbus_handler._read_inverter_data_blocks() 사용',
+        '# ─────────────────────────────────────────────────────────────────────────',
+        f'FC_CODE = {fc_code}  # {fc_comment}',
+        '',
+        '# READ_BLOCKS: [(start_addr, count), ...]',
+        '# modbus_handler가 한 번에 읽는 연속 레지스터 블록 목록',
+        'READ_BLOCKS = [',
+    ]
+    for start_addr, count in read_blocks:
+        end_addr = start_addr + count - 1
+        lines.append(f'    (0x{start_addr:04X}, {count:3d}),  # 0x{start_addr:04X}–0x{end_addr:04X}')
+    lines.append(']')
+    lines.append('')
+    lines.append('# DATA_PARSER: {canonical_field: (block_idx, offset, dtype, scale)}')
+    lines.append('# block_idx=READ_BLOCKS 인덱스, offset=블록 내 레지스터 오프셋')
+    lines.append('# dtype=U16/S16/U32/S32/FLOAT32, scale=물리값(SI) 변환 계수')
+    lines.append('DATA_PARSER = {')
+    for name, (blk_idx, offset, dtype, scale) in data_parser.items():
+        lines.append(f"    {name!r}: ({blk_idx}, {offset}, {dtype!r}, {scale}),")
+    lines.append('}')
+    lines.append('')
+
+    return '\n'.join(lines)
+
+
 # ─── 코드 검증 ───────────────────────────────────────────────────────────────
 
 def validate_code(code: str, mppt: int, total_strings: int,
@@ -735,6 +898,11 @@ def validate_code(code: str, mppt: int, total_strings: int,
     checks['get_mppt_registers'] = 'def get_mppt_registers' in code
     checks['DATA_TYPES'] = 'DATA_TYPES' in code
     checks['StatusConverter'] = 'StatusConverter' in code
+
+    # RTU 블록 통신 호환성 검증
+    checks['RTU_FC_CODE'] = 'FC_CODE' in code
+    checks['RTU_READ_BLOCKS'] = 'READ_BLOCKS' in code
+    checks['RTU_DATA_PARSER'] = 'DATA_PARSER' in code
 
     # MPPT 채널 수 — Method 1: 생성된 MPPT_CHANNELS 상수 우선
     if f'MPPT_CHANNELS = {mppt}' in code:
@@ -932,6 +1100,13 @@ def run_stage3(
 
     # ── 코드 생성 ──
     log('Python 코드 생성...')
+
+    # FC 코드 감지 (MONITORING 레지스터 fc 필드 기반)
+    monitoring_regs = regs_by_cat.get('MONITORING', [])
+    _fc_vals = [str(getattr(r, 'fc', '')).strip() for r in monitoring_regs
+                if str(getattr(r, 'fc', '')).strip()]
+    fc_code = 4 if _fc_vals and all(v in ('4', '04', 'FC04') for v in _fc_vals) else 3
+
     code_parts = [
         _gen_header(manufacturer, protocol_name, protocol_version,
                     mppt_count, total_strings, strings_per_mppt,
@@ -949,6 +1124,7 @@ def run_stage3(
         _gen_helpers(mppt_count, total_strings, strings_per_mppt, iv_data_points),
         _gen_data_types(all_regs),
         _gen_string_current_monitor(all_regs),
+        _gen_rtu_comm(monitoring_regs, fc_code),
     ]
     code = '\n'.join(p for p in code_parts if p)
 
