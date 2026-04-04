@@ -3,11 +3,23 @@ Async SQLite Database Layer (Production)
 Adds: data retention cleanup, WAL checkpoint, body_type in events, limit bounds.
 """
 
+import re
 import logging
 import asyncio
 import time
 import aiosqlite
 from datetime import datetime, timezone, timedelta
+
+# ALTER TABLE SQL 화이트리스트
+_ALLOWED_COL_TYPES = {'TEXT', 'INTEGER', 'REAL', 'BLOB', 'NUMERIC'}
+_ALLOWED_COL_PATTERN = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*$')
+
+def _validate_sql_col(col: str, ctype: str):
+    """ALTER TABLE에 사용할 컬럼명과 타입을 화이트리스트로 검증."""
+    if not _ALLOWED_COL_PATTERN.match(col):
+        raise ValueError(f"Invalid column name for ALTER TABLE: {col!r}")
+    if ctype.upper() not in _ALLOWED_COL_TYPES:
+        raise ValueError(f"Invalid column type for ALTER TABLE: {ctype!r}")
 
 KST = timezone(timedelta(hours=9))
 
@@ -73,7 +85,10 @@ class DB:
                          ('do_status','INTEGER'), ('di_status','INTEGER'),
                          ('inverter_power','REAL'), ('load_power','REAL')]:
             try:
+                _validate_sql_col(col, typ)
                 await self.db.execute(f"ALTER TABLE relay_data ADD COLUMN {col} {typ} DEFAULT 0")
+            except ValueError as e:
+                logger.error(f"ALTER TABLE validation failed: {e}")
             except Exception:
                 pass
 
@@ -101,7 +116,10 @@ class DB:
         for table in ('inverter_data', 'relay_data'):
             for col, ctype, default in [('backup', 'INTEGER', '0'), ('original_timestamp', 'TEXT', 'NULL')]:
                 try:
+                    _validate_sql_col(col, ctype)
                     await self.db.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ctype} DEFAULT {default}")
+                except ValueError as e:
+                    logger.error(f"ALTER TABLE validation failed: {e}")
                 except Exception:
                     pass
         try:
@@ -142,7 +160,10 @@ class DB:
                          ('firmware','TEXT'), ('rtu_type','TEXT'),
                          ('last_info_update','TEXT'), ('note','TEXT')]:
             try:
+                _validate_sql_col(col, typ)
                 await self.db.execute(f"ALTER TABLE rtu_registry ADD COLUMN {col} {typ}")
+            except ValueError as e:
+                logger.error(f"ALTER TABLE validation failed: {e}")
             except Exception:
                 pass
 
@@ -520,29 +541,36 @@ class DB:
             where = "WHERE timestamp >= ? AND timestamp < ?"
             params = [ts_from, ts_to]
 
-        async with self.db.execute(f"SELECT COUNT(*) FROM inverter_data {where}", params) as cur:
-            count = (await cur.fetchone())[0]
-        if count == 0:
-            return 0
-
-        bucket = f"strftime('%Y-%m-%d %H:', timestamp) || printf('%02d', (CAST(strftime('%M', timestamp) AS INTEGER) / {interval_min}) * {interval_min}) || ':00'"
-        agg_q = f"""
-            SELECT {bucket} as ts_bucket, rtu_id, device_number, model,
-                   AVG(pv_voltage), AVG(pv_current), AVG(pv_power),
-                   AVG(r_voltage), AVG(s_voltage), AVG(t_voltage),
-                   AVG(r_current), AVG(s_current), AVG(t_current),
-                   AVG(ac_power), AVG(power_factor), AVG(frequency),
-                   MAX(cumulative_energy), MAX(status), 0, NULL
-            FROM inverter_data {where}
-            GROUP BY ts_bucket, rtu_id, device_number
-        """
-        async with self.db.execute(agg_q, params) as cur:
-            rows = await cur.fetchall()
-        if not rows:
-            return 0
-
-        # Atomic: BEGIN → DELETE → INSERT all → COMMIT
+        # BEGIN IMMEDIATE 먼저 → SELECT 집계 → DELETE → INSERT → COMMIT
         await self.db.execute("BEGIN IMMEDIATE")
+        try:
+            async with self.db.execute(f"SELECT COUNT(*) FROM inverter_data {where}", params) as cur:
+                count = (await cur.fetchone())[0]
+            if count == 0:
+                await self.db.execute("ROLLBACK")
+                return 0
+
+            bucket = f"strftime('%Y-%m-%d %H:', timestamp) || printf('%02d', (CAST(strftime('%M', timestamp) AS INTEGER) / {interval_min}) * {interval_min}) || ':00'"
+            agg_q = f"""
+                SELECT {bucket} as ts_bucket, rtu_id, device_number, model,
+                       AVG(pv_voltage), AVG(pv_current), AVG(pv_power),
+                       AVG(r_voltage), AVG(s_voltage), AVG(t_voltage),
+                       AVG(r_current), AVG(s_current), AVG(t_current),
+                       AVG(ac_power), AVG(power_factor), AVG(frequency),
+                       MAX(cumulative_energy), MAX(status), 0, NULL
+                FROM inverter_data {where}
+                GROUP BY ts_bucket, rtu_id, device_number
+            """
+            async with self.db.execute(agg_q, params) as cur:
+                rows = await cur.fetchall()
+            if not rows:
+                await self.db.execute("ROLLBACK")
+                return 0
+        except Exception as e:
+            await self.db.execute("ROLLBACK")
+            raise
+
+        # Atomic: DELETE → INSERT all → COMMIT (already in IMMEDIATE)
         try:
             await self.db.execute(f"DELETE FROM inverter_data {where}", params)
             await self.db.executemany("""
@@ -573,26 +601,34 @@ class DB:
             where = "WHERE timestamp >= ? AND timestamp < ?"
             params = [ts_from, ts_to]
 
-        async with self.db.execute(f"SELECT COUNT(*) FROM relay_data {where}", params) as cur:
-            count = (await cur.fetchone())[0]
-        if count == 0:
-            return 0
-
-        bucket = f"strftime('%Y-%m-%d %H:', timestamp) || printf('%02d', (CAST(strftime('%M', timestamp) AS INTEGER) / {interval_min}) * {interval_min}) || ':00'"
-        agg_q = f"""
-            SELECT {bucket} as ts_bucket, rtu_id, device_number,
-                   AVG(r_voltage), AVG(s_voltage), AVG(t_voltage),
-                   AVG(r_current), AVG(s_current), AVG(t_current),
-                   AVG(total_power), AVG(power_factor), AVG(frequency), 0, NULL
-            FROM relay_data {where}
-            GROUP BY ts_bucket, rtu_id, device_number
-        """
-        async with self.db.execute(agg_q, params) as cur:
-            rows = await cur.fetchall()
-        if not rows:
-            return 0
-
+        # BEGIN IMMEDIATE 먼저 → SELECT 집계 → DELETE → INSERT → COMMIT
         await self.db.execute("BEGIN IMMEDIATE")
+        try:
+            async with self.db.execute(f"SELECT COUNT(*) FROM relay_data {where}", params) as cur:
+                count = (await cur.fetchone())[0]
+            if count == 0:
+                await self.db.execute("ROLLBACK")
+                return 0
+
+            bucket = f"strftime('%Y-%m-%d %H:', timestamp) || printf('%02d', (CAST(strftime('%M', timestamp) AS INTEGER) / {interval_min}) * {interval_min}) || ':00'"
+            agg_q = f"""
+                SELECT {bucket} as ts_bucket, rtu_id, device_number,
+                       AVG(r_voltage), AVG(s_voltage), AVG(t_voltage),
+                       AVG(r_current), AVG(s_current), AVG(t_current),
+                       AVG(total_power), AVG(power_factor), AVG(frequency), 0, NULL
+                FROM relay_data {where}
+                GROUP BY ts_bucket, rtu_id, device_number
+            """
+            async with self.db.execute(agg_q, params) as cur:
+                rows = await cur.fetchall()
+            if not rows:
+                await self.db.execute("ROLLBACK")
+                return 0
+        except Exception as e:
+            await self.db.execute("ROLLBACK")
+            raise
+
+        # DELETE → INSERT → COMMIT (already in IMMEDIATE)
         try:
             await self.db.execute(f"DELETE FROM relay_data {where}", params)
             for r in rows:
@@ -623,29 +659,37 @@ class DB:
             where = "WHERE timestamp >= ? AND timestamp < ?"
             params = [ts_from, ts_to]
 
-        async with self.db.execute(f"SELECT COUNT(*) FROM weather_data {where}", params) as cur:
-            count = (await cur.fetchone())[0]
-        if count == 0:
-            return 0
-
-        bucket = f"strftime('%Y-%m-%d %H:', timestamp) || printf('%02d', (CAST(strftime('%M', timestamp) AS INTEGER) / {interval_min}) * {interval_min}) || ':00'"
-        agg_q = f"""
-            SELECT {bucket} as ts_bucket, rtu_id, device_number,
-                   AVG(air_temp), AVG(humidity), AVG(air_pressure),
-                   AVG(wind_speed), AVG(wind_direction),
-                   AVG(module_temp_1), AVG(module_temp_2),
-                   AVG(module_temp_3), AVG(module_temp_4),
-                   AVG(horizontal_radiation), AVG(horizontal_accum),
-                   AVG(inclined_radiation), AVG(inclined_accum), 0, NULL
-            FROM weather_data {where}
-            GROUP BY ts_bucket, rtu_id, device_number
-        """
-        async with self.db.execute(agg_q, params) as cur:
-            rows = await cur.fetchall()
-        if not rows:
-            return 0
-
+        # BEGIN IMMEDIATE 먼저 → SELECT 집계 → DELETE → INSERT → COMMIT
         await self.db.execute("BEGIN IMMEDIATE")
+        try:
+            async with self.db.execute(f"SELECT COUNT(*) FROM weather_data {where}", params) as cur:
+                count = (await cur.fetchone())[0]
+            if count == 0:
+                await self.db.execute("ROLLBACK")
+                return 0
+
+            bucket = f"strftime('%Y-%m-%d %H:', timestamp) || printf('%02d', (CAST(strftime('%M', timestamp) AS INTEGER) / {interval_min}) * {interval_min}) || ':00'"
+            agg_q = f"""
+                SELECT {bucket} as ts_bucket, rtu_id, device_number,
+                       AVG(air_temp), AVG(humidity), AVG(air_pressure),
+                       AVG(wind_speed), AVG(wind_direction),
+                       AVG(module_temp_1), AVG(module_temp_2),
+                       AVG(module_temp_3), AVG(module_temp_4),
+                       AVG(horizontal_radiation), AVG(horizontal_accum),
+                       AVG(inclined_radiation), AVG(inclined_accum), 0, NULL
+                FROM weather_data {where}
+                GROUP BY ts_bucket, rtu_id, device_number
+            """
+            async with self.db.execute(agg_q, params) as cur:
+                rows = await cur.fetchall()
+            if not rows:
+                await self.db.execute("ROLLBACK")
+                return 0
+        except Exception as e:
+            await self.db.execute("ROLLBACK")
+            raise
+
+        # DELETE → INSERT → COMMIT (already in IMMEDIATE)
         try:
             await self.db.execute(f"DELETE FROM weather_data {where}", params)
             for r in rows:

@@ -203,6 +203,7 @@ class ModbusLoggedHoldingBlock(ModbusSequentialDataBlock):
         self.logger = logger
         self.log_queue = deque(maxlen=100)
         self._internal_update = False
+        self._update_lock = threading.Lock()
         self.simulator = simulator
         self.name = name  # "INV" or "RLY" or "WTH"
     
@@ -251,12 +252,13 @@ class ModbusLoggedHoldingBlock(ModbusSequentialDataBlock):
         
         if is_control_write and self.simulator:
             # Prevent recursion: set flag before calling update methods
-            self._internal_update = True
-            try:
-                self.simulator._check_control_changes()
-                self.simulator._update_registers()
-            finally:
-                self._internal_update = False
+            with self._update_lock:
+                self._internal_update = True
+                try:
+                    self.simulator._check_control_changes()
+                    self.simulator._update_registers()
+                finally:
+                    self._internal_update = False
         
         return result
 
@@ -346,7 +348,8 @@ class InverterSimulator:
         
         # Current values for display
         self._current = {}
-    
+        self._current_lock = threading.Lock()
+
     def _create_datastore(self):
         """Create Modbus datastore"""
         hr_block = ModbusLoggedHoldingBlock(0, [0] * 0x8500, self.logger, simulator=self, name="INV")
@@ -490,11 +493,13 @@ class InverterSimulator:
         phase_power = ac_power // 3
         
         apparent_power = math.sqrt(ac_power_w**2 + reactive_power_w**2) if ac_power_w > 0 else 0
-        phase_current = int((apparent_power / 3) / 380 * 100) if apparent_power > 0 else 0
+        # 3상 전류 계산: I = S / (sqrt(3) * V_line). 단위: 0.01A
+        # apparent_power/3 → 1상 피상전력(VA), /380(V) → 전류(A), *100 → 0.01A 단위
+        phase_current = int((apparent_power / math.sqrt(3)) / 380 * 100) if apparent_power > 0 else 0
         
         if ac_power > 0:
-            self.total_energy += (ac_power / 10) / 3600000
-            self.today_energy += (ac_power / 10) / 3600
+            self.total_energy += (ac_power / 10) / 3600000  # Wh → kWh (누적, kWh)
+            self.today_energy += (ac_power / 10) / 3600     # Wh/s → Wh (당일, Wh 단위. 레지스터 기록 시 /10 → 0.1kWh)
         
         # Phase data (L1, L2, L3)
         for base in [RegisterMap.L1_VOLTAGE, RegisterMap.L2_VOLTAGE, RegisterMap.L3_VOLTAGE]:
@@ -1120,6 +1125,7 @@ class KstarSimulator:
             ir=ir_block,
         )
         self.store = store
+        self.ir_block = ir_block  # FC04 Input Register 블록 직접 참조
         self._init_device_info()
         self._init_control_registers()
         return store
@@ -2233,16 +2239,23 @@ class EquipmentSimulator:
     def _update_loop(self):
         """Background thread for updating all devices"""
         error_count = 0
+        last_error_time = 0.0
+        ERROR_RESET_INTERVAL = 60  # 60초 경과 시 에러 카운터 리셋
         while self.running:
             try:
                 for d in self.devices:
                     sim = d['sim']
                     sim._update_registers()
                     if hasattr(sim, '_check_control_changes'):
-                        sim._check_control_changes()
+                        sim._check_control_changes()  # _update_registers 이후 실행
                 error_count = 0
             except Exception as e:
+                now = time.time()
+                if error_count > 0 and (now - last_error_time) > ERROR_RESET_INTERVAL:
+                    self.logger.info(f"Error counter reset after {ERROR_RESET_INTERVAL}s of inactivity")
+                    error_count = 0
                 error_count += 1
+                last_error_time = now
                 self.logger.exception(f"Update error ({error_count}): {e}")
                 if error_count >= 10:
                     self.logger.critical("Too many consecutive errors, halting simulator")
@@ -2274,7 +2287,12 @@ class EquipmentSimulator:
                 for d in self.devices:
                     sim = d['sim']
                     try:
-                        cur = dict(sim._current)  # Snapshot to avoid race
+                        lock = getattr(sim, '_current_lock', None)
+                        if lock:
+                            with lock:
+                                cur = dict(sim._current)  # Thread-safe snapshot
+                        else:
+                            cur = dict(sim._current)  # Snapshot to avoid race
                     except RuntimeError:
                         continue  # dict changed size during iteration
                     sid = d['slave_id']

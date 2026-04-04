@@ -77,10 +77,12 @@ class DuplicateDetector:
         key = (rtu_id, seq)
 
         with self._lock:
-            # Lazy cleanup
+            # Lazy cleanup: 점진적 삭제로 메모리 재할당 최소화
             if now - self._last_cleanup > self.CLEANUP_INTERVAL:
                 cutoff = now - self.TTL
-                self._seen = {k: t for k, t in self._seen.items() if t > cutoff}
+                expired_keys = [k for k, t in self._seen.items() if t <= cutoff]
+                for k in expired_keys:
+                    del self._seen[k]
                 self._last_cleanup = now
 
             if key in self._seen:
@@ -203,10 +205,12 @@ class UDPEngine:
         self._keepalive_seqs: set = set()  # track keepalive sequences to distinguish from manual
 
         self.seq = 1000
+        self._seq_lock = threading.Lock()
 
     def _next_seq(self) -> int:
-        self.seq = (self.seq % 65535) + 1
-        return self.seq
+        with self._seq_lock:
+            self.seq = (self.seq % 65535) + 1
+            return self.seq
 
     def _safe_sendto(self, data: bytes, addr: tuple) -> bool:
         """Thread-safe sendto with error handling. Returns True on success."""
@@ -429,6 +433,7 @@ class UDPEngine:
             # Subsequent records: each is HEADER_SIZE + body_size
             remaining = body[expected_body_size:]
             while len(remaining) >= HEADER_SIZE + 44:  # at least header + min body
+                prev_len = len(remaining)
                 sub_header = struct.unpack(HEADER_FORMAT, remaining[:HEADER_SIZE])
                 sub_body_type = sub_header[8]
                 sub_body = remaining[HEADER_SIZE:]
@@ -444,6 +449,9 @@ class UDPEngine:
                     'seq': sub_header[1],
                 })
                 remaining = remaining[HEADER_SIZE + sub_expected:]
+                if len(remaining) >= prev_len:  # 진전이 없으면 무한루프 방지
+                    logger.warning(f"Combined packet parse: no progress, breaking loop (remaining={len(remaining)})")
+                    break
                 logger.info(f"Combined packet from RTU:{rtu_id}: split backup record "
                            f"dev={sub_header[4]}/{sub_header[5]} BK={sub_header[7]} "
                            f"ts={sub_header[3]}")

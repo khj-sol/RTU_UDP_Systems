@@ -182,14 +182,14 @@ class SyncDB:
                    VALUES (?, ?, ?, ?, ?, 'online')
                    ON CONFLICT(rtu_id) DO UPDATE SET ip=?, port=?, last_seen=?, status='online'""",
                 (rtu_id, ip, port, ts, ts, ip, port, ts))
-            self.conn.commit()
+            self._maybe_commit()  # 배치 커밋에 포함
 
     def set_rtu_offline(self, rtu_id: int):
         with self._lock:
             self.conn.execute(
                 "UPDATE rtu_registry SET status='offline', last_seen=? WHERE rtu_id=?",
                 (now_kst(), rtu_id))
-            self.conn.commit()
+            self._maybe_commit()  # 배치 커밋에 포함
 
     def save_inverter(self, rtu_id: int, p: dict):
         with self._lock:
@@ -250,13 +250,12 @@ class SyncDB:
                 total += deleted
                 if deleted < 5000:
                     break
-        # Reclaim disk space after large deletes
+        # Reclaim disk space after large deletes (락 없이 실행 — WAL 모드에서 읽기 가능)
         if total > 1000:
-            with self._lock:
-                try:
-                    self.conn.execute("VACUUM")
-                except Exception as e:
-                    logger.warning(f"VACUUM failed: {e}")
+            try:
+                self.conn.execute("VACUUM")
+            except Exception as e:
+                logger.warning(f"VACUUM failed: {e}")
         return total
 
     def count_rows(self) -> dict:
@@ -417,10 +416,13 @@ class FTPServerManager:
             self.authorizer = DummyAuthorizer()
             for user, pw in self.users.items():
                 self.authorizer.add_user(user, pw, self.root_dir, perm="elradfmw")
-            handler = FTPHandler
-            handler.authorizer = self.authorizer
-            handler.passive_ports = range(60000, 60100)
-            handler.banner = "RTU Production Server FTP"
+            # 클래스 변수 오염을 방지하기 위해 인스턴스 전용 서브클래스 생성
+            _auth = self.authorizer
+            handler = type('_RTUFTPHandler', (FTPHandler,), {
+                'authorizer': _auth,
+                'passive_ports': range(60000, 60100),
+                'banner': "RTU Production Server FTP",
+            })
             self.server = FTPServer(("0.0.0.0", self.port), handler)
             self.server.max_cons = 10
             self.server.max_cons_per_ip = 5
