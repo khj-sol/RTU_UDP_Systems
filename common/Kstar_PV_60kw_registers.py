@@ -381,8 +381,13 @@ class RegisterMap:
     PV_VOLTAGE                               = MPPT1_VOLTAGE
     PV_STRING_COUNT                          = 9
 
+    # --- TOTAL_ENERGY / ERROR_CODE alias ---
+    TOTAL_ENERGY                             = CUMULATIVE_ENERGY
+    ERROR_CODE1                              = DSP_ERROR_CODE
+
     # --- RTU modbus_handler / simulator 필수 alias ---
     INNER_TEMP                               = TEMPERATURE
+    INVERTER_MODE                            = OPERATING_MODE_OF_THEINVERTER
     DER_POWER_FACTOR_SET                     = 0x07D0
     DER_ACTION_MODE                          = 0x07D1
     DER_REACTIVE_POWER_PCT                   = 0x07D2
@@ -1067,3 +1072,38 @@ FLOAT32_FIELDS: set = set()
 # True: String별 전류 레지스터 있음 (Solarize, Senergy, Kstar 등)
 # False: String 전류 레지스터 없음 (Huawei 등 — PV 전류만 제공)
 STRING_CURRENT_MONITOR = True
+
+
+# RTU 배치 읽기 블록 — Kstar (전용 핸들러 사용, 참고용)
+# Kstar: 모니터링은 Input Registers(FC04), 0x0BB8–0x0C80 구간
+READ_BLOCKS = [
+    {'start': 0x0BB8, 'count': 125, 'fc': 4},  # 주 모니터링 (FC04 Input Registers)
+    {'start': 0x0C35, 'count':  75, 'fc': 4},  # 추가 모니터링
+]
+
+
+# H01 출력 필드 → RegisterMap 속성명 매핑
+DATA_PARSER = {
+    'r_voltage'          : 'R_PHASE_VOLTAGE',
+    's_voltage'          : 'S_PHASE_VOLTAGE',
+    't_voltage'          : 'T_PHASE_VOLTAGE',
+    'r_current'          : 'R_PHASE_CURRENT',
+    's_current'          : 'S_PHASE_CURRENT',
+    't_current'          : 'T_PHASE_CURRENT',
+    'frequency'          : 'FREQUENCY',
+    'pv_power'           : 'PV_POWER',
+    'ac_power'           : 'AC_POWER',
+    'power_factor'       : 'POWER_FACTOR',
+    'mode'               : 'INVERTER_MODE',
+    'alarm1'             : 'ERROR_CODE1',
+    'cumulative_energy'  : 'TOTAL_ENERGY',
+    'mppt1_voltage'      : 'MPPT1_VOLTAGE',
+    'mppt1_current'      : 'MPPT1_CURRENT',
+    'mppt2_voltage'      : 'MPPT2_VOLTAGE',
+    'mppt2_current'      : 'MPPT2_CURRENT',
+    'mppt3_voltage'      : 'MPPT3_VOLTAGE',
+    'mppt3_current'      : 'MPPT3_CURRENT',
+    'string1_current'    : 'STRING1_CURRENT',
+    'string2_current'    : 'STRING2_CURRENT',
+    'string3_current'    : 'STRING3_CURRENT',
+}

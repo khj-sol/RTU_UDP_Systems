@@ -926,9 +926,13 @@ class RegisterMap:
     PV_VOLTAGE                               = MPPT1_VOLTAGE
     PV_STRING_COUNT                          = 4
 
+    # --- TOTAL_ENERGY alias ---
+    TOTAL_ENERGY                             = CUMULATIVE_ENERGY
+
     # --- RTU modbus_handler / simulator 필수 alias ---
     INNER_TEMP                               = TEMPERATURE
     INVERTER_MODE                            = DEVICE_STATUS
+    AC_POWER                                 = ACTIVEPOWER
     DER_POWER_FACTOR_SET                     = 0x07D0
     DER_ACTION_MODE                          = 0x07D1
     DER_REACTIVE_POWER_PCT                   = 0x07D2
@@ -2773,3 +2777,35 @@ FLOAT32_FIELDS: set = set()
 # True: String별 전류 레지스터 있음 (Solarize, Senergy, Kstar 등)
 # False: String 전류 레지스터 없음 (Huawei 등 — PV 전류만 제공)
 STRING_CURRENT_MONITOR = False
+
+
+# RTU 배치 읽기 블록 — Huawei (전용 핸들러 사용, 참고용)
+READ_BLOCKS = [
+    {'start': 0x2000, 'count': 125, 'fc': 3},  # 주 모니터링 블록 (전압/전류/전력)
+    {'start': 0x207F, 'count':  60, 'fc': 3},  # 에너지/MPPT 블록
+]
+
+
+# H01 출력 필드 → RegisterMap 속성명 매핑
+DATA_PARSER = {
+    'r_voltage'          : 'R_PHASE_VOLTAGE',
+    's_voltage'          : 'S_PHASE_VOLTAGE',
+    't_voltage'          : 'T_PHASE_VOLTAGE',
+    'r_current'          : 'R_PHASE_CURRENT',
+    's_current'          : 'S_PHASE_CURRENT',
+    't_current'          : 'T_PHASE_CURRENT',
+    'frequency'          : 'FREQUENCY',
+    'pv_power'           : 'PV_POWER',
+    'ac_power'           : 'AC_POWER',
+    'power_factor'       : 'POWER_FACTOR',
+    'mode'               : 'INVERTER_MODE',
+    'cumulative_energy'  : 'TOTAL_ENERGY',
+    'mppt1_voltage'      : 'MPPT1_VOLTAGE',
+    'mppt1_current'      : 'MPPT1_CURRENT',
+    'mppt2_voltage'      : 'MPPT2_VOLTAGE',
+    'mppt2_current'      : 'MPPT2_CURRENT',
+    'mppt3_voltage'      : 'MPPT3_VOLTAGE',
+    'mppt3_current'      : 'MPPT3_CURRENT',
+    'mppt4_voltage'      : 'MPPT4_VOLTAGE',
+    'mppt4_current'      : 'MPPT4_CURRENT',
+}

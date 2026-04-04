@@ -102,12 +102,30 @@ class RegisterMap:
     GRID_STATUS_ALARM3                       = 0x7597  # U16
 
     # --- Standard handler compatibility aliases (H01 Body Type 4 required) ---
-    S_PHASE_VOLTAGE                          = 전압종합  # L2 없음 → 대체
+    S_PHASE_VOLTAGE                          = 전압종합  # L2 없음 → 단상 대체
+    R_PHASE_VOLTAGE                          = S_PHASE_VOLTAGE  # L1 없음 → 단상 대체
+    T_PHASE_VOLTAGE                          = S_PHASE_VOLTAGE  # L3 없음 → 단상 대체
+    R_PHASE_CURRENT                          = 전류종합  # L1 없음 → 단상 대체
+    S_PHASE_CURRENT                          = 전류종합
+    T_PHASE_CURRENT                          = 전류종합  # L3 없음 → 단상 대체
 
     # --- MPPT alias (modbus_handler: MPPT{N}_ 형식) ---
     MPPT1_VOLTAGE                            = 인버터_DC전압_PV_VOLTAGE
+    MPPT1_CURRENT                            = 태양전지_전류  # PV 전류
     PV_VOLTAGE                               = MPPT1_VOLTAGE
     PV_STRING_COUNT                          = 2
+
+    # --- String alias ---
+    STRING1_CURRENT                          = 태양전지1_전류_STRING_1_CURRENT
+    STRING2_CURRENT                          = 태양전지2_전류_STRING_2_CURRENT
+
+    # --- AC_POWER / TOTAL_ENERGY alias ---
+    AC_POWER                                 = 유효전력종합_ACTIVE_POWER
+    TOTAL_ENERGY                             = CUMULATIVE_ENERGY
+
+    # --- ERROR_CODE alias (alarm 레지스터) ---
+    ERROR_CODE1                              = SW_FAULT_STATUS_ALARM_1
+    ERROR_CODE2                              = HW_FAULT_STATUS_ALARM_2
 
     # --- RTU modbus_handler / simulator 필수 alias ---
     INNER_TEMP                               = PV_MPPPT온도
@@ -426,3 +444,35 @@ FLOAT32_FIELDS: set = set()
 # True: String별 전류 레지스터 있음 (Solarize, Senergy, Kstar 등)
 # False: String 전류 레지스터 없음 (Huawei 등 — PV 전류만 제공)
 STRING_CURRENT_MONITOR = True
+
+
+# RTU 배치 읽기 블록 — start/count/fc 지정으로 트랜잭션 최소화
+# EKOS: 주 모니터링 레지스터는 0x7539–0x75AC (FLOAT32 위주)
+READ_BLOCKS = [
+    {'start': 0x0000, 'count':  16, 'fc': 3},  # 알람/상태 (저주소)
+    {'start': 0x7539, 'count': 120, 'fc': 3},  # 주 모니터링 블록
+]
+
+
+# H01 출력 필드 → RegisterMap 속성명 매핑
+# modbus_handler._read_inverter_data_dynamic()이 이 매핑을 사용한다.
+DATA_PARSER = {
+    'r_voltage'          : 'R_PHASE_VOLTAGE',
+    's_voltage'          : 'S_PHASE_VOLTAGE',
+    't_voltage'          : 'T_PHASE_VOLTAGE',
+    'r_current'          : 'R_PHASE_CURRENT',
+    's_current'          : 'S_PHASE_CURRENT',
+    't_current'          : 'T_PHASE_CURRENT',
+    'frequency'          : 'FREQUENCY',
+    'pv_power'           : 'PV_POWER',
+    'ac_power'           : 'AC_POWER',
+    'power_factor'       : 'POWER_FACTOR',
+    'mode'               : 'INVERTER_MODE',
+    'alarm1'             : 'ERROR_CODE1',
+    'alarm2'             : 'ERROR_CODE2',
+    'cumulative_energy'  : 'TOTAL_ENERGY',
+    'mppt1_voltage'      : 'MPPT1_VOLTAGE',
+    'mppt1_current'      : 'MPPT1_CURRENT',
+    'string1_current'    : 'STRING1_CURRENT',
+    'string2_current'    : 'STRING2_CURRENT',
+}

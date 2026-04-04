@@ -304,6 +304,10 @@ def _init_reg_attrs(handler, reg_module):
             if handler.status_converter is not None:
                 break
 
+    # DATA_PARSER / READ_BLOCKS — Stage 3 생성 파일에 포함된 경우 바인딩
+    handler.data_parser = getattr(mod, 'DATA_PARSER', None)
+    handler.read_blocks = getattr(mod, 'READ_BLOCKS', None)
+
     # Detect non-Solarize register layout: if AC_POWER address differs from
     # the hardcoded Solarize default (0x1037), use dynamic register reading.
     rm = handler.RegMap
@@ -468,8 +472,68 @@ class ModbusHandlerHAT:
         return {'tests': [], 'recommendations': ['Master not initialized']}
     
     def _read_reg(self, addr, count=1):
-        """Read holding registers, returns list of U16 values or None."""
+        """Read holding registers (FC03), returns list of U16 values or None."""
         return self.master.read_holding_registers(addr, count, self.slave_id)
+
+    def _read_input_reg(self, addr, count=1):
+        """Read input registers (FC04), returns list of U16 values or None."""
+        return self.master.read_input_registers(addr, count, self.slave_id)
+
+    def _read_block(self, start, count, fc=3):
+        """Read a contiguous register block using the specified FC code.
+
+        Returns list of U16 values, or None on failure.
+        """
+        if fc == 4:
+            return self._read_input_reg(start, count)
+        return self._read_reg(start, count)
+
+    def _build_reg_cache(self, read_blocks):
+        """Read all READ_BLOCKS and return {addr: value} cache.
+
+        Only caches registers that were successfully read.
+        """
+        cache = {}
+        for blk in read_blocks:
+            start = blk['start']
+            count = blk['count']
+            fc = blk.get('fc', 3)
+            result = self._read_block(start, count, fc)
+            if result:
+                for i, v in enumerate(result):
+                    cache[start + i] = v
+        return cache
+
+    def _get_typed_from_cache(self, field_name, addr, cache):
+        """Extract a typed value from the register cache.
+
+        Returns converted Python value (int or float), or None if not cached.
+        Handles FLOAT32/U32/S32/S16/U16 via DATA_TYPES.
+        """
+        dtype = (self.reg_data_types or {}).get(field_name, 'u16').lower()
+        if dtype == 'float32':
+            lo = cache.get(addr)
+            hi = cache.get(addr + 1)
+            if lo is not None and hi is not None and self.reg_to_float32:
+                return self.reg_to_float32(lo, hi)
+            return None
+        elif dtype in ('u32', 's32'):
+            lo = cache.get(addr)
+            hi = cache.get(addr + 1)
+            if lo is not None and hi is not None:
+                if dtype == 'u32':
+                    return self.reg_to_u32(lo, hi)
+                else:
+                    val = self.reg_to_u32(lo, hi)
+                    return val - 0x100000000 if val >= 0x80000000 else val
+            return None
+        elif dtype == 's16':
+            v = cache.get(addr)
+            if v is not None:
+                return v - 65536 if v > 32767 else v
+            return None
+        else:  # u16
+            return cache.get(addr)
 
     def _read_typed_value(self, field_name, addr):
         """Read a register value using the correct data type from DATA_TYPES.
@@ -509,145 +573,155 @@ class ModbusHandlerHAT:
         """Generic register-map-driven inverter data reading.
 
         Used for non-Solarize protocols (EKOS, Sungrow, etc.) where register
-        addresses and data types differ from the hardcoded Solarize layout.
-        Reads each field from its RegisterMap address using the correct
-        data type conversion (Float32, U32, U16, S16).
+        addresses differ from the hardcoded Solarize layout.
+
+        Strategy:
+          1. If reg_module has READ_BLOCKS → batch-read all monitoring blocks once,
+             build {addr: value} cache, then parse every field from cache.
+          2. Otherwise fall back to per-field reads (legacy behaviour).
+
+        All RegisterMap attribute accesses use getattr(..., None) to prevent
+        AttributeError from crashing the whole read cycle.
 
         Returns:
             dict compatible with H01 inverter body, or None on failure.
         """
-        self.logger.info(f"[Dynamic Read] slave={self.slave_id} module={getattr(self, 'reg_module', None)}")
+        self.logger.debug(f"[Dynamic Read] slave={self.slave_id}")
         if not self.connected or not self.master:
             return None
 
         try:
-            data = {}
             rm = self.RegMap
             scale = self.scale
+            dtypes = self.reg_data_types or {}
 
-            # --- AC Phase Voltages ---
-            # Read and convert to V (integer) for H01 body
-            for phase, field in [('r', 'R_PHASE_VOLTAGE'), ('s', 'S_PHASE_VOLTAGE'), ('t', 'T_PHASE_VOLTAGE')]:
-                val = self._read_typed_value(field, getattr(rm, field))
+            # ── helper: read one field by address ──────────────────────────
+            def _read_field(field, addr, cache):
+                """Return typed value from cache (batch) or via individual read."""
+                if cache is not None:
+                    return self._get_typed_from_cache(field, addr, cache)
+                return self._read_typed_value(field, addr)
+
+            # ── batch read via READ_BLOCKS if available ─────────────────────
+            read_blocks = getattr(self.reg_module, 'READ_BLOCKS', None)
+            cache = self._build_reg_cache(read_blocks) if read_blocks else None
+            if cache is not None:
+                self.logger.debug(f"[Dynamic] Batch cache: {len(cache)} regs from "
+                                  f"{len(read_blocks)} blocks")
+
+            data = {}
+
+            # ── AC Phase Voltages → integer V ──────────────────────────────
+            for ph, field in [('r', 'R_PHASE_VOLTAGE'), ('s', 'S_PHASE_VOLTAGE'),
+                               ('t', 'T_PHASE_VOLTAGE')]:
+                addr = getattr(rm, field, None)
+                val = _read_field(field, addr, cache) if addr is not None else None
                 if val is not None:
-                    # Float32 registers already in V; U16 registers in 0.1V
-                    dtype = (self.reg_data_types or {}).get(field, 'u16')
-                    if dtype == 'float32':
-                        data[f'{phase}_voltage'] = int(val)  # V
-                    else:
-                        data[f'{phase}_voltage'] = int(val * scale.get('voltage', 0.1))
+                    dtype = dtypes.get(field, 'u16').lower()
+                    data[f'{ph}_voltage'] = (int(val) if dtype == 'float32'
+                                             else int(val * scale.get('voltage', 0.1)))
                 else:
-                    data[f'{phase}_voltage'] = 0
+                    data[f'{ph}_voltage'] = 0
 
-            # --- AC Phase Currents ---
-            # Convert to 0.1A for H01 body
-            for phase, field in [('r', 'R_PHASE_CURRENT'), ('s', 'S_PHASE_CURRENT'), ('t', 'T_PHASE_CURRENT')]:
-                val = self._read_typed_value(field, getattr(rm, field))
+            # ── AC Phase Currents → integer 0.1A ───────────────────────────
+            for ph, field in [('r', 'R_PHASE_CURRENT'), ('s', 'S_PHASE_CURRENT'),
+                               ('t', 'T_PHASE_CURRENT')]:
+                addr = getattr(rm, field, None)
+                val = _read_field(field, addr, cache) if addr is not None else None
                 if val is not None:
-                    dtype = (self.reg_data_types or {}).get(field, 'u16')
-                    if dtype == 'float32':
-                        data[f'{phase}_current'] = int(val * 10)  # A -> 0.1A
-                    else:
-                        data[f'{phase}_current'] = int(val * scale.get('current', 0.01) * 10)
+                    dtype = dtypes.get(field, 'u16').lower()
+                    data[f'{ph}_current'] = (int(val * 10) if dtype == 'float32'
+                                             else int(val * scale.get('current', 0.01) * 10))
                 else:
-                    data[f'{phase}_current'] = 0
+                    data[f'{ph}_current'] = 0
 
-            # --- Frequency ---
-            val = self._read_typed_value('FREQUENCY', rm.FREQUENCY)
+            # ── Frequency → integer 0.1Hz ───────────────────────────────────
+            addr = getattr(rm, 'FREQUENCY', None)
+            val = _read_field('FREQUENCY', addr, cache) if addr is not None else None
             if val is not None:
-                dtype = (self.reg_data_types or {}).get('FREQUENCY', 'u16')
-                if dtype == 'float32':
-                    data['frequency'] = int(val * 10)  # Hz -> 0.1Hz
-                else:
-                    data['frequency'] = int(val * scale.get('frequency', 0.01) * 10)
+                dtype = dtypes.get('FREQUENCY', 'u16').lower()
+                data['frequency'] = (int(val * 10) if dtype == 'float32'
+                                     else int(val * scale.get('frequency', 0.01) * 10))
             else:
                 data['frequency'] = 600
 
-            # --- MPPT Data ---
+            # ── MPPT Data ───────────────────────────────────────────────────
             mppt_data = []
-            for i in range(1, 5):
+            for i in range(1, 17):
                 v_field = f'MPPT{i}_VOLTAGE'
                 c_field = f'MPPT{i}_CURRENT'
-                if not hasattr(rm, v_field):
+                v_addr = getattr(rm, v_field, None)
+                if v_addr is None:
                     break
-                v_val = self._read_typed_value(v_field, getattr(rm, v_field))
-                c_val = self._read_typed_value(c_field, getattr(rm, c_field))
-                v_dtype = (self.reg_data_types or {}).get(v_field, 'u16')
-                c_dtype = (self.reg_data_types or {}).get(c_field, 'u16')
-                # Convert to raw 0.1V / 0.01A for MPPT compatibility
-                if v_dtype == 'float32':
-                    mppt_v = int((v_val or 0) * 10)   # V -> 0.1V raw
-                else:
-                    mppt_v = int(v_val) if v_val else 0  # already 0.1V raw
-                if c_dtype == 'float32':
-                    mppt_c = int((c_val or 0) * 100)   # A -> 0.01A raw
-                else:
-                    mppt_c = int(c_val) if c_val else 0  # already 0.01A raw
+                c_addr = getattr(rm, c_field, None)
+                v_val = _read_field(v_field, v_addr, cache)
+                c_val = _read_field(c_field, c_addr, cache) if c_addr is not None else None
+                v_dtype = dtypes.get(v_field, 'u16').lower()
+                c_dtype = dtypes.get(c_field, 'u16').lower()
+                mppt_v = (int((v_val or 0) * 10) if v_dtype == 'float32'
+                          else int(v_val) if v_val else 0)
+                mppt_c = (int((c_val or 0) * 100) if c_dtype == 'float32'
+                          else int(c_val) if c_val else 0)
                 mppt_data.append({'voltage': mppt_v, 'current': mppt_c})
             data['mppt'] = mppt_data
 
-            # PV voltage/current from MPPT
             if mppt_data:
-                connected = [m for m in mppt_data if m['voltage'] >= 1000]  # >= 100V in 0.1V
-                data['pv_voltage'] = int(sum(m['voltage'] for m in connected) / len(connected) / 10) if connected else 0
+                connected = [m for m in mppt_data if m['voltage'] >= 1000]  # ≥100V
+                data['pv_voltage'] = (int(sum(m['voltage'] for m in connected)
+                                         / len(connected) / 10) if connected else 0)
                 data['pv_current'] = int(sum(m['current'] for m in mppt_data) / 10)
             else:
                 data['pv_voltage'] = 0
                 data['pv_current'] = 0
 
-            # --- String Currents ---
+            # ── String Currents ─────────────────────────────────────────────
             strings = []
-            for i in range(1, 9):
+            for i in range(1, 33):
                 s_field = f'STRING{i}_CURRENT'
-                if not hasattr(rm, s_field):
+                s_addr = getattr(rm, s_field, None)
+                if s_addr is None:
                     break
-                s_val = self._read_typed_value(s_field, getattr(rm, s_field))
-                s_dtype = (self.reg_data_types or {}).get(s_field, 'u16')
-                if s_dtype == 'float32':
-                    strings.append(int((s_val or 0) * 100))  # A -> 0.01A raw
-                else:
-                    strings.append(int(s_val) if s_val else 0)
+                s_val = _read_field(s_field, s_addr, cache)
+                s_dtype = dtypes.get(s_field, 'u16').lower()
+                strings.append(int((s_val or 0) * 100) if s_dtype == 'float32'
+                               else int(s_val) if s_val else 0)
             data['strings'] = strings
 
-            # --- PV Power ---
-            val = self._read_typed_value('PV_POWER', rm.PV_POWER)
+            # ── PV Power → integer W ────────────────────────────────────────
+            pv_addr = getattr(rm, 'PV_POWER', None)
+            val = _read_field('PV_POWER', pv_addr, cache) if pv_addr is not None else None
             if val is not None:
-                dtype = (self.reg_data_types or {}).get('PV_POWER', 'u32')
-                if dtype == 'float32':
-                    data['pv_power'] = int(val)  # Already in W
-                else:
-                    data['pv_power'] = int(val * scale.get('power', 1.0))
+                dtype = dtypes.get('PV_POWER', 'u32').lower()
+                data['pv_power'] = (int(val) if dtype == 'float32'
+                                    else int(val * scale.get('power', 1.0)))
             else:
                 data['pv_power'] = 0
 
-            # --- AC Power ---
-            val = self._read_typed_value('AC_POWER', rm.AC_POWER)
+            # ── AC Power → integer W ────────────────────────────────────────
+            ac_addr = getattr(rm, 'AC_POWER', None)
+            val = _read_field('AC_POWER', ac_addr, cache) if ac_addr is not None else None
             if val is not None:
-                dtype = (self.reg_data_types or {}).get('AC_POWER', 'u32')
-                if dtype == 'float32':
-                    data['ac_power'] = int(val)  # Already in W
-                else:
-                    data['ac_power'] = int(val * scale.get('power', 1.0))
+                dtype = dtypes.get('AC_POWER', 'u32').lower()
+                data['ac_power'] = (int(val) if dtype == 'float32'
+                                    else int(val * scale.get('power', 1.0)))
             else:
                 data['ac_power'] = 0
 
-            # --- Power Factor ---
-            val = self._read_typed_value('POWER_FACTOR', rm.POWER_FACTOR)
+            # ── Power Factor → integer 0.001 ────────────────────────────────
+            pf_addr = getattr(rm, 'POWER_FACTOR', None)
+            val = _read_field('POWER_FACTOR', pf_addr, cache) if pf_addr is not None else None
             if val is not None:
-                dtype = (self.reg_data_types or {}).get('POWER_FACTOR', 's16')
-                if dtype == 'float32':
-                    # Float value (e.g. 0.98) -> 0.001 scale integer (980)
-                    data['power_factor'] = int(val * 1000)
-                else:
-                    data['power_factor'] = int(val)  # Already in 0.001 scale
+                dtype = dtypes.get('POWER_FACTOR', 's16').lower()
+                data['power_factor'] = (int(val * 1000) if dtype == 'float32'
+                                        else int(val))
             else:
                 data['power_factor'] = 1000
 
-            # --- Inverter Mode / Status ---
-            val = self._read_typed_value('INVERTER_MODE', rm.INVERTER_MODE)
+            # ── Inverter Mode / Status ──────────────────────────────────────
+            mode_addr = getattr(rm, 'INVERTER_MODE', None)
+            val = _read_field('INVERTER_MODE', mode_addr, cache) if mode_addr is not None else None
             if val is not None:
                 raw_mode = int(val)
-                # Use StatusConverter if available (EKOS, Sungrow have raw->Solarize mapping)
                 if self.status_converter and hasattr(self.status_converter, 'to_inverter_mode'):
                     mode = self.status_converter.to_inverter_mode(raw_mode)
                 else:
@@ -666,25 +740,26 @@ class ModbusHandlerHAT:
                 data['mode'] = self.InvMode.ON_GRID
                 data['status'] = INV_STATUS_ON_GRID
 
-            # --- Error Codes ---
-            val1 = self._read_typed_value('ERROR_CODE1', rm.ERROR_CODE1) if hasattr(rm, 'ERROR_CODE1') else 0
-            val2 = self._read_typed_value('ERROR_CODE2', rm.ERROR_CODE2) if hasattr(rm, 'ERROR_CODE2') else 0
-            data['alarm1'] = int(val1) if val1 else 0
-            data['alarm2'] = int(val2) if val2 else 0
-            data['alarm3'] = 0
-
-            # --- Cumulative Energy ---
-            val = self._read_typed_value('TOTAL_ENERGY', rm.TOTAL_ENERGY)
-            if val is not None:
-                dtype = (self.reg_data_types or {}).get('TOTAL_ENERGY', 'u32')
-                if dtype == 'float32':
-                    # Float value in Wh
-                    data['cumulative_energy'] = int(val)
-                elif dtype == 'u32':
-                    # Solarize: kWh -> Wh (*1000), Sungrow: 0.1kWh -> Wh (*100)
-                    data['cumulative_energy'] = int(val * 1000)
+            # ── Error Codes ─────────────────────────────────────────────────
+            for ec_i, ec_key in [(1, 'alarm1'), (2, 'alarm2'), (3, 'alarm3')]:
+                ec_field = f'ERROR_CODE{ec_i}'
+                ec_addr = getattr(rm, ec_field, None)
+                if ec_addr is not None:
+                    v = _read_field(ec_field, ec_addr, cache)
+                    data[ec_key] = int(v) if v is not None else 0
                 else:
-                    data['cumulative_energy'] = int(val)
+                    data[ec_key] = 0
+
+            # ── Cumulative Energy → integer Wh ──────────────────────────────
+            te_addr = getattr(rm, 'TOTAL_ENERGY', None)
+            val = _read_field('TOTAL_ENERGY', te_addr, cache) if te_addr is not None else None
+            if val is not None:
+                dtype = dtypes.get('TOTAL_ENERGY', 'u32').lower()
+                if dtype == 'float32':
+                    data['cumulative_energy'] = int(val)      # already Wh
+                else:
+                    # U32 assumed kWh × 1000 (Solarize/Sungrow convention)
+                    data['cumulative_energy'] = int(val * 1000)
             else:
                 data['cumulative_energy'] = 0
 
@@ -2242,8 +2317,15 @@ class ModbusHandlerSerial:
         self.connected = False
     
     def _read_reg(self, addr, count=1):
-        """Read holding registers via pymodbus, returns list of U16 values or None."""
+        """Read holding registers (FC03) via pymodbus, returns list of U16 values or None."""
         result = self.client.read_holding_registers(addr, count, slave=self.slave_id)
+        if result.isError():
+            return None
+        return result.registers
+
+    def _read_input_reg(self, addr, count=1):
+        """Read input registers (FC04) via pymodbus, returns list of U16 values or None."""
+        result = self.client.read_input_registers(addr, count, slave=self.slave_id)
         if result.isError():
             return None
         return result.registers
