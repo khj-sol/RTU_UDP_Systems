@@ -184,11 +184,8 @@ class ControlCommand(BaseModel):
 class FirmwareUpdate(BaseModel):
     rtu_id: int
     filename: str
-    ftp_host: str = DEFAULT_FTP_HOST
     ftp_port: int = DEFAULT_FTP_PORT
-    ftp_user: str = DEFAULT_FTP_USER
-    ftp_pass: str = DEFAULT_FTP_PASSWORD
-    ftp_path: str = "/firmware"
+    # ftp_host, ftp_user, ftp_pass는 환경변수(FTP_LOCAL_IP, FTP_USER_ENV, FTP_PASS_ENV)로만 설정
 
 
 # =========================================================================
@@ -595,8 +592,12 @@ async def firmware_list():
     if not os.path.isdir(FIRMWARE_DIR):
         return {"files": []}
 
+    FIRMWARE_EXTENSIONS = ('.tar.gz', '.gz', '.zip', '.tar')
     files = []
     for fname in os.listdir(FIRMWARE_DIR):
+        # 펌웨어 확장자만 반환
+        if not any(fname.endswith(ext) for ext in FIRMWARE_EXTENSIONS):
+            continue
         fpath = os.path.join(FIRMWARE_DIR, fname)
         if os.path.isfile(fpath):
             stat = os.stat(fpath)
@@ -643,7 +644,7 @@ async def firmware_update(fw: FirmwareUpdate):
 
     # Use built-in FTP server with credentials from environment
     ftp_host = FTP_LOCAL_IP
-    ftp_port = 21
+    ftp_port = fw.ftp_port
     ftp_user = FTP_USER_ENV
     ftp_pass = FTP_PASS_ENV
     ftp_path = "/"
@@ -674,6 +675,7 @@ def _ssh_connect(ip: str):
     import paramiko
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    logger.warning("SSH host key not verified (AutoAddPolicy). Set RTU_SSH_KNOWN_HOSTS for production.")
     # Try key auth first, then password
     key_path = os.path.expanduser("~/.ssh/id_rsa")
     try:

@@ -127,13 +127,13 @@ async def _run_in_thread(func, *args, **kwargs):
 def _make_progress_callback(sid: str, stage: str, loop: asyncio.AbstractEventLoop):
     """WebSocket 로그 전송 콜백 생성 — loop을 캡처하여 스레드 안전"""
     def callback(msg: str, level: str = 'info'):
-        loop.call_soon_threadsafe(
-            asyncio.ensure_future,
+        asyncio.run_coroutine_threadsafe(
             ws_manager.send_json(sid, {
                 'stage': stage,
                 'text': msg,
                 'level': level,
-            })
+            }),
+            loop
         )
     return callback
 
@@ -289,7 +289,7 @@ async def stage1_run(body: dict):
             })
             traceback.print_exc()
 
-    task = asyncio.ensure_future(_run())
+    task = asyncio.ensure_future(_run(), loop=asyncio.get_event_loop())
     SessionStore.update(sid, _running_task=task)
     return {'status': 'running', 'session_id': sid}
 
@@ -385,7 +385,7 @@ async def apply_suggestion(body: dict):
             })
             import traceback; traceback.print_exc()
 
-    asyncio.ensure_future(_rerun())
+    asyncio.ensure_future(_rerun(), loop=asyncio.get_event_loop())
     return {'status': 'rerunning', 'session_id': sid}
 
 
@@ -491,7 +491,7 @@ async def stage2_run(body: dict):
             })
             traceback.print_exc()
 
-    asyncio.ensure_future(_run())
+    asyncio.ensure_future(_run(), loop=asyncio.get_event_loop())
     return {'status': 'running', 'session_id': sid}
 
 
@@ -543,7 +543,7 @@ async def stage3_run(body: dict):
             })
             traceback.print_exc()
 
-    asyncio.ensure_future(_run())
+    asyncio.ensure_future(_run(), loop=asyncio.get_event_loop())
     return {'status': 'running', 'session_id': sid}
 
 

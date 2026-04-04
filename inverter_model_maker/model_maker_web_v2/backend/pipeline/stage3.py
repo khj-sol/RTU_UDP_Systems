@@ -8,10 +8,13 @@ Stage 3 — Stage 2 Excel → *_registers.py 코드 생성
 """
 import os
 import re
+import logging
 import importlib.util
 from datetime import datetime
 from textwrap import dedent, indent
 from typing import List, Dict, Optional
+
+logger = logging.getLogger(__name__)
 
 from . import (
     PROJECT_ROOT, COMMON_DIR, RTU_COMMON_DIR,
@@ -176,11 +179,11 @@ def _parse_s2_reg_row(cells, header, category):
         definition=defn,
         address=addr if addr is not None else 0,
         address_hex=addr_raw if addr_raw.startswith('0x') else (f'0x{addr:04X}' if addr else ''),
-        data_type=cells[col_map.get('type', 99)] if col_map.get('type', 99) < len(cells) else 'U16',
-        scale=cells[col_map.get('scale', 99)] if col_map.get('scale', 99) < len(cells) else '',
-        rw=cells[col_map.get('rw', 99)] if col_map.get('rw', 99) < len(cells) else 'RO',
-        h01_field=cells[col_map.get('h01_field', 99)] if col_map.get('h01_field', 99) < len(cells) else '',
-        comment=cells[col_map.get('comment', 99)] if col_map.get('comment', 99) < len(cells) else '',
+        data_type=cells[col_map.get('type', -1)] if 0 <= col_map.get('type', -1) < len(cells) else 'U16',
+        scale=cells[col_map.get('scale', -1)] if 0 <= col_map.get('scale', -1) < len(cells) else '',
+        rw=cells[col_map.get('rw', -1)] if 0 <= col_map.get('rw', -1) < len(cells) else 'RO',
+        h01_field=cells[col_map.get('h01_field', -1)] if 0 <= col_map.get('h01_field', -1) < len(cells) else '',
+        comment=cells[col_map.get('comment', -1)] if 0 <= col_map.get('comment', -1) < len(cells) else '',
         category=category,
     )
 
@@ -212,7 +215,8 @@ def _load_error_bits_from_reference(manufacturer: str) -> dict:
                     result[cls_name] = dict(cls.BITS)
             if result:
                 return result
-        except Exception:
+        except Exception as _e:
+            logger.warning(f"_load_error_bits_from_reference: failed to load {fpath}: {_e}")
             continue
     return result
 
@@ -495,8 +499,8 @@ def _gen_register_map(regs_by_cat: dict, mppt: int, total_strings: int,
     # IV Scan Control aliases + registers
     if 'IV_CURVE_SCAN' in all_defined:
         lines.append('    # IV Scan aliases')
-        lines.append('    IV_SCAN_COMMAND                          = IV_CURVE_SCAN')
-        lines.append('    IV_SCAN_STATUS                           = IV_CURVE_SCAN')
+        lines.append('    IV_SCAN_COMMAND                          = IV_CURVE_SCAN  # 읽기/쓰기 겸용 레지스터')
+        lines.append('    IV_SCAN_STATUS                           = IV_CURVE_SCAN  # 읽기/쓰기 겸용 레지스터')
         lines.append('')
 
     # IV Scan Data Registers (if supported)
@@ -712,7 +716,8 @@ def registers_to_s32(low, high):
 
 
 def get_string_registers(string_num):
-    """Return (voltage_addr, current_addr) for a string number (1-{total_strings})."""
+    """Return (voltage_addr, current_addr) for a string number (1-{total_strings}).
+    # Solarize 프로토콜 전용 주소 (0x1050 기반)"""
     if string_num < 1 or string_num > {total_strings}:
         raise ValueError(f"String number must be 1-{total_strings}, got {{string_num}}")
     base = 0x1050 + (string_num - 1) * 2
@@ -720,7 +725,8 @@ def get_string_registers(string_num):
 
 
 def get_mppt_registers(mppt_num):
-    """Return (voltage, current, power_low, power_high) for MPPT number (1-{mppt})."""
+    """Return (voltage, current, power_low, power_high) for MPPT number (1-{mppt}).
+    # Solarize 프로토콜 전용 주소 (0x1010 기반)"""
     if mppt_num < 1 or mppt_num > {mppt}:
         raise ValueError(f"MPPT number must be 1-{mppt}, got {{mppt_num}}")
     if mppt_num <= 3:
@@ -832,13 +838,17 @@ STRING_CURRENT_MONITOR = {has_string}
 def validate_code(code: str, mppt: int, total_strings: int,
                    iv_scan: bool = True, der_avm: bool = True) -> dict:
     checks = {}
+    if mppt == 0:
+        checks['mppt_count_nonzero'] = False  # MPPT count must be > 0
+        return checks
     checks['class_RegisterMap'] = 'class RegisterMap' in code
     checks['class_InverterMode'] = 'class InverterMode' in code
     if iv_scan:
         checks['class_IVScanCommand'] = 'class IVScanCommand' in code
         checks['class_IVScanStatus'] = 'class IVScanStatus' in code
-    # DER-AVM은 모든 인버터 필수
-    checks['class_DerActionMode'] = 'class DerActionMode' in code
+    # DER-AVM은 der_avm=True일 때만 검사
+    if der_avm:
+        checks['class_DerActionMode'] = 'class DerActionMode' in code
     checks['class_DeviceType'] = 'class DeviceType' in code
     checks['class_ErrorCode1'] = 'class ErrorCode1' in code
     checks['InverterMode_to_string'] = 'def to_string' in code
@@ -977,8 +987,9 @@ def run_stage3(
                 if to_upper_snake(reg.definition) == to_upper_snake(defn):
                     reg.category = target
         elif verdict == 'KEEP':
-            all_regs = [r for r in all_regs
-                        if to_upper_snake(r.definition) != to_upper_snake(defn)]
+            for reg in all_regs:
+                if to_upper_snake(reg.definition) == to_upper_snake(defn):
+                    reg.category = 'MONITORING'
 
     # 카테고리별 그룹화
     regs_by_cat = {}
@@ -1011,7 +1022,7 @@ def run_stage3(
         except (ValueError, IndexError):
             pass
 
-    strings_per_mppt = total_strings // mppt_count if mppt_count > 0 else 0
+    strings_per_mppt = total_strings // max(1, mppt_count) if mppt_count > 0 else 0
 
     # 프로토콜명 정규화 (긴 파일명 → 짧은 프로토콜명)
     protocol_name = manufacturer.lower()
