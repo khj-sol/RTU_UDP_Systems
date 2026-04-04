@@ -1282,7 +1282,8 @@ def validate_code(code: str, mppt: int, total_strings: int,
     checks['alias_TOTAL_ENERGY'] = 'TOTAL_ENERGY' in code
 
     # RTU 블록 통신 호환성 검증
-    checks['RTU_FC_CODE'] = 'FC_CODE' in code
+    # FC_CODE: 구형(독립 변수) 또는 신형(READ_BLOCKS 딕트 내 'fc':) 모두 허용
+    checks['RTU_FC_CODE'] = 'FC_CODE' in code or ("'fc':" in code and 'READ_BLOCKS' in code)
     checks['RTU_READ_BLOCKS'] = 'READ_BLOCKS' in code
     checks['RTU_DATA_PARSER'] = 'DATA_PARSER' in code
 
