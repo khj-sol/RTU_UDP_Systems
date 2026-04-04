@@ -547,6 +547,105 @@ async def stage3_run(body: dict):
     return {'status': 'running', 'session_id': sid}
 
 
+# ─── H01 매핑 ────────────────────────────────────────────────────────────────
+
+@router.get('/h01-mapping/{session_id}')
+def get_h01_mapping(session_id: str):
+    """Stage2 Excel의 H01_MAPPING 시트를 읽어 JSON 반환"""
+    s = SessionStore.get(session_id)
+    if not s:
+        raise HTTPException(404, 'session not found')
+
+    stage2_excel = s.get('stage2_excel')
+    if not stage2_excel or not os.path.exists(stage2_excel):
+        raise HTTPException(400, 'Stage 2 not completed')
+
+    try:
+        import openpyxl
+        wb = openpyxl.load_workbook(stage2_excel, data_only=True)
+        if 'H01_MAPPING' not in wb.sheetnames:
+            raise HTTPException(404, 'H01_MAPPING sheet not found')
+
+        ws = wb['H01_MAPPING']
+        DATA_START = 4
+        N_FIELDS = 18
+
+        # E열 전체에서 사용 가능한 레지스터 목록 수집
+        available_registers = []
+        seen = set()
+        for row_idx in range(DATA_START, ws.max_row + 1):
+            val = ws.cell(row=row_idx, column=5).value
+            if val:
+                v = str(val).strip()
+                if v and v not in seen:
+                    available_registers.append(v)
+                    seen.add(v)
+
+        # H01 필드 데이터 (행 4~21)
+        fields = []
+        for i in range(N_FIELDS):
+            row = DATA_START + i
+            h01_field = str(ws.cell(row=row, column=2).value or '').strip()
+            description = str(ws.cell(row=row, column=3).value or '').strip()
+            current_register = str(ws.cell(row=row, column=4).value or '').strip()
+            if h01_field:
+                fields.append({
+                    'h01_field': h01_field,
+                    'description': description,
+                    'current_register': current_register,
+                    'is_matched': bool(current_register),
+                })
+
+        wb.close()
+        return {'fields': fields, 'available_registers': available_registers}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f'H01_MAPPING 읽기 오류: {str(e)}')
+
+
+@router.post('/h01-mapping/{session_id}')
+def save_h01_mapping(session_id: str, body: dict):
+    """사용자가 수정한 H01 매핑을 Stage2 Excel에 저장"""
+    s = SessionStore.get(session_id)
+    if not s:
+        raise HTTPException(404, 'session not found')
+
+    stage2_excel = s.get('stage2_excel')
+    if not stage2_excel or not os.path.exists(stage2_excel):
+        raise HTTPException(400, 'Stage 2 not completed')
+
+    mappings = body.get('mappings', {})
+
+    try:
+        import openpyxl
+        wb = openpyxl.load_workbook(stage2_excel)
+        if 'H01_MAPPING' not in wb.sheetnames:
+            raise HTTPException(404, 'H01_MAPPING sheet not found')
+
+        ws = wb['H01_MAPPING']
+        DATA_START = 4
+        N_FIELDS = 18
+
+        updated = 0
+        for i in range(N_FIELDS):
+            row = DATA_START + i
+            h01_field = str(ws.cell(row=row, column=2).value or '').strip()
+            if h01_field and h01_field in mappings:
+                ws.cell(row=row, column=4, value=mappings[h01_field] or None)
+                updated += 1
+
+        wb.save(stage2_excel)
+        wb.close()
+        return {'status': 'ok', 'updated': updated}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f'H01_MAPPING 저장 오류: {str(e)}')
+
+
 # ─── 파일 다운로드 ───────────────────────────────────────────────────────────
 
 @router.get('/download/{session_id}/{filename}')

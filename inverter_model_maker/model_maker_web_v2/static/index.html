@@ -188,6 +188,27 @@
       border: none; border-radius: 4px;
       font-size: 11px; cursor: pointer;
     }
+
+    .h01-mapping-section {
+      margin-top: 12px;
+      padding: 10px;
+      background: #12151f;
+      border: 1px solid #2e3248;
+      border-radius: 6px;
+      font-size: 12px;
+    }
+    .h01-mapping-section h4 { color: #7eb8f7; margin-bottom: 6px; }
+    .h01-row {
+      display: grid;
+      grid-template-columns: 148px 1fr;
+      gap: 6px;
+      align-items: center;
+      padding: 3px 0;
+      border-bottom: 1px solid #1e2235;
+    }
+    .h01-row:last-child { border-bottom: none; }
+    .h01-matched { color: #4ade80; font-family: 'Consolas', monospace; font-size: 11px; }
+    .h01-unmatched { color: #f87171; font-family: 'Consolas', monospace; font-size: 11px; }
   </style>
 </head>
 <body>
@@ -283,6 +304,21 @@
     <div class="stage-body">
       <div id="s3-summary" style="font-size:12px; color:#ffffff; margin-top:8px;">
         Stage 2 완료 후 활성화됩니다.
+      </div>
+      <div id="h01-mapping-area" style="display:none">
+        <div class="h01-mapping-section">
+          <h4>🔗 H01 매핑 확인/수정</h4>
+          <div style="font-size:11px;color:#9ca3af;margin-bottom:8px">
+            자동매칭 결과를 확인하고 필요시 드롭다운으로 수정하세요.
+            <span style="color:#4ade80">✓ 초록</span>=매칭됨&nbsp;
+            <span style="color:#f87171">✗ 빨강</span>=미매칭
+          </div>
+          <div id="h01-mapping-table"></div>
+          <button class="run-btn" id="btn-save-mapping" onclick="saveH01Mapping()"
+                  style="background:#f59e0b;color:#0f1117;margin-top:10px">
+            💾 매핑 저장 후 Stage 3 활성화
+          </button>
+        </div>
       </div>
       <button class="run-btn" id="btn-s3" disabled onclick="runStage3()">Stage 3 실행 — registers.py 생성</button>
       <div class="log-box" id="log-s3"><span style="color:#ffffff">-- Stage 2 완료 후 활성화 --</span></div>
@@ -384,6 +420,8 @@
     document.getElementById('suggest-area').style.display = 'none';
     document.getElementById('suggest-groups').innerHTML = '';
     document.getElementById('s2-import-name').style.display = 'none';
+    document.getElementById('h01-mapping-area').style.display = 'none';
+    document.getElementById('h01-mapping-table').innerHTML = '';
     document.getElementById('card-s1').className = 'stage-card active';
     document.getElementById('card-s2').className = 'stage-card';
     document.getElementById('card-s3').className = 'stage-card';
@@ -766,19 +804,19 @@
       `H01: ${msg.h01_matched}/${msg.h01_total}  DER: ${msg.der_matched}/${msg.der_total}`,
       h01ok && derOk ? 'ok' : 'warn');
     if (msg.review_count > 0 && msg.review_items && msg.review_items.length > 0) {
-      appendLog('s2', `REVIEW ${msg.review_count}개 — 판정 후 Stage 3 진행`, 'warn');
+      appendLog('s2', `REVIEW ${msg.review_count}개 — 판정 후 H01 매핑 확인`, 'warn');
       showReview(msg.review_items);
       document.getElementById('card-s2').className = 'stage-card done';
       document.getElementById('s3-summary').innerHTML =
         `H01 ${fmtMatch(msg.h01_matched, msg.h01_total)}  |  DER ${fmtMatch(msg.der_matched, msg.der_total)}` +
         `<br><span style="color:#fbbf24">REVIEW ${msg.review_count}개 미결</span>`;
-      return; // Stage 3는 REVIEW 판정 후 활성화
+      return; // REVIEW 판정 → H01 매핑 → Stage 3
     }
     document.getElementById('card-s2').className = 'stage-card done';
     document.getElementById('card-s3').className = 'stage-card active';
-    document.getElementById('btn-s3').disabled = false;
     document.getElementById('s3-summary').innerHTML =
       `H01 ${fmtMatch(msg.h01_matched, msg.h01_total)}  |  DER ${fmtMatch(msg.der_matched, msg.der_total)}`;
+    loadH01Mapping(); // H01 매핑 확인 화면 표시 (Stage 3 버튼은 저장 후 활성화)
   }
 
   function onStage3Done(msg) {
@@ -840,9 +878,8 @@
     const total = document.querySelectorAll('[class="review-row"]').length;
     const checked = document.querySelectorAll('.review-radio:checked').length;
     if (checked >= total) {
-      // 모든 판정 완료 → Stage 3 활성화 + REVIEW 미결 표시 제거
+      // 모든 판정 완료 → REVIEW 미결 표시 제거
       document.getElementById('card-s3').className = 'stage-card active';
-      document.getElementById('btn-s3').disabled = false;
       const sumEl = document.getElementById('s3-summary');
       if (sumEl) {
         sumEl.innerHTML = sumEl.innerHTML
@@ -859,6 +896,81 @@
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({type: 'review_verdicts', verdicts}));
       }
+
+      // H01 매핑 확인 화면 표시 (Stage 3 버튼은 저장 후 활성화)
+      loadH01Mapping();
+    }
+  }
+
+  // ─── H01 매핑 ──────────────────────────────────────────────────
+  async function loadH01Mapping() {
+    const area = document.getElementById('h01-mapping-area');
+    const table = document.getElementById('h01-mapping-table');
+    table.innerHTML = '<span style="color:#9ca3af;font-size:11px">불러오는 중...</span>';
+    area.style.display = 'block';
+
+    try {
+      const r = await fetch(`${API}/h01-mapping/${sessionId}`);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const data = await r.json();
+      const avail = data.available_registers || [];
+
+      table.innerHTML = '';
+      data.fields.forEach(f => {
+        const row = document.createElement('div');
+        row.className = 'h01-row';
+        const cls = f.is_matched ? 'h01-matched' : 'h01-unmatched';
+        const icon = f.is_matched ? '✓' : '✗';
+
+        let opts = '<option value="">(없음)</option>';
+        const inList = avail.includes(f.current_register);
+        if (f.current_register && !inList) {
+          opts += `<option value="${f.current_register}" selected>${f.current_register}</option>`;
+        }
+        avail.forEach(reg => {
+          const sel = reg === f.current_register ? ' selected' : '';
+          opts += `<option value="${reg}"${sel}>${reg}</option>`;
+        });
+
+        row.innerHTML = `
+          <div class="${cls}" title="${f.description}">${icon} ${f.h01_field}</div>
+          <select class="h01-select" data-field="${f.h01_field}" style="padding:3px 6px;font-size:11px">${opts}</select>`;
+        table.appendChild(row);
+      });
+
+      const matched = data.fields.filter(f => f.is_matched).length;
+      const total = data.fields.length;
+      appendLog('s3', `H01 매핑 로드: ${matched}/${total} 자동매칭`, matched === total ? 'ok' : 'warn');
+    } catch (err) {
+      table.innerHTML = `<span style="color:#f87171">H01 매핑 로드 오류: ${err.message}</span>`;
+    }
+  }
+
+  async function saveH01Mapping() {
+    const selects = document.querySelectorAll('.h01-select[data-field]');
+    const mappings = {};
+    selects.forEach(s => { mappings[s.dataset.field] = s.value; });
+
+    const btn = document.getElementById('btn-save-mapping');
+    btn.disabled = true;
+    btn.textContent = '저장 중...';
+
+    try {
+      const r = await fetch(`${API}/h01-mapping/${sessionId}`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({mappings}),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const d = await r.json();
+
+      document.getElementById('h01-mapping-area').style.display = 'none';
+      document.getElementById('btn-s3').disabled = false;
+      appendLog('s3', `H01 매핑 저장 완료 (${d.updated}개) — Stage 3 실행 가능`, 'ok');
+    } catch (err) {
+      appendLog('s3', `매핑 저장 오류: ${err.message}`, 'err');
+      btn.disabled = false;
+      btn.textContent = '💾 매핑 저장 후 Stage 3 활성화';
     }
   }
 
