@@ -482,6 +482,130 @@ def _gen_register_map(regs_by_cat: dict, mppt: int, total_strings: int,
                 all_defined.add('INVERTER_MODE')
                 break
 
+    # AC_POWER — 유효전력 레지스터 다양한 후보명 지원 (한글/영문/제조사별)
+    if 'AC_POWER' not in all_defined:
+        for _ap in ['유효전력종합_ACTIVE_POWER', 'ACTIVE_POWER', 'TOTAL_ACTIVE_POWER',
+                    'GRID_TOTAL_ACTIVE_POWER_LOW', 'ACTIVE_POWER_LOW', 'AC_ACTIVE_POWER',
+                    'OUTPUT_POWER', 'GRID_ACTIVE_POWER', 'TOTAL_OUTPUT_POWER',
+                    'ACTIVE_OUTPUT_POWER', 'ACTIVE_OUTPUT_POWER_LOW']:
+            if _ap in all_defined:
+                lines.append(f'    {"AC_POWER":40s} = {_ap}')
+                all_defined.add('AC_POWER')
+                break
+
+    # R_PHASE_VOLTAGE — L1/A상 전압 후보, 없으면 S_PHASE_VOLTAGE로 대체
+    if 'R_PHASE_VOLTAGE' not in all_defined:
+        _found_r = False
+        for _rv in ['L1_VOLTAGE', 'R_VOLTAGE', 'PHASE_A_VOLTAGE', 'UA_VOLTAGE',
+                    'A_PHASE_VOLTAGE', 'A_B_LINEVOLTAGE_PHASE_AVOLTAGE']:
+            if _rv in all_defined:
+                lines.append(f'    {"R_PHASE_VOLTAGE":40s} = {_rv}')
+                all_defined.add('R_PHASE_VOLTAGE')
+                _found_r = True
+                break
+        if not _found_r and 'S_PHASE_VOLTAGE' in all_defined:
+            lines.append(f'    {"R_PHASE_VOLTAGE":40s} = S_PHASE_VOLTAGE  # L1 없음 → 단상 대체')
+            all_defined.add('R_PHASE_VOLTAGE')
+
+    # T_PHASE_VOLTAGE — L3/C상 전압 후보, 없으면 S_PHASE_VOLTAGE로 대체
+    if 'T_PHASE_VOLTAGE' not in all_defined:
+        _found_t = False
+        for _tv in ['L3_VOLTAGE', 'T_VOLTAGE', 'PHASE_C_VOLTAGE', 'UC_VOLTAGE',
+                    'C_PHASE_VOLTAGE', 'C_A_LINE_VOLTAGE_PHASE_CVOLTAGE']:
+            if _tv in all_defined:
+                lines.append(f'    {"T_PHASE_VOLTAGE":40s} = {_tv}')
+                all_defined.add('T_PHASE_VOLTAGE')
+                _found_t = True
+                break
+        if not _found_t and 'S_PHASE_VOLTAGE' in all_defined:
+            lines.append(f'    {"T_PHASE_VOLTAGE":40s} = S_PHASE_VOLTAGE  # L3 없음 → 단상 대체')
+            all_defined.add('T_PHASE_VOLTAGE')
+
+    # R_PHASE_CURRENT / S_PHASE_CURRENT / T_PHASE_CURRENT
+    if 'R_PHASE_CURRENT' not in all_defined:
+        _found_rc = False
+        for _rc in ['L1_CURRENT', 'R_CURRENT', 'PHASE_A_CURRENT', 'IA_CURRENT',
+                    'A_PHASE_CURRENT', '전류종합']:
+            if _rc in all_defined:
+                lines.append(f'    {"R_PHASE_CURRENT":40s} = {_rc}')
+                all_defined.add('R_PHASE_CURRENT')
+                _found_rc = True
+                break
+        if not _found_rc and 'S_PHASE_CURRENT' in all_defined:
+            lines.append(f'    {"R_PHASE_CURRENT":40s} = S_PHASE_CURRENT  # L1 없음 → 단상 대체')
+            all_defined.add('R_PHASE_CURRENT')
+    if 'S_PHASE_CURRENT' not in all_defined:
+        for _sc in ['L2_CURRENT', 'S_CURRENT', 'PHASE_B_CURRENT', 'IB_CURRENT',
+                    'B_PHASE_CURRENT', '전류종합']:
+            if _sc in all_defined:
+                lines.append(f'    {"S_PHASE_CURRENT":40s} = {_sc}')
+                all_defined.add('S_PHASE_CURRENT')
+                break
+    if 'T_PHASE_CURRENT' not in all_defined:
+        _found_tc2 = False
+        for _tc2 in ['L3_CURRENT', 'T_CURRENT', 'PHASE_C_CURRENT', 'IC_CURRENT',
+                     'C_PHASE_CURRENT']:
+            if _tc2 in all_defined:
+                lines.append(f'    {"T_PHASE_CURRENT":40s} = {_tc2}')
+                all_defined.add('T_PHASE_CURRENT')
+                _found_tc2 = True
+                break
+        if not _found_tc2 and 'S_PHASE_CURRENT' in all_defined:
+            lines.append(f'    {"T_PHASE_CURRENT":40s} = S_PHASE_CURRENT  # L3 없음 → 단상 대체')
+            all_defined.add('T_PHASE_CURRENT')
+
+    # TOTAL_ENERGY — 누적 발전량 후보 (kWh/Wh 단위 구분은 modbus_handler가 처리)
+    if 'TOTAL_ENERGY' not in all_defined:
+        for _te in ['CUMULATIVE_ENERGY', 'TOTAL_ACTIVE_ENERGY', 'ACCUMULATED_ENERGY',
+                    'TOTAL_ENERGY_LOW', 'TOTAL_GENERATED_ENERGY', 'ENERGY_TOTAL']:
+            if _te in all_defined:
+                lines.append(f'    {"TOTAL_ENERGY":40s} = {_te}')
+                all_defined.add('TOTAL_ENERGY')
+                break
+
+    # PV_POWER alias (없으면 추가)
+    if 'PV_POWER' not in all_defined:
+        for _pvp in ['PV_TOTAL_INPUT_POWER_LOW', 'TOTAL_PV_POWER_LOW', 'DC_POWER',
+                     'INPUT_POWER', 'DC_INPUT_POWER']:
+            if _pvp in all_defined:
+                lines.append(f'    {"PV_POWER":40s} = {_pvp}')
+                all_defined.add('PV_POWER')
+                break
+
+    # MPPT1_CURRENT 추가 후보 (단상/EKOS 등 PV전류 직접 레지스터 사용 인버터)
+    if 'MPPT1_CURRENT' not in all_defined:
+        for _mc1 in ['태양전지_전류', 'PV_CURRENT', 'DC_CURRENT', 'INPUT_CURRENT',
+                     'PV_INPUT_CURRENT', 'PV1_CURRENT', 'PV_SIDE_CURRENT']:
+            if _mc1 in all_defined:
+                lines.append(f'    {"MPPT1_CURRENT":40s} = {_mc1}')
+                all_defined.add('MPPT1_CURRENT')
+                break
+
+    # STRING{N}_CURRENT aliases — 한글 인버터 등 STRING_N_CURRENT 형식 통일
+    for _si in range(1, total_strings + 1):
+        _salias = f'STRING{_si}_CURRENT'
+        if _salias not in all_defined:
+            for _sc_cand in [f'STRING_{_si}_CURRENT', f'태양전지{_si}_전류_STRING_{_si}_CURRENT',
+                             f'PV_STRING{_si}_CURRENT', f'PVSTRING{_si}_CURRENT']:
+                if _sc_cand in all_defined:
+                    lines.append(f'    {_salias:40s} = {_sc_cand}')
+                    all_defined.add(_salias)
+                    break
+
+    # ERROR_CODE{N} aliases — ALARM 카테고리 첫 3개 레지스터에서 자동 생성
+    _alarm_regs_sorted = sorted(
+        [r for r in regs_by_cat.get('ALARM', []) if isinstance(r.address, int)],
+        key=lambda r: r.address
+    )
+    for _ei, _areg in enumerate(_alarm_regs_sorted[:3], 1):
+        _ecode_alias = f'ERROR_CODE{_ei}'
+        _areg_name = to_upper_snake(_areg.definition)
+        # 이름 정규화 (STRING입력/MPPT입력 패턴 제거)
+        _areg_name = re.sub(r'(STRING\d+)_INPUT_(VOLTAGE|CURRENT)', r'\1_\2', _areg_name)
+        if _ecode_alias not in all_defined and _areg_name in all_defined:
+            lines.append(f'    {_ecode_alias:40s} = {_areg_name}')
+            all_defined.add(_ecode_alias)
+
     # DER / Control registers — 고정 주소 (없으면 항상 추가)
     _der_fixed = [
         ('DER_POWER_FACTOR_SET',   '0x07D0'),
@@ -797,6 +921,103 @@ def generate_iv_current_data(isc, voc, v_min, data_points={iv_data_points}):
 '''
 
 
+def _gen_read_blocks(all_regs: List[RegisterRow], fc_code: int = 3,
+                     gap_tolerance: int = 4) -> str:
+    """RTU 배치 읽기용 READ_BLOCKS 생성.
+
+    모니터링/상태/알람 레지스터를 연속 블록으로 묶어 Modbus 트랜잭션 수를 최소화.
+    FLOAT32/U32/S32는 2개 레지스터를 차지한다.
+    fc_code: 3=FC03 Holding Registers, 4=FC04 Input Registers
+    """
+    read_cats = {'MONITORING', 'STATUS', 'ALARM'}
+    two_reg_types = {'FLOAT32', 'U32', 'S32'}
+    addr_sizes = []
+    for reg in all_regs:
+        if reg.category not in read_cats:
+            continue
+        if not isinstance(reg.address, int):
+            continue
+        size = 2 if (reg.data_type or '').upper() in two_reg_types else 1
+        addr_sizes.append((reg.address, size))
+
+    if not addr_sizes:
+        return "\nREAD_BLOCKS = []\n"
+
+    # 중복 제거 후 정렬
+    seen: set = set()
+    unique = []
+    for addr, size in sorted(addr_sizes):
+        if addr not in seen:
+            seen.add(addr)
+            unique.append((addr, size))
+
+    # 연속 블록 그룹화
+    blocks = []
+    blk_start, blk_end = unique[0][0], unique[0][0] + unique[0][1]
+    for addr, size in unique[1:]:
+        if addr <= blk_end + gap_tolerance:
+            blk_end = max(blk_end, addr + size)
+        else:
+            blocks.append((blk_start, blk_end - blk_start))
+            blk_start, blk_end = addr, addr + size
+    blocks.append((blk_start, blk_end - blk_start))
+
+    lines = ['\n', '# RTU 배치 읽기 블록 — start/count/fc 지정으로 트랜잭션 최소화',
+             'READ_BLOCKS = [']
+    for start, count in blocks:
+        # Modbus 최대 레지스터 수(125) 초과 시 분할
+        MAX_REG = 125
+        off = 0
+        while off < count:
+            c = min(MAX_REG, count - off)
+            lines.append(f"    {{'start': 0x{start + off:04X}, 'count': {c:3d}, 'fc': {fc_code}}},")
+            off += c
+    lines.append(']')
+    lines.append('')
+    return '\n'.join(lines)
+
+
+def _gen_data_parser(mppt_count: int, total_strings: int) -> str:
+    """H01 출력 필드 → RegisterMap 속성명 매핑 DATA_PARSER 생성.
+
+    modbus_handler._read_inverter_data_dynamic()이 이 매핑을 사용하여
+    레지스터 파일에 의존하지 않고 H01 필드를 읽는다.
+    RegisterMap 속성명은 _gen_register_map()이 생성하는 표준 alias와 일치해야 한다.
+    """
+    lines = ['\n', '# H01 출력 필드 → RegisterMap 속성명 매핑',
+             '# modbus_handler._read_inverter_data_dynamic()이 이 매핑을 사용한다.',
+             'DATA_PARSER = {']
+    # 기본 스칼라 필드
+    _base = [
+        ('r_voltage',         'R_PHASE_VOLTAGE'),
+        ('s_voltage',         'S_PHASE_VOLTAGE'),
+        ('t_voltage',         'T_PHASE_VOLTAGE'),
+        ('r_current',         'R_PHASE_CURRENT'),
+        ('s_current',         'S_PHASE_CURRENT'),
+        ('t_current',         'T_PHASE_CURRENT'),
+        ('frequency',         'FREQUENCY'),
+        ('pv_power',          'PV_POWER'),
+        ('ac_power',          'AC_POWER'),
+        ('power_factor',      'POWER_FACTOR'),
+        ('mode',              'INVERTER_MODE'),
+        ('alarm1',            'ERROR_CODE1'),
+        ('alarm2',            'ERROR_CODE2'),
+        ('cumulative_energy', 'TOTAL_ENERGY'),
+    ]
+    for h01, reg in _base:
+        lines.append(f"    '{h01:20s}': '{reg}',")
+    # MPPT
+    for n in range(1, mppt_count + 1):
+        lines.append(f"    'mppt{n}_voltage'        : 'MPPT{n}_VOLTAGE',")
+        lines.append(f"    'mppt{n}_current'        : 'MPPT{n}_CURRENT',")
+    # String 전류
+    for n in range(1, total_strings + 1):
+        lines.append(f"    'string{n}_current'      : 'STRING{n}_CURRENT',")
+    lines.append('}')
+    lines.append('')
+    return '\n'.join(lines)
+
+
 def _gen_data_types(all_regs: List[RegisterRow]) -> str:
     """DATA_TYPES dict 생성"""
     lines = ['\n', 'DATA_TYPES = {']
@@ -1031,6 +1252,14 @@ def validate_code(code: str, mppt: int, total_strings: int,
     checks['get_mppt_registers'] = 'def get_mppt_registers' in code
     checks['DATA_TYPES'] = 'DATA_TYPES' in code
     checks['StatusConverter'] = 'StatusConverter' in code
+    # RTU 통신 호환성 — READ_BLOCKS / DATA_PARSER
+    checks['READ_BLOCKS'] = 'READ_BLOCKS' in code
+    checks['DATA_PARSER'] = 'DATA_PARSER' in code
+    # 필수 H01 매핑 alias
+    checks['alias_AC_POWER'] = 'AC_POWER' in code
+    checks['alias_R_PHASE_VOLTAGE'] = 'R_PHASE_VOLTAGE' in code
+    checks['alias_T_PHASE_VOLTAGE'] = 'T_PHASE_VOLTAGE' in code
+    checks['alias_TOTAL_ENERGY'] = 'TOTAL_ENERGY' in code
 
     # RTU 블록 통신 호환성 검증
     checks['RTU_FC_CODE'] = 'FC_CODE' in code
@@ -1257,7 +1486,8 @@ def run_stage3(
         _gen_helpers(mppt_count, total_strings, strings_per_mppt, iv_data_points),
         _gen_data_types(all_regs),
         _gen_string_current_monitor(all_regs),
-        _gen_rtu_comm(monitoring_regs, fc_code),
+        _gen_read_blocks(all_regs),
+        _gen_data_parser(mppt_count, total_strings),
     ]
     code = '\n'.join(p for p in code_parts if p)
 
