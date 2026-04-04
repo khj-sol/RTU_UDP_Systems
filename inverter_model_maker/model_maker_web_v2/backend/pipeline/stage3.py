@@ -33,7 +33,7 @@ def read_stage2_excel(path: str) -> dict:
     """Stage 2 Excel → {meta, all_regs, review_items} — V2 + 레거시 호환"""
     openpyxl = get_openpyxl()
     wb = openpyxl.load_workbook(path, data_only=True)
-    result = {'meta': {}, 'all_regs': [], 'review_items': []}
+    result = {'meta': {}, 'all_regs': [], 'review_items': [], 'h01_manual_mapping': {}}
 
     is_v2 = '1_REGISTER_MAP' in wb.sheetnames
 
@@ -143,6 +143,21 @@ def read_stage2_excel(path: str) -> dict:
                     if i < len(cells):
                         item[h] = cells[i]
                 result['review_items'].append(item)
+
+    # ── H01_MAPPING 시트 읽기 (수동 매핑 오버라이드) ──
+    if 'H01_MAPPING' in wb.sheetnames:
+        ws_h01 = wb['H01_MAPPING']
+        header_found = False
+        for row in ws_h01.iter_rows(values_only=True):
+            cells = [str(c).strip() if c is not None else '' for c in row]
+            if not header_found:
+                # 헤더 행 감지: 'H01 Field' 컬럼 존재 확인
+                if 'H01 Field' in cells:
+                    header_found = True
+                continue
+            # cells[1]=H01 Field, cells[3]=매칭된 레지스터명
+            if len(cells) >= 4 and cells[1] and cells[3]:
+                result['h01_manual_mapping'][cells[1]] = cells[3]
 
     wb.close()
     return result
@@ -978,15 +993,18 @@ def _gen_read_blocks(all_regs: List[RegisterRow], fc_code: int = 3,
     return '\n'.join(lines)
 
 
-def _gen_data_parser(all_regs: List[RegisterRow], mppt_count: int, total_strings: int) -> str:
+def _gen_data_parser(all_regs: List[RegisterRow], mppt_count: int, total_strings: int,
+                     h01_manual_mapping: dict = None) -> str:
     """H01 출력 필드 → RegisterMap 속성명 매핑 DATA_PARSER 생성.
 
     modbus_handler._read_inverter_data_dynamic()이 이 매핑을 사용하여
     레지스터 파일에 의존하지 않고 H01 필드를 읽는다.
     RegisterMap 속성명은 _gen_register_map()이 생성하는 표준 alias와 일치해야 한다.
 
-    Stage2에서 h01_field 매칭된 레지스터가 있으면 그 이름을 우선 사용하고,
-    없으면 _gen_register_map()이 항상 보장하는 표준 alias를 사용한다.
+    우선순위:
+      1. H01_MAPPING 시트 수동 매핑 (h01_manual_mapping)
+      2. Stage2 h01_field 자동 매칭 레지스터명
+      3. _gen_register_map()이 항상 보장하는 표준 alias
     """
     # Stage2 H01 매칭 결과: h01_field → RegisterMap 속성명
     h01_to_reg: dict = {}
@@ -996,6 +1014,12 @@ def _gen_data_parser(all_regs: List[RegisterRow], mppt_count: int, total_strings
             name = to_upper_snake(reg.definition)
             if name:
                 h01_to_reg[h01] = name
+
+    # 수동 매핑 오버라이드 (H01_MAPPING 시트에서 읽은 값)
+    if h01_manual_mapping:
+        for field, reg_name in h01_manual_mapping.items():
+            if reg_name and reg_name.strip():
+                h01_to_reg[field] = reg_name.strip()
 
     lines = ['\n', '# H01 출력 필드 → RegisterMap 속성명 매핑',
              '# modbus_handler._read_inverter_data_dynamic()이 이 매핑을 사용한다.',
@@ -1379,6 +1403,7 @@ def run_stage3(
     meta = s2_data['meta']
     all_regs = s2_data['all_regs']
     review_items = s2_data['review_items']
+    h01_manual_mapping = s2_data.get('h01_manual_mapping', {})
 
     manufacturer = meta.get('제조사', meta.get('manufacturer', 'Unknown'))
     device_type = meta.get('설비 타입', meta.get('device_type', 'inverter'))
@@ -1526,7 +1551,7 @@ def run_stage3(
         _gen_data_types(all_regs),
         _gen_string_current_monitor(all_regs),
         _gen_read_blocks(all_regs),
-        _gen_data_parser(all_regs, mppt_count, total_strings),
+        _gen_data_parser(all_regs, mppt_count, total_strings, h01_manual_mapping),
     ]
     code = '\n'.join(p for p in code_parts if p)
 

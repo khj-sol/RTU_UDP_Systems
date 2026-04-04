@@ -381,6 +381,129 @@ def _guess_category(definition: str) -> str:
     return 'MONITORING'
 
 
+# H01 고정 필드 목록 (순서 고정) — (h01_field명, 설명)
+_H01_MAPPING_FIELDS = [
+    ('pv_voltage',        'HANDLER 계산 (평균 MPPT 전압)'),
+    ('pv_current',        'HANDLER 계산 (합산 MPPT 전류)'),
+    ('pv_power',          'HANDLER 계산 (합산 MPPT 전력)'),
+    ('r_voltage',         'R상(L1) 전압'),
+    ('s_voltage',         'S상(L2) 전압'),
+    ('t_voltage',         'T상(L3) 전압'),
+    ('r_current',         'R상(L1) 전류'),
+    ('s_current',         'S상(L2) 전류'),
+    ('t_current',         'T상(L3) 전류'),
+    ('ac_power',          'AC 출력 전력'),
+    ('power_factor',      '역률'),
+    ('frequency',         '계통 주파수'),
+    ('cumulative_energy', '누적 발전량'),
+    ('status',            '인버터 상태'),
+    ('alarm1',            '경보 코드 1'),
+    ('alarm2',            '경보 코드 2'),
+    ('alarm3',            '경보 코드 3'),
+    ('temperature',       '인버터 온도'),
+]
+
+
+def _add_h01_mapping_sheet(wb, s1: dict, openpyxl_module) -> None:
+    """H01_MAPPING 시트 추가 — H01 필드별 레지스터 수동 매핑 (드롭다운 지원)."""
+    from openpyxl.styles import Font, PatternFill, Border, Side
+    from openpyxl.worksheet.datavalidation import DataValidation
+
+    ws = wb.create_sheet('H01_MAPPING')
+
+    thin = Border(
+        left=Side(style='thin'), right=Side(style='thin'),
+        top=Side(style='thin'), bottom=Side(style='thin'))
+    hdr_font = Font(bold=True, color='FFFFFF')
+    hdr_fill = PatternFill('solid', fgColor='333333')
+    auto_fill  = PatternFill('solid', fgColor='D5F5E3')  # 연초록 — 자동 매칭
+    empty_fill = PatternFill('solid', fgColor='FDECEA')  # 연빨강 — 미매칭
+    ref_fill   = PatternFill('solid', fgColor='EBF5FB')  # 연파랑 — 참조 목록
+
+    # Row 1 제목
+    ws['A1'] = 'H01_MAPPING — H01 필드별 레지스터 수동 매핑'
+    ws['A1'].font = Font(bold=True, size=13)
+    ws['A2'] = ('※ C열 드롭다운에서 매핑할 레지스터명(UPPER_SNAKE_CASE)을 선택하거나 직접 입력하세요.'
+                '  D열은 참조용 — 편집 불필요.')
+    ws['A2'].font = Font(italic=True, color='555555')
+
+    # Row 3 헤더
+    headers = ['No', 'H01 Field', '설명', '매칭된 레지스터명', '사용 가능한 레지스터 목록']
+    for j, h in enumerate(headers, start=1):
+        cell = ws.cell(row=3, column=j, value=h)
+        cell.font = hdr_font
+        cell.fill = hdr_fill
+        cell.border = thin
+
+    # 자동 매칭 빌드: h01_field → UPPER_SNAKE_CASE 레지스터명
+    h01_auto: dict = {}
+    all_cats = (s1.get('monitoring', []) + s1.get('info', []) +
+                s1.get('status', []) + s1.get('alarm', []))
+    for reg in all_cats:
+        h01 = (getattr(reg, 'h01_field', '') or '').strip()
+        if h01 and h01 not in h01_auto:
+            name = to_upper_snake(reg.definition)
+            if name:
+                h01_auto[h01] = name
+
+    # 사용 가능한 레지스터 목록 (MONITORING 우선, UPPER_SNAKE_CASE)
+    avail_names: list = []
+    seen_avail: set = set()
+    for reg in all_cats:
+        name = to_upper_snake(reg.definition)
+        if name and name not in seen_avail:
+            avail_names.append(name)
+            seen_avail.add(name)
+
+    DATA_START = 4
+    n_fields = len(_H01_MAPPING_FIELDS)
+
+    # 데이터 행
+    for i, (field, desc) in enumerate(_H01_MAPPING_FIELDS):
+        row = DATA_START + i
+        matched = h01_auto.get(field, '')
+
+        ws.cell(row=row, column=1, value=i + 1).border = thin
+        ws.cell(row=row, column=2, value=field).border = thin
+        ws.cell(row=row, column=3, value=desc).border = thin
+
+        cell_c = ws.cell(row=row, column=4, value=matched)
+        cell_c.border = thin
+        cell_c.fill = auto_fill if matched else empty_fill
+
+        avail_val = avail_names[i] if i < len(avail_names) else ''
+        cell_d = ws.cell(row=row, column=5, value=avail_val)
+        cell_d.fill = ref_fill
+
+    # D열 남은 레지스터명 기록
+    for i in range(n_fields, len(avail_names)):
+        ws.cell(row=DATA_START + i, column=5, value=avail_names[i]).fill = ref_fill
+
+    # DataValidation — C열(4열)에 E열(5열) 범위 드롭다운
+    last_avail_row = DATA_START + max(len(avail_names), n_fields) - 1
+    last_data_row  = DATA_START + n_fields - 1
+
+    if avail_names:
+        dv = DataValidation(
+            type='list',
+            formula1=f'$E${DATA_START}:$E${last_avail_row}',
+            allow_blank=True,
+            showDropDown=False,  # False = 드롭다운 화살표 표시
+        )
+        dv.error      = '목록에 없는 값입니다. E열 레지스터 목록을 확인하세요.'
+        dv.errorTitle = '잘못된 입력'
+        dv.prompt     = 'E열의 레지스터 목록에서 선택하거나 직접 입력하세요.'
+        dv.promptTitle = '레지스터 선택'
+        dv.sqref = f'D{DATA_START}:D{last_data_row}'
+        ws.add_data_validation(dv)
+
+    ws.column_dimensions['A'].width = 5
+    ws.column_dimensions['B'].width = 22
+    ws.column_dimensions['C'].width = 30
+    ws.column_dimensions['D'].width = 35
+    ws.column_dimensions['E'].width = 35
+
+
 # ─── Stage 2 메인 함수 ───────────────────────────────────────────────────────
 
 def run_stage2(
@@ -684,6 +807,11 @@ def run_stage2(
     ws_sum.column_dimensions['B'].width = 25
     ws_sum.column_dimensions['E'].width = 20
     ws_sum.column_dimensions['F'].width = 35
+
+    # ═══════════════════════════════════════════════════════════════════
+    # Sheet 4: H01_MAPPING — H01 필드별 레지스터 수동 매핑
+    # ═══════════════════════════════════════════════════════════════════
+    _add_h01_mapping_sheet(wb, s1, openpyxl)
 
     wb.save(output_path)
     wb.close()
