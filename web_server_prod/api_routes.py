@@ -51,8 +51,16 @@ FIRMWARE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "pc_prog
 # --- Security: credentials from environment variables ---
 SSH_USER = os.environ.get('RTU_SSH_USER', 'pi')
 SSH_PASS = os.environ.get('RTU_SSH_PASS', 'raspberry')
+SSH_PORT = int(os.environ.get('RTU_SSH_PORT', '22'))
 FTP_USER_ENV = os.environ.get('RTU_FTP_USER', 'rtu')
 FTP_PASS_ENV = os.environ.get('RTU_FTP_PASS', '1234')
+
+if not os.environ.get('RTU_SSH_PASS'):
+    import logging as _log
+    _log.getLogger(__name__).warning(
+        "RTU_SSH_PASS 환경변수가 설정되지 않아 기본값 'raspberry'를 사용합니다. "
+        "운영 환경에서는 RTU_SSH_PASS를 설정하세요."
+    )
 
 # --- Security: path whitelist for config file access ---
 ALLOWED_CONFIG_DIRS = ['/home/pi/config', '/home/pi/common']
@@ -670,11 +678,11 @@ def _ssh_connect(ip: str):
     key_path = os.path.expanduser("~/.ssh/id_rsa")
     try:
         if os.path.isfile(key_path):
-            client.connect(ip, username=SSH_USER, key_filename=key_path, timeout=10)
+            client.connect(ip, port=SSH_PORT, username=SSH_USER, key_filename=key_path, timeout=10)
         else:
-            client.connect(ip, username=SSH_USER, password=SSH_PASS, timeout=10)
+            client.connect(ip, port=SSH_PORT, username=SSH_USER, password=SSH_PASS, timeout=10)
     except Exception:
-        client.connect(ip, username=SSH_USER, password=SSH_PASS, timeout=10)
+        client.connect(ip, port=SSH_PORT, username=SSH_USER, password=SSH_PASS, timeout=10)
     return client
 
 
@@ -861,6 +869,13 @@ async def config_push_preview():
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     files = []
 
+    # config/rtu_config.ini
+    p = os.path.join(project_root, 'config', 'rtu_config.ini')
+    if os.path.isfile(p):
+        files.append({'local': 'config/rtu_config.ini',
+                      'remote': '/home/pi/config/rtu_config.ini',
+                      'size': os.path.getsize(p)})
+
     # config/device_models.ini
     p = os.path.join(project_root, 'config', 'device_models.ini')
     if os.path.isfile(p):
@@ -906,6 +921,9 @@ async def config_push_to_rtu(req: ConfigRestart):
 
     # Build file pairs (local_path, remote_path, display_name) — shared by both modes
     file_pairs = []
+    p = os.path.join(project_root, 'config', 'rtu_config.ini')
+    if os.path.isfile(p):
+        file_pairs.append((p, '/home/pi/config/rtu_config.ini', 'config/rtu_config.ini'))
     p = os.path.join(project_root, 'config', 'device_models.ini')
     if os.path.isfile(p):
         file_pairs.append((p, '/home/pi/config/device_models.ini', 'config/device_models.ini'))
@@ -968,9 +986,13 @@ async def config_push_to_rtu(req: ConfigRestart):
         restart_ok = False
         restart_error = ''
         try:
-            _, stdout, _ = client.exec_command('sudo systemctl restart rtu')
+            _, stdout, stderr = client.exec_command('sudo systemctl restart rtu')
             stdout.read()
-            restart_ok = True
+            err_output = stderr.read().decode('utf-8', errors='replace').strip()
+            if err_output:
+                restart_error = err_output
+            else:
+                restart_ok = True
         except Exception as re_err:
             restart_error = str(re_err)
 
