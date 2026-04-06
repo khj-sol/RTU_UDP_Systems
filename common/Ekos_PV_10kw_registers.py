@@ -439,7 +439,9 @@ STRING_CURRENT_MONITOR = True
 
 # RTU 배치 읽기 블록 — start/count/fc 지정으로 트랜잭션 최소화
 READ_BLOCKS = [
-    {'start': 0x0000, 'count':  15, 'fc': 3},
+    {'start': 0x0000, 'count':  16, 'fc': 3},
+    {'start': 0x0041, 'count':   2, 'fc': 3},
+    {'start': 0x0073, 'count':   3, 'fc': 3},
     {'start': 0x754B, 'count':  87, 'fc': 3},
 ]
 

@@ -74,6 +74,7 @@ class RegisterMap:
     PV_STRING_COUNT                          = 6
 
     # --- RTU modbus_handler / simulator 필수 alias ---
+    INVERTER_MODE                            = 0x2779  # U16, Working state (0=wait,2=normal,3=fault)
     INNER_TEMP                               = TEMPERATURE
     AC_POWER                                 = PV_POWER
     T_PHASE_VOLTAGE                          = S_PHASE_VOLTAGE  # L3 없음 → 단상 대체
@@ -429,7 +430,7 @@ STRING_CURRENT_MONITOR = True
 # RTU 배치 읽기 블록 — start/count/fc 지정으로 트랜잭션 최소화
 READ_BLOCKS = [
     {'start': 0x0000, 'count':  33, 'fc': 3},
-    {'start': 0x2780, 'count':  10, 'fc': 3},
+    {'start': 0x2779, 'count':  11, 'fc': 3},
     {'start': 0x2B07, 'count':  83, 'fc': 3},
 ]
 

@@ -17,6 +17,7 @@ class RegisterMap:
     # Device Information
     # =========================================================================
     DEVICE_MODEL_PDF                         = 0x0000  # TEXT
+    INVERTER_MODE                            = 0x0000  # U16, Operating State (0=wait,2=normal,3=fault)
     FREQUENCY                                = 0x000F  # U16, scale A
     TOTAL_GENERATIONTIME_HIGH_BYTE           = 0x0017  # U16
     INVERTER_MODULETEMPERATURE               = 0x001B  # U16
