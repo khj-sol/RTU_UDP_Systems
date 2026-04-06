@@ -1636,13 +1636,22 @@ def build_h01_match_table(categorized: dict, meta: dict) -> List[dict]:
             if dc_neighbors:
                 # DC 영역에 있는 alarm → MONITORING으로 이동
                 r.category = 'MONITORING'
-                # 주소 패턴으로 MPPT 번호 추정 (DC voltage 1=base, 2=base+2, ...)
-                base_addr = min(n.address for n in dc_neighbors)
+                # 주소 패턴으로 MPPT 번호 추정
+                # DC voltage/current는 연속 쌍: V1,I1,V2,I2,V3,I3,V4,I4
+                # 가장 작은 DC 주소(voltage 1)를 기준으로 offset 계산
+                all_dc = [n for n in categorized.get('MONITORING', [])
+                          if isinstance(n.address, int) and
+                          any(k in n.definition.lower() for k in ['dc_voltage', 'dc voltage',
+                               'dc_current', 'dc current'])]
+                if all_dc:
+                    base_addr = min(n.address for n in all_dc)
+                else:
+                    base_addr = min(n.address for n in dc_neighbors)
                 offset = r.address - base_addr
-                mppt_n = (offset // 2) + 1  # 2개씩 (voltage+current)
-                if offset % 2 == 0:  # 짝수 offset = voltage
+                mppt_n = (offset // 2) + 1
+                if offset % 2 == 0:  # 짝수 = voltage
                     r.h01_field = f'mppt{mppt_n}_voltage'
-                else:  # 홀수 offset = current
+                else:  # 홀수 = current
                     r.h01_field = f'mppt{mppt_n}_current'
                 categorized['MONITORING'].append(r)
                 reclassified.append(r)
