@@ -1609,7 +1609,20 @@ def build_h01_match_table(categorized: dict, meta: dict) -> List[dict]:
                     break
             if status_reg:
                 break
-    # 상태 정의(값 테이블) 검증 — 통상 Appendix에 별도 정의
+    # status 미발견 시 주소 추정: alarm 첫 주소 - 1 (frequency 뒤, alarm 앞)
+    if not status_reg:
+        alarm_addrs = [r.address for r in categorized.get('ALARM', [])
+                       if isinstance(r.address, int) and r.address > 0x1000]
+        freq_reg = _find_matched_reg(categorized, 'frequency')
+        if alarm_addrs and freq_reg and isinstance(freq_reg.address, int):
+            # frequency와 alarm 사이 주소에 status가 있을 가능성
+            est_addr = min(alarm_addrs) - 1
+            if freq_reg.address < est_addr < min(alarm_addrs):
+                status_reg = RegisterRow(
+                    definition='Work state (추정)',
+                    address=est_addr, address_hex=f'0x{est_addr:04X}',
+                    data_type='U16', rw='RO', category='STATUS',
+                    h01_field='inverter_status')
     status_note = ''
     rows.append(_make_pdf_match_row('status', status_reg, 'Work State 미발견'))
     if status_note and rows[-1]['status'] == 'O':
@@ -1690,6 +1703,20 @@ def build_h01_match_table(categorized: dict, meta: dict) -> List[dict]:
             reg = _find_matched_reg(categorized, field)
             if reg:
                 rows.append(_make_pdf_match_row(field, reg))
+            elif mtype == 'voltage':
+                # voltage 없으면 current 주소 - 1 로 추정 (MPPT V/I 쌍 패턴)
+                cur_reg = _find_matched_reg(categorized, f'mppt{n}_current')
+                if cur_reg and isinstance(cur_reg.address, int):
+                    est_addr = cur_reg.address - 1
+                    rows.append({
+                        'field': field, 'source': 'PDF', 'status': 'O',
+                        'address': f'0x{est_addr:04X}',
+                        'definition': f'MPPT_{n}_VOLTAGE (추정)',
+                        'type': 'U16', 'unit': 'V', 'scale': '0.1',
+                        'note': f'current({cur_reg.address_hex}) -1 주소 추정',
+                    })
+                else:
+                    rows.append(_make_pdf_match_row(field, None))
             elif mtype == 'current':
                 # current 없으면 voltage + power로 계산 가능한지 체크
                 has_v = _find_matched_reg(categorized, f'mppt{n}_voltage')
