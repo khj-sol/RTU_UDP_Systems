@@ -272,6 +272,9 @@ class RegisterMap:
     IV_POINTS_PER_STRING                     = 100     # 100 V/I points per string
     IV_DATA_BASE                             = 0x1388  # FC04, IV data start
     IV_REGS_PER_STRING                       = 200     # 100V + 100I regs
+    # RTU KstarModbusHandler 호환 alias
+    BLOCK1_COUNT                             = 125     # FC04 Block 1
+    BLOCK2_COUNT                             = 125     # FC04 Block 2
 
 class IVScanCommand:
     """IV Scan Command values for writing to 0x600D"""
@@ -289,12 +292,6 @@ class IVScanStatus:
     def to_string(cls, status):
         return {0: "Idle", 1: "Running", 2: "Finished"}.get(status, f"Unknown({status})")
 
-
-
-
-    # RTU KstarModbusHandler 호환 alias
-    BLOCK1_COUNT = 125  # FC04 Block 1
-    BLOCK2_COUNT = 125  # FC04 Block 2
 
 class InverterMode:
     """Inverter Mode Table (0x101D)"""
