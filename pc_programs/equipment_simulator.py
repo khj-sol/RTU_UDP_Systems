@@ -3213,7 +3213,21 @@ def main():
         try:
             config = _load_config_from_ini()
             if config.get('devices'):
-                print(f"\n  Loaded {len(config['devices'])} devices from rs485_ch1.ini:")
+                # 시뮬레이션 가능한 모델 리스트 (common/ 스캔)
+                common_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'common')
+                avail_protos = []
+                for f in sorted(os.listdir(common_dir)):
+                    if f.endswith('_registers.py') and not f.startswith('REF_'):
+                        proto = f.replace('_registers.py', '').split('_')[0].lower()
+                        avail_protos.append((proto, f.replace('_registers.py', '')))
+
+                print(f"\n  Available models ({len(avail_protos)}):")
+                active_protos = {d['protocol'].lower() for d in config['devices']}
+                for proto, fname in avail_protos:
+                    active = '*' if proto in active_protos else ' '
+                    print(f"    [{active}] {fname}")
+
+                print(f"\n  Active devices ({len(config['devices'])} from rs485_ch1.ini):")
                 for d in config['devices']:
                     fc = "FC04" if d['type'] == 'inverter' and d['protocol'].lower().startswith('kstar') else "FC03"
                     print(f"    [Slave {d['slave_id']:2d}] {d['type']:8s} {d['protocol']:12s} {d['name']} ({fc})")
