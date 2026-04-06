@@ -104,6 +104,12 @@ class RegisterMap:
 
     # --- MPPT alias (modbus_handler: MPPT{N}_ 형식) ---
     MPPT1_CURRENT                            = PV1_CURRENT
+    MPPT2_VOLTAGE                            = PV2_VOLTAGE
+    MPPT2_CURRENT                            = PV2_CURRENT
+    MPPT3_VOLTAGE                            = PV3_VOLTAGE
+    MPPT3_CURRENT                            = PV3_CURRENT
+    MPPT4_VOLTAGE                            = PV4_VOLTAGE
+    MPPT4_CURRENT                            = PV4_CURRENT
     PV_STRING_COUNT                          = 4
 
     # --- RTU modbus_handler / simulator 필수 alias ---

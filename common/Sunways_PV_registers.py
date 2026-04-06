@@ -94,6 +94,10 @@ class RegisterMap:
     INVERTER_ON_OFF                          = 0x0834
     MPPT_NUMBER                              = 0x1A4A  # default MPPT count register
     MPPT1_VOLTAGE                            = PV_VOLTAGE
+    MPPT2_VOLTAGE                            = PV2_VOLTAGE
+    MPPT2_CURRENT                            = PV2_CURRENT
+    MPPT3_VOLTAGE                            = PV3_VOLTAGE
+    MPPT3_CURRENT                            = PV3_CURRENT
     CUMULATIVE_ENERGY_LOW                    = CUMULATIVE_ENERGY
     DER_AVM_DIGITAL_METERCONNECT_STATUS      = 0x1210
 
