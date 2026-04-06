@@ -1725,17 +1725,12 @@ def _interactive_setup():
     print("=" * 70)
     print()
 
-    # COM port
-    port_input = input("  COM Port [COM10]: ").strip()
-    port = port_input if port_input else "COM10"
-
-    baud_input = input("  Baudrate [9600]: ").strip()
-    baudrate = int(baud_input) if baud_input else 9600
-
-    # Device count
+    # COM port / baudrate / device count — 고정값 자동 실행
+    port = "COM10"
+    baudrate = 9600
+    device_count = 5
+    print(f"  COM Port: {port}  Baudrate: {baudrate}  Devices: {device_count}")
     print()
-    count_input = input("  Number of devices [5]: ").strip()
-    device_count = int(count_input) if count_input else 5
 
     all_models = _load_device_models_ini()
     inv_models = all_models['inverter']
@@ -1936,11 +1931,9 @@ def main():
     if 'baudrate' not in config:
         config['baudrate'] = 9600
 
-    # COM 포트 확인/변경 (CLI --port 미지정 시)
+    # COM 포트: CLI --port 미지정 시 config 기본값(COM10) 사용
     if not args.port:
-        port_input = input(f"  COM Port [{config['port']}]: ").strip()
-        if port_input:
-            config['port'] = port_input
+        print(f"  COM Port: {config['port']}")
 
     simulator = EquipmentSimulator(config)
     simulator.start()
