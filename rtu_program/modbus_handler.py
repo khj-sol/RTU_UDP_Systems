@@ -3045,7 +3045,7 @@ class MultiDeviceHandler:
         if handler.connect():
             self._save_shared_pc_client(handler)   # PC 모드: 첫 연결 클라이언트 저장
             mode = "SIM" if use_simulation else ("CM4" if self.use_cm4 else ("HAT" if self.use_hat else "Serial"))
-            self.logger.info(f"add_device: {device_type}{proto_tag} slave={slave_id}, mode={mode}")
+            self.logger.info(f"add_device: {device_type}/{protocol} slave={slave_id}, mode={mode}")
 
             # Register handler in handlers dict for read_monitor_data etc.
             if device_type == 'inverter':
