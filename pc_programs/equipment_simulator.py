@@ -1498,7 +1498,7 @@ class KstarSimulator:
         """Pre-populate IV curve data in FC04 registers — 200V~Voc, 100점, 스캔 시점 파워 참조."""
         from common.Kstar_PV_60kw_registers import generate_iv_voltage_data, generate_iv_current_data
         mppt_count = 3
-        strings_per_mppt = 4
+        strings_per_mppt = 3   # Stage2 메타: Kstar 60kW = 3 MPPT × 3 String
         data_points = KstarRegisters.IV_POINTS_PER_STRING  # 100
         sun_frac = max(0.1, self.env.get_sun_fraction())
 
@@ -1703,17 +1703,17 @@ class EkosSimulator:
     FC03 (Holding Register): Float32 data registers + DER-AVM control
     SCALE['power'] = 1.0 → stores raw W (NOT W×10)
     Float32 for power, voltage, current, frequency, power factor
-    2 MPPT, 4 strings
+    Stage2 메타: 10kW, 1 MPPT, 2 strings
     """
 
     VERSION = "1.0.0"
-    MODEL_NAME = "EKOS-50K-3P"
-    NOMINAL_POWER = 50000       # 50kW
+    MODEL_NAME = "EKOS-10K-3P"
+    NOMINAL_POWER = 10000       # 10kW
     NOMINAL_VOLTAGE = 380.0     # V (line-to-line)
     NOMINAL_FREQUENCY = 60.0    # Hz
 
-    # MPPT nominal voltages (V, real float)
-    PV_VOLTAGE_NOMINAL = [390.0, 385.0]
+    # MPPT nominal voltages (V, real float) — 1 MPPT
+    PV_VOLTAGE_NOMINAL = [390.0]
 
     def __init__(self, logger=None, env=None):
         self.logger = logger or logging.getLogger("EkosSim")
