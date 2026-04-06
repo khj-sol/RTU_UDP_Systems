@@ -116,7 +116,11 @@ from common.REF_weather_registers import (
     accum_radiation_to_raw
 )
 from common.Kstar_PV_60kw_registers import RegisterMap as KstarRegisters
-from common.Huawei_PV_50kw_registers import RegisterMap as HuaweiRegisters, HuaweiStatusConverter
+from common.Huawei_PV_50kw_registers import RegisterMap as HuaweiRegisters
+try:
+    from common.Huawei_PV_50kw_registers import HuaweiStatusConverter
+except ImportError:
+    from common.Huawei_PV_50kw_registers import HuaweiPvStatusConverter as HuaweiStatusConverter
 try:
     from common.Ekos_PV_10kw_registers import RegisterMap as EkosRegisters, InverterMode as EkosInverterMode
 except ImportError:
