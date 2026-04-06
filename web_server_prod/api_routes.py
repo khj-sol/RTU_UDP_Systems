@@ -55,12 +55,7 @@ SSH_PORT = int(os.environ.get('RTU_SSH_PORT', '22'))
 FTP_USER_ENV = os.environ.get('RTU_FTP_USER', 'rtu')
 FTP_PASS_ENV = os.environ.get('RTU_FTP_PASS', '1234')
 
-if not os.environ.get('RTU_SSH_PASS'):
-    import logging as _log
-    _log.getLogger(__name__).warning(
-        "RTU_SSH_PASS 환경변수가 설정되지 않아 기본값 'raspberry'를 사용합니다. "
-        "운영 환경에서는 RTU_SSH_PASS를 설정하세요."
-    )
+# SSH 기본값: raspberry (환경변수 RTU_SSH_PASS로 변경 가능)
 
 # --- Security: path whitelist for config file access ---
 ALLOWED_CONFIG_DIRS = ['/home/pi/config', '/home/pi/common']
