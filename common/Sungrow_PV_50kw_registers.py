@@ -16,15 +16,8 @@ class RegisterMap:
     # =========================================================================
     # Device Information
     # =========================================================================
-    PV_POWER                                 = 0x0011  # U16
-    TOTAL_FAULT_BIT_DEVICE_IS_INFAULT_STOP_STATE = 0x0012  # U16
-    FREQUENCY                                = 0x0025  # U16
-    L2_CURRENT                               = 0x002B  # U16
     SERIAL_NUMBER                            = 0x137E  # U16
     DEVICE_MODEL                             = 0x1388  # U16
-    NOMINALACTIVE_POWER                      = 0x1389  # U16, scale kW 0.1
-    OUTPUT_TYPE                              = 0x138A  # U16
-    DAILY_ENERGY                             = 0x138B  # U16, scale kWh 0.1
     TOTAL_RUNNING_TIME                       = 0x138E  # U32
     TOTAL_RUNNING_TIME_HIGH                  = 0x138F
     INTERNALTEMPERATURE                      = 0x1390  # S16, scale ℃ 0.1
@@ -38,11 +31,15 @@ class RegisterMap:
     # =========================================================================
     # Monitoring Data
     # =========================================================================
+    FREQUENCY                                = 0x0008  # U16
     FAULT                                    = 0x0009  # U16
     L1_VOLTAGE                               = 0x000C  # U16
     COMMUNICATE_FAULT                        = 0x000D  # U16
+    AC_POWER                                 = 0x0011  # U16
     L1_CURRENT                               = 0x0027  # U16
+    L2_CURRENT                               = 0x002B  # U16
     CUMULATIVE_ENERGY                        = 0x0055  # U16
+    DAILY_ENERGY                             = 0x138B  # U16, scale kWh 0.1
     PV_VOLTAGE                               = 0x1393  # U16
     MPPT_1_CURRENT                           = 0x1394  # U16, scale A
     MPPT_2_VOLTAGE                           = 0x1395  # U16, scale A
@@ -64,11 +61,18 @@ class RegisterMap:
     STRING_8_CURRENT                         = 0x1B6C  # STRINGING, scale A 0.01
 
     # =========================================================================
+    # Status & Temperature
+    # =========================================================================
+    REACTIVE_POWERADJUSTMENTMODE             = 0x13AC  # U16
+    QUICK_GRIDDISPATCH_MODE                  = 0x7F39  # U16
+    SWIFT_GRIDDISPATCH_MODE                  = 0x7F3A  # U16
+
+    # =========================================================================
     # Alarm / Error Codes
     # =========================================================================
     L2_VOLTAGE                               = 0x0005  # U16
+    ALARM_RUN                                = 0x000A  # U16
     INVERTER_PARALLEL_COMMUNICATION_ALARM    = 0x004B  # U16
-    REVERSE_CONNECTION_ALARM_OF_THE_METER_CT = 0x0054  # U16
     ELECTRIC_ARC_FAULT                       = 0x0058  # U16
     GROUNDING_CABLE_FAULT                    = 0x006A  # U16
     METER_COMMUNICATION_ABNORMALALARM        = 0x0202  # U16
@@ -81,7 +85,6 @@ class RegisterMap:
     FAULT_ALARM_TIME_MINUTE                  = 0x13B3  # U16
     FAULT_ALARM_TIME_SECOND                  = 0x13B4  # U16
     FAULT_ALARM_CODE_1                       = 0x13B5  # U16
-    ALARM_RUN                                = 0x9100  # U16
 
     # R/S/T Phase Aliases
     R_VOLTAGE                                = L1_VOLTAGE
@@ -110,20 +113,16 @@ class RegisterMap:
     STRING6_CURRENT                          = STRING_6_CURRENT
     STRING7_CURRENT                          = STRING_7_CURRENT
     STRING8_CURRENT                          = STRING_8_CURRENT
-    ERROR_CODE3                              = REVERSE_CONNECTION_ALARM_OF_THE_METER_CT
+    ERROR_CODE3                              = INVERTER_PARALLEL_COMMUNICATION_ALARM
     DER_POWER_FACTOR_SET                     = 0x07D0
     DER_ACTION_MODE                          = 0x07D1
     DER_REACTIVE_POWER_PCT                   = 0x07D2
     DER_ACTIVE_POWER_PCT                     = 0x07D3
     INVERTER_ON_OFF                          = 0x0834
-
-    # --- Simulator 추가 alias ---
-    AC_POWER                                 = PV_POWER          # 0x0011: total active power
-    INNER_TEMP                               = INTERNALTEMPERATURE  # 0x1390
-    INVERTER_MODE                            = 0xE000             # virtual: inverter mode for simulator
-    MPPT1_VOLTAGE                            = PV_VOLTAGE         # 0x1393: MPPT1 voltage (consecutive V1,V2)
-    MPPT3_VOLTAGE                            = MPPT_3_VOLTAGE     # 0x1397
-    MPPT3_CURRENT                            = MPPT_3_CURRENT     # 0x1398
+    MPPT_NUMBER                              = 0x1A4A  # default MPPT count register
+    MPPT1_VOLTAGE                            = PV_VOLTAGE
+    CUMULATIVE_ENERGY_LOW                    = CUMULATIVE_ENERGY
+    DER_AVM_DIGITAL_METERCONNECT_STATUS      = 0x1210
 
 
 
@@ -212,7 +211,7 @@ class ErrorCode1:
 
 
 class ErrorCode2:
-    """Error Code Table2 (0x004B) — Bit field"""
+    """Error Code Table2 (0x000A) — Bit field"""
     BITS = {
         0:  "Grid over voltage",
         1:  "Grid under voltage",
@@ -242,7 +241,7 @@ class ErrorCode2:
 
 
 class ErrorCode3:
-    """Error Code Table3 (0x0054) — Bit field"""
+    """Error Code Table3 (0x004B) — Bit field"""
     BITS = {
         0:  "Reserved",
         1:  "Logger/E-Display EEPROM fail",
@@ -617,14 +616,13 @@ DATA_TYPES = {
     'L2_VOLTAGE': 'U16',
     'FREQUENCY': 'U16',
     'FAULT': 'U16',
+    'ALARM_RUN': 'U16',
     'L1_VOLTAGE': 'U16',
     'COMMUNICATE_FAULT': 'U16',
-    'PV_POWER': 'U16',
-    'TOTAL_FAULT_BIT_DEVICE_IS_INFAULT_STOP_STATE': 'U16',
+    'AC_POWER': 'U16',
     'L1_CURRENT': 'U16',
     'L2_CURRENT': 'U16',
     'INVERTER_PARALLEL_COMMUNICATION_ALARM': 'U16',
-    'REVERSE_CONNECTION_ALARM_OF_THE_METER_CT': 'U16',
     'CUMULATIVE_ENERGY': 'U16',
     'ELECTRIC_ARC_FAULT': 'U16',
     'GROUNDING_CABLE_FAULT': 'U16',
@@ -633,8 +631,6 @@ DATA_TYPES = {
     'SYSTEM_HARDWARE_FAULT': 'U16',
     'SERIAL_NUMBER': 'U16',
     'DEVICE_MODEL': 'U16',
-    'NOMINALACTIVE_POWER': 'U16',
-    'OUTPUT_TYPE': 'U16',
     'DAILY_ENERGY': 'U16',
     'TOTAL_RUNNING_TIME': 'U32',
     'TOTAL_RUNNING_TIME_HIGH': 'U16',
@@ -651,6 +647,7 @@ DATA_TYPES = {
     'MPPT2_VOLTAGE': 'U16',
     'MPPT2_CURRENT': 'U16',
     'POWER_FACTOR': 'U16',
+    'REACTIVE_POWERADJUSTMENTMODE': 'U16',
     'ERROR_CODE1': 'U16',
     'FAULT_ALARM_TIME_MONTH': 'U16',
     'ERROR_CODE2': 'U16',
@@ -671,7 +668,8 @@ DATA_TYPES = {
     'STRING_6_CURRENT': 'STRINGING',
     'STRING_7_CURRENT': 'STRINGING',
     'STRING_8_CURRENT': 'STRINGING',
-    'ALARM_RUN': 'U16',
+    'QUICK_GRIDDISPATCH_MODE': 'U16',
+    'SWIFT_GRIDDISPATCH_MODE': 'U16',
 }
 
 FLOAT32_FIELDS: set = set()
@@ -686,15 +684,15 @@ STRING_CURRENT_MONITOR = True
 
 # RTU 배치 읽기 블록 — start/count/fc 지정으로 트랜잭션 최소화
 READ_BLOCKS = [
-    {'start': 0x0005, 'count':  35, 'fc': 3},
-    {'start': 0x004B, 'count':  32, 'fc': 3},
+    {'start': 0x0005, 'count': 102, 'fc': 3},
     {'start': 0x0202, 'count':   1, 'fc': 3},
     {'start': 0x0640, 'count':  17, 'fc': 3},
-    {'start': 0x138C, 'count':  42, 'fc': 3},
+    {'start': 0x138B, 'count':  43, 'fc': 3},
     {'start': 0x13FC, 'count':   1, 'fc': 3},
     {'start': 0x1B65, 'count':   8, 'fc': 3},
     {'start': 0x2500, 'count':   1, 'fc': 3},
     {'start': 0x5500, 'count':   1, 'fc': 3},
+    {'start': 0x7F39, 'count':   2, 'fc': 3},
     {'start': 0x9100, 'count':   1, 'fc': 3},
 ]
 
@@ -706,14 +704,14 @@ DATA_PARSER = {
     'mode                ': 'INVERTER_MODE',
     'r_voltage           ': 'DEA_L1_VOLTAGE (0x03EE~0x03EF); FAULT (0x0009); L1_VOLTAGE (0x000C)',
     's_voltage           ': 'DEA_L2_VOLTAGE (0x03F0~0x03F1); COMMUNICATE_FAULT (0x000D); L2_VOLTAGE (0x0005)',
-    't_voltage           ': 'DEA_L3_VOLTAGE (0x03F2~0x03F3)',
+    't_voltage           ': 'DEA_L3_VOLTAGE (0x03F2~0x03F3); ERROR_CODE1 (0x13AF); ERROR_CODE2 (0x13B1)',
     'r_current           ': 'DEA_L1_CURRENT (0x03E8~0x03E9); L1_CURRENT (0x0027)',
-    's_current           ': 'DEA_L2_CURRENT (0x03EA~0x03EB)',
+    's_current           ': 'DEA_L2_CURRENT (0x03EA~0x03EB); L2_CURRENT (0x002B)',
     't_current           ': 'DEA_L3_CURRENT (0x03EC~0x03ED)',
     'frequency           ': 'DEA_FREQUENCY (0x03FA~0x03FB); FREQUENCY (0x0008)',
-    'ac_power            ': 'DEA_TOTAL_ACTIVE_POWER (0x03F4~0x03F5)',
+    'ac_power            ': 'DEA_TOTAL_ACTIVE_POWER (0x03F4~0x03F5); AC_POWER (0x0011)',
     'cumulative_energy   ': 'CUMULATIVE_ENERGY (0x138C)',
-    'alarm1              ': 'ERROR_CODE1 (0x13AF)',
+    'alarm1              ': 'ERROR_CODE1 (0x13AF); ALARM_RUN (0x000A)',
     'mppt1_voltage'        : 'PV_VOLTAGE',
     'mppt1_current'        : 'MPPT_1_CURRENT',
     'mppt2_voltage'        : 'MPPT_2_VOLTAGE',
@@ -731,3 +729,20 @@ DATA_PARSER = {
     'string7_current'      : 'STRING_7_CURRENT',
     'string8_current'      : 'STRING_8_CURRENT',
 }
+
+
+# =========================================================================
+# Simulator / RTU compatibility aliases (auto-appended)
+# =========================================================================
+# PV_POWER: alias to AC_POWER (Sungrow total active power register)
+RegisterMap.PV_POWER         = RegisterMap.AC_POWER              # 0x0011
+
+# INNER_TEMP: alias to INTERNALTEMPERATURE
+RegisterMap.INNER_TEMP       = RegisterMap.INTERNALTEMPERATURE    # 0x1390 (5008)
+
+# INVERTER_MODE: virtual register for simulator (Sungrow has no direct mode register)
+RegisterMap.INVERTER_MODE    = 0xE000  # virtual
+
+# MPPT3/4 short aliases
+RegisterMap.MPPT3_VOLTAGE    = RegisterMap.MPPT_3_VOLTAGE        # 0x1397 (5015)
+RegisterMap.MPPT3_CURRENT    = RegisterMap.MPPT_3_CURRENT        # 0x1398 (5016)

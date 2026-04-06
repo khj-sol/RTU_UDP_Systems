@@ -17,50 +17,44 @@ class RegisterMap:
     # Device Information
     # =========================================================================
     DEVICE_MODEL_PDF                         = 0x0000  # TEXT
-    POWER_FACTOR                             = 0x0000  # U16
-    FREQUENCY                                = 0x000E  # U16
-    A_PHASE_VOLTAGE                          = 0x000F  # U16, scale A
-    REG_0X10                                 = 0x0010  # U16
-    B_PHASE_VOLTAGE                          = 0x0011  # U16
-    B_PHASE_CURRENT                          = 0x0012  # U16
-    C_PHASE_VOLTAGE                          = 0x0013  # U16
+    FREQUENCY                                = 0x000F  # U16, scale A
     TOTAL_GENERATIONTIME_HIGH_BYTE           = 0x0017  # U16
     INVERTER_MODULETEMPERATURE               = 0x001B  # U16
     INVERTER_INNERTEMPERATURE                = 0x001C  # U16
     INVERTER_BUSVOLTAGE                      = 0x001D  # U16
-    BIT6                                     = 0x001F  # U16
-    GCFI_VALID_VALUE                         = 0x002A  # U16
+    L2_CURRENT                               = 0x002C  # U16
     DAILY_ENERGY                             = 0x0036  # U16
-    REG_0X41                                 = 0x0041  # U16
-    DAILY_ENERGY_OFTHIS_MONTH                = 0x7001  # U16
 
     # =========================================================================
     # Monitoring Data
     # =========================================================================
-    REG_0X01                                 = 0x0001  # U16
-    REG_0X02                                 = 0x0002  # U16
+    POWER_FACTOR                             = 0x0000  # U16
+    TEMPERATURE                              = 0x0001  # U16
     REACTIVE_POWER                           = 0x0003  # U16
-    FAULT_4                                  = 0x0004  # U16
-    FAULT_5                                  = 0x0005  # U16
     PV2_CURRENT                              = 0x0009  # U16
     PV_POWER                                 = 0x000B  # U16
     PV_VOLTAGE                               = 0x000C  # U16
+    L2_VOLTAGE                               = 0x000D  # U16
+    B_PHASE_VOLTAGE                          = 0x0011  # U16
+    B_PHASE_CURRENT                          = 0x0012  # U16
+    C_PHASE_VOLTAGE                          = 0x0013  # U16
     L3_CURRENT                               = 0x0014  # U16
-    TOTAL_PRODUCTIONLOW_BYTE                 = 0x0016  # U16
-    L2_VOLTAGE                               = 0x0019  # U16
-    L3_VOLTAGE                               = 0x001E  # U16
-    BIT7                                     = 0x0020  # U16
-    INVERTER_INNER                           = 0x0023  # U16
-    INSULATION_OF_PV2TO_GROUND               = 0x0025  # U16
-    INSULATION_OF_PV_TO_GROUND               = 0x0026  # U16
+    TOTAL_PRODUCTIONHIGH_BYTE                = 0x0015  # U16
+    L3_VOLTAGE                               = 0x0016  # U16
+    TOTAL_GENERATIONTIME_LOW_BYTE            = 0x0018  # U16
+    THE_DAYGENERATION                        = 0x0019  # U16
+    PV1_INOUT_VOLTAGESAMPLING_BY_SLAVE_CPU   = 0x001E  # U16
+    ERROR_CODE2                              = 0x001F  # U16
+    REG_0X21                                 = 0x0021  # U16
+    INPUT_MODE                               = 0x0022  # U16
+    CUMULATIVE_ENERGY                        = 0x0023  # U16
+    L1_VOLTAGE                               = 0x0026  # U16
     L1_CURRENT                               = 0x0027  # U16
-    L2_CURRENT                               = 0x0029  # U16
-    DCI_VALUE_PHASE_R                        = 0x002B  # U16
-    CUMULATIVE_ENERGY                        = 0x0035  # U16
-    TEMPERATURE                              = 0x003E  # U16
-    REG_0X46                                 = 0x0046  # U16
-    REG_0X55_0X66                            = 0x0055  # U16
-    GET_ONE_OR_MORE_VALUES_FROM_REGISTER     = 0x0100  # U16
+    CT_POWER                                 = 0x0029  # U16
+    REG_0X33                                 = 0x0033  # U16
+    REG_0X35                                 = 0x0035  # U16
+    REG_0X84                                 = 0x0084  # U16
+    REG_0X_B8                                = 0x00B8  # U16
     REG_1_PV1_VOLTAGE                        = 0x0105  # U16
     REG_1PV1_CURRENT                         = 0x0106  # U16
     PV2_VOLTAGE                              = 0x0107  # U16
@@ -68,21 +62,28 @@ class RegisterMap:
     PV3_CURRENT                              = 0x010A  # U16
     PV4_VOLTAGE                              = 0x010B  # U16
     PV4_CURRENT                              = 0x010C  # U16
+    REG_0X04                                 = 0x1000  # U16
 
     # =========================================================================
     # Alarm / Error Codes
     # =========================================================================
-    REACTIVE_POWEROUTPUT                     = 0x000D  # U16
-    REG_0X21                                 = 0x0021  # U16
-    INSULATION_OF_PV1TO_GROUND               = 0x0024  # U16
-    CT_CURRENT                               = 0x0028  # U16
-    REG_0X33                                 = 0x0033  # U16
+    FAULT_5                                  = 0x0005  # U16
+    ALARM1                                   = 0x000A  # U16
     REG_0X61                                 = 0x0061  # U16
     FAULT_2                                  = 0x0101  # U16
     FAULT_3                                  = 0x0102  # U16
-    REG_0X04                                 = 0x1000  # U16
+    FAULT_4                                  = 0x0103  # U16
+
+    # R/S/T Phase Aliases
+    R_VOLTAGE                                = L1_VOLTAGE
+    R_CURRENT                                = L1_CURRENT
+    S_VOLTAGE                                = L2_VOLTAGE
+    S_CURRENT                                = L2_CURRENT
+    T_VOLTAGE                                = L3_VOLTAGE
+    T_CURRENT                                = L3_CURRENT
 
     # --- Standard handler compatibility aliases (H01 Body Type 4 required) ---
+    R_PHASE_VOLTAGE                          = L1_VOLTAGE
     T_PHASE_VOLTAGE                          = L3_VOLTAGE
     R_PHASE_CURRENT                          = L1_CURRENT
     S_PHASE_CURRENT                          = L2_CURRENT
@@ -94,22 +95,19 @@ class RegisterMap:
 
     # --- RTU modbus_handler / simulator 필수 alias ---
     INNER_TEMP                               = TEMPERATURE
-    R_PHASE_VOLTAGE                          = A_PHASE_VOLTAGE
     TOTAL_ENERGY                             = CUMULATIVE_ENERGY
-    ERROR_CODE1                              = REACTIVE_POWEROUTPUT
-    ERROR_CODE2                              = REG_0X21
-    ERROR_CODE3                              = INSULATION_OF_PV1TO_GROUND
+    ERROR_CODE1                              = FAULT_5
+    ERROR_CODE3                              = FREQUENCY
     DER_POWER_FACTOR_SET                     = 0x07D0
     DER_ACTION_MODE                          = 0x07D1
     DER_REACTIVE_POWER_PCT                   = 0x07D2
     DER_ACTIVE_POWER_PCT                     = 0x07D3
     INVERTER_ON_OFF                          = 0x0834
+    MPPT_NUMBER                              = 0x1A4A  # default MPPT count register
+    MPPT1_VOLTAGE                            = PV_VOLTAGE
+    CUMULATIVE_ENERGY_LOW                    = CUMULATIVE_ENERGY
+    DER_AVM_DIGITAL_METERCONNECT_STATUS      = 0x1210
 
-
-
-    # IV Scan block layout
-    IV_TRACKER_BLOCK_SIZE             = 0x0100  # 256 regs per tracker
-    IV_SCAN_DATA_POINTS              = 64      # default data points
 
 
 class InverterMode:
@@ -167,7 +165,7 @@ class ControlMode:
 
 
 class ErrorCode1:
-    """Error Code Table1 (0x000D) — Bit field"""
+    """Error Code Table1 (0x0005) — Bit field"""
     BITS = {
     }
 
@@ -181,7 +179,7 @@ class ErrorCode1:
 
 
 class ErrorCode2:
-    """Error Code Table2 (0x0021) — Bit field"""
+    """Error Code Table2 (0x000A) — Bit field"""
     BITS = {
     }
 
@@ -195,7 +193,7 @@ class ErrorCode2:
 
 
 class ErrorCode3:
-    """Error Code Table3 (0x0024) — Bit field"""
+    """Error Code Table3 (0x000E) — Bit field"""
     BITS = {
     }
 
@@ -209,7 +207,7 @@ class ErrorCode3:
 
 
 class ErrorCode4:
-    """Error Code Table4 (0x0028) — Bit field"""
+    """Error Code Table4 (0x0020) — Bit field"""
     BITS = {
     }
 
@@ -223,7 +221,7 @@ class ErrorCode4:
 
 
 class ErrorCode5:
-    """Error Code Table5 (0x0033) — Bit field"""
+    """Error Code Table5 (0x0061) — Bit field"""
     BITS = {
     }
 
@@ -237,7 +235,7 @@ class ErrorCode5:
 
 
 class ErrorCode6:
-    """Error Code Table6 (0x003F) — Bit field"""
+    """Error Code Table6 (0x0101) — Bit field"""
     BITS = {
     }
 
@@ -251,7 +249,7 @@ class ErrorCode6:
 
 
 class ErrorCode7:
-    """Error Code Table7 (0x0061) — Bit field"""
+    """Error Code Table7 (0x0102) — Bit field"""
     BITS = {
     }
 
@@ -265,7 +263,7 @@ class ErrorCode7:
 
 
 class ErrorCode8:
-    """Error Code Table8 (0x0101) — Bit field"""
+    """Error Code Table8 (0x0103) — Bit field"""
     BITS = {
     }
 
@@ -279,49 +277,7 @@ class ErrorCode8:
 
 
 class ErrorCode9:
-    """Error Code Table9 (0x0102) — Bit field"""
-    BITS = {
-    }
-
-    @classmethod
-    def decode(cls, value):
-        return [f"E{b}:{d}" for b, d in cls.BITS.items() if value & (1 << b)]
-
-    @classmethod
-    def to_string(cls, value):
-        return ", ".join(cls.decode(value)) if value else "OK"
-
-
-class ErrorCode10:
-    """Error Code Table10 (0x0103) — Bit field"""
-    BITS = {
-    }
-
-    @classmethod
-    def decode(cls, value):
-        return [f"E{b}:{d}" for b, d in cls.BITS.items() if value & (1 << b)]
-
-    @classmethod
-    def to_string(cls, value):
-        return ", ".join(cls.decode(value)) if value else "OK"
-
-
-class ErrorCode11:
-    """Error Code Table11 (0x0104) — Bit field"""
-    BITS = {
-    }
-
-    @classmethod
-    def decode(cls, value):
-        return [f"E{b}:{d}" for b, d in cls.BITS.items() if value & (1 << b)]
-
-    @classmethod
-    def to_string(cls, value):
-        return ", ".join(cls.decode(value)) if value else "OK"
-
-
-class ErrorCode12:
-    """Error Code Table12 (0x1000) — Bit field"""
+    """Error Code Table9 (0x0104) — Bit field"""
     BITS = {
     }
 
@@ -469,52 +425,45 @@ def generate_iv_current_data(isc, voc, v_min, data_points=64):
 DATA_TYPES = {
     'DEVICE_MODEL_PDF': 'TEXT',
     'POWER_FACTOR': 'U16',
-    'REG_0X01': 'U16',
-    'REG_0X02': 'U16',
-    'REACTIVE_POWER': 'U16',
-    'FAULT_4': 'U16',
-    'FAULT_5': 'U16',
+    'TEMPERATURE': 'U16',
     'FREQUENCY': 'U16',
+    'REACTIVE_POWER': 'U16',
+    'FAULT_5': 'U16',
     'PV2_CURRENT': 'U16',
+    'ALARM1': 'U16',
     'PV_POWER': 'U16',
     'PV_VOLTAGE': 'U16',
-    'REACTIVE_POWEROUTPUT': 'U16',
-    'A_PHASE_VOLTAGE': 'U16',
-    'REG_0X10': 'U16',
+    'L2_VOLTAGE': 'U16',
     'B_PHASE_VOLTAGE': 'U16',
     'B_PHASE_CURRENT': 'U16',
     'C_PHASE_VOLTAGE': 'U16',
     'L3_CURRENT': 'U16',
-    'TOTAL_PRODUCTIONLOW_BYTE': 'U16',
+    'TOTAL_PRODUCTIONHIGH_BYTE': 'U16',
+    'L3_VOLTAGE': 'U16',
     'TOTAL_GENERATIONTIME_HIGH_BYTE': 'U16',
-    'L2_VOLTAGE': 'U16',
+    'TOTAL_GENERATIONTIME_LOW_BYTE': 'U16',
+    'THE_DAYGENERATION': 'U16',
     'INVERTER_MODULETEMPERATURE': 'U16',
     'INVERTER_INNERTEMPERATURE': 'U16',
     'INVERTER_BUSVOLTAGE': 'U16',
-    'L3_VOLTAGE': 'U16',
-    'BIT6': 'U16',
-    'BIT7': 'U16',
+    'PV1_INOUT_VOLTAGESAMPLING_BY_SLAVE_CPU': 'U16',
+    'ERROR_CODE2': 'U16',
     'REG_0X21': 'U16',
-    'INVERTER_INNER': 'U16',
-    'INSULATION_OF_PV1TO_GROUND': 'U16',
-    'INSULATION_OF_PV2TO_GROUND': 'U16',
-    'INSULATION_OF_PV_TO_GROUND': 'U16',
-    'L1_CURRENT': 'U16',
-    'CT_CURRENT': 'U16',
-    'L2_CURRENT': 'U16',
-    'GCFI_VALID_VALUE': 'U16',
-    'DCI_VALUE_PHASE_R': 'U16',
-    'REG_0X33': 'U16',
+    'INPUT_MODE': 'U16',
     'CUMULATIVE_ENERGY': 'U16',
+    'L1_VOLTAGE': 'U16',
+    'L1_CURRENT': 'U16',
+    'CT_POWER': 'U16',
+    'L2_CURRENT': 'U16',
+    'REG_0X33': 'U16',
+    'REG_0X35': 'U16',
     'DAILY_ENERGY': 'U16',
-    'TEMPERATURE': 'U16',
-    'REG_0X41': 'U16',
-    'REG_0X46': 'U16',
-    'REG_0X55_0X66': 'U16',
     'REG_0X61': 'U16',
-    'GET_ONE_OR_MORE_VALUES_FROM_REGISTER': 'U16',
+    'REG_0X84': 'U16',
+    'REG_0X_B8': 'U16',
     'FAULT_2': 'U16',
     'FAULT_3': 'U16',
+    'FAULT_4': 'U16',
     'REG_1_PV1_VOLTAGE': 'U16',
     'REG_1PV1_CURRENT': 'U16',
     'PV2_VOLTAGE': 'U16',
@@ -523,7 +472,6 @@ DATA_TYPES = {
     'PV4_VOLTAGE': 'U16',
     'PV4_CURRENT': 'U16',
     'REG_0X04': 'U16',
-    'DAILY_ENERGY_OFTHIS_MONTH': 'U16',
 }
 
 FLOAT32_FIELDS: set = set()
@@ -538,9 +486,13 @@ STRING_CURRENT_MONITOR = False
 
 # RTU 배치 읽기 블록 — start/count/fc 지정으로 트랜잭션 최소화
 READ_BLOCKS = [
-    {'start': 0x0001, 'count':  97, 'fc': 3},
+    {'start': 0x0000, 'count': 125, 'fc': 3},
+    {'start': 0x007D, 'count':   8, 'fc': 3},
+    {'start': 0x00B8, 'count':   1, 'fc': 3},
     {'start': 0x0100, 'count':  13, 'fc': 3},
     {'start': 0x1000, 'count':   1, 'fc': 3},
+    {'start': 0x1100, 'count':   1, 'fc': 3},
+    {'start': 0x7001, 'count':   1, 'fc': 3},
 ]
 
 
@@ -549,16 +501,16 @@ READ_BLOCKS = [
 # modbus_handler._read_inverter_data_dynamic()이 이 매핑을 사용한다.
 DATA_PARSER = {
     'mode                ': 'INVERTER_MODE',
-    'r_voltage           ': 'DEA_L1_VOLTAGE (0x03EE~0x03EF); FAULT_4 (0x0004); INSULATION_OF_PV_TO_GROUND (0x0026)',
-    's_voltage           ': 'DEA_L2_VOLTAGE (0x03F0~0x03F1); FAULT_5 (0x0005); L2_VOLTAGE (0x0019); REACTIVE_POWEROUTPUT (0x000D)',
-    't_voltage           ': 'DEA_L3_VOLTAGE (0x03F2~0x03F3); TOTAL_PRODUCTIONLOW_BYTE (0x0016); L3_VOLTAGE (0x001E)',
-    'r_current           ': 'DEA_L1_CURRENT (0x03E8~0x03E9); L1_CURRENT (0x0027)',
-    's_current           ': 'DEA_L2_CURRENT (0x03EA~0x03EB); L2_CURRENT (0x0029); DCI_VALUE_PHASE_R (0x002B)',
+    'r_voltage           ': 'DEA_L1_VOLTAGE (0x03EE~0x03EF); L1_VOLTAGE (0x0026); REG_0X61 (0x0061); FAULT_2 (0x0101); FAULT_3 (0x0102); FAULT_4 (0x0103)',
+    's_voltage           ': 'DEA_L2_VOLTAGE (0x03F0~0x03F1); L2_VOLTAGE (0x000D); THE_DAYGENERATION (0x0019); FAULT_5 (0x0005)',
+    't_voltage           ': 'DEA_L3_VOLTAGE (0x03F2~0x03F3); L3_VOLTAGE (0x0016); ERROR_CODE2 (0x001F)',
+    'r_current           ': 'DEA_L1_CURRENT (0x03E8~0x03E9); INPUT_MODE (0x0022); L1_CURRENT (0x0027)',
+    's_current           ': 'DEA_L2_CURRENT (0x03EA~0x03EB); B_PHASE_CURRENT (0x0012); CT_POWER (0x0029); L2_CURRENT (0x002B)',
     't_current           ': 'DEA_L3_CURRENT (0x03EC~0x03ED); L3_CURRENT (0x0014)',
-    'frequency           ': 'DEA_FREQUENCY (0x03FA~0x03FB); REG_0X02 (0x0002); FREQUENCY (0x0008); INSULATION_OF_PV2TO_GROUND (0x0025)',
-    'ac_power            ': 'DEA_TOTAL_ACTIVE_POWER (0x03F4~0x03F5)',
-    'cumulative_energy   ': 'CUMULATIVE_ENERGY (0x0035); INVERTER_INNER (0x0023); REG_0X55_0X66 (0x0055)',
-    'alarm1              ': 'REG_0X04 (0x1000)',
+    'frequency           ': 'DEA_FREQUENCY (0x03FA~0x03FB); FREQUENCY (0x0002); REG_0X21 (0x0021); REG_0X04 (0x1000)',
+    'ac_power            ': 'DEA_TOTAL_ACTIVE_POWER (0x03F4~0x03F5); B_PHASE_VOLTAGE (0x0011)',
+    'cumulative_energy   ': 'REG_0X33 (0x0033); CUMULATIVE_ENERGY (0x0023); REG_0X35 (0x0035); REG_0X_B8 (0x00B8)',
+    'alarm1              ': 'ERROR_CODE2 (0x001F); ALARM1 (0x000A)',
     'mppt1_voltage'        : 'PV_VOLTAGE',
     'mppt1_current'        : 'REG_1PV1_CURRENT',
     'mppt2_voltage'        : 'PV2_VOLTAGE',

@@ -16,24 +16,17 @@ class RegisterMap:
     # =========================================================================
     # Device Information
     # =========================================================================
-    BIT17                                    = 0x0011  # U16
-    BIT18                                    = 0x0012  # U16
-    BIT19                                    = 0x0013  # U16
-    BIT26                                    = 0x001A  # U16
-    BLU_E_25KT_M1                            = 0x008B  # U16
+    FREQUENCY                                = 0x000F  # U16
     PBUS_VOLTAGE                             = 0x0BC4  # U16, scale V 0.1
     NBUS_VOLTAGE                             = 0x0BC5  # U16, scale V 0.1
-    L1_VOLTAGE                               = 0x0BC6  # U16, scale V 0.1
+    L1_VOLTAGE                               = 0x0BC7  # U16, scale V 0.1
     S_PHASE_GRID_TIED_CURRENT                = 0x0BCD  # U16, scale A 0.01
-    CUMULATIVE_ENERGY                        = 0x0BDE  # U32, scale Kwh 0.1
-    CUMULATIVE_ENERGY_HIGH                   = 0x0BDF
     APPARENT_POWER                           = 0x0BEC  # S32, scale VA 1
     APPARENT_POWER_HIGH                      = 0x0BED
     DC_INSULATION_RESISTANCE                 = 0x0BF1  # U16
-    OVERFREQUENCY_DERATING                   = 0x0BF2  # U16
-    OVERFREQUENCY_DERATINGTHRESHOLD          = 0x0BF3  # U16
-    REG_485ADDRESS2                          = 0x0C2D  # U16
-    SLOW_INCREASE_IN_POWER                   = 0x0C4D  # U16
+    RUNNING_TIME                             = 0x0C12  # U32
+    RUNNING_TIME_HIGH                        = 0x0C13
+    INTERNAL_USE_REGISTERSMALL_THREE_PHASE   = 0x0C52  # U16
     SETTING_VALUE_OF_RATEDPOWER_FOR_ANTI_BACKFLOW = 0x0C7C  # U16
     MODEL_NAME_BASE                          = 0x0C80  # ASCII
     INVERTER_SN                              = 0x0C86  # ASCII
@@ -43,54 +36,99 @@ class RegisterMap:
     SERIAL_NUMBER_BASE                       = 0x0C9C  # U16
     SETTING_INVERTER_SN                      = 0x0CEF  # ASCII
     DEVICE_MODEL                             = 0x0D05  # U16
-    IV_DATA_BASE                             = 0x1388  # U16, scale V 0.1
-    PV1_CURRENT_POINT_2                      = 0x138B  # S16, scale A 0.01
 
     # =========================================================================
     # Monitoring Data
     # =========================================================================
     POWER_FACTOR                             = 0x0000  # U16, scale A
-    INVALID_FUNCTION_CODE                    = 0x0001  # U16
-    BYTECOUNT                                = 0x0001  # U16
-    INVALID_DATA_ADDRESS                     = 0x0002  # U16
-    READ_KEEP_REGISTER_FOR_QUERYINGINVERTER_INFORMATION = 0x0003  # U16
-    READ_INPUT_REGISTER_FOR_QUERYINGINVERTER_INFORMATION = 0x0004  # U16
-    NULL                                     = 0x0008  # U16
-    FREQUENCY                                = 0x0009  # U16
-    INVERTER_DC_CURRERNT_OVER                = 0x000B  # U16
+    TEMPERATURE                              = 0x0001  # U16
+    REACTIVE_POWER                           = 0x0003  # U16
+    PV_PARALLEL_OPEN                         = 0x0007  # U16
+    PV_POWER                                 = 0x000B  # U16
     L2_VOLTAGE                               = 0x000D  # U16
-    ERROR_CODE2                              = 0x000E  # U16
-    BIT20                                    = 0x0014  # U16
-    BIT21                                    = 0x0015  # U16
-    BIT22                                    = 0x0016  # U16
-    BIT23                                    = 0x0017  # U16
-    BIT24                                    = 0x0018  # U16
-    BLOCK3_COUNT                             = 0x0019  # U16
-    BIT27                                    = 0x001B  # U16
-    BIT28                                    = 0x001C  # U16
-    BIT29                                    = 0x001D  # U16
-    BIT30                                    = 0x001E  # U16
-    BIT31                                    = 0x001F  # U16
-    BLU_E_12KT_M1                            = 0x007D  # U16
-    BLU_E_15KT_M0                            = 0x007E  # U16
-    BLU_E_15KT_M1                            = 0x007F  # U16
-    BLU_E_15KT_M3                            = 0x0081  # U16
-    BLU_E_17KT_M1                            = 0x0083  # U16
-    PV_POWER                                 = 0x0B96  # S32, scale W 1
-    PV_POWER_HIGH                            = 0x0B97
+    BIT17                                    = 0x0011  # U16
+    BIT18                                    = 0x0012  # U16
+    BIT19                                    = 0x0013  # U16
+    L3_CURRENT                               = 0x0014  # U16
+    L3_VOLTAGE                               = 0x0016  # U16
+    BIT26                                    = 0x001A  # U16
+    CUMULATIVE_ENERGY                        = 0x001C  # U16
+    BLU_E_10KT_M1                            = 0x007B  # U16
+    BLU_E_12KT_M0                            = 0x007C  # U16
+    MPPT2_VOLTAGE                            = 0x007F  # U16
+    BLU_E_15KT_M2                            = 0x0080  # U16
+    MPPT3_VOLTAGE                            = 0x0081  # U16
+    BLU_E_17KT_M0                            = 0x0082  # U16
+    BLU_E_20KT_M0                            = 0x0084  # U16
+    BLU_E_20KT_M1                            = 0x0085  # U16
+    BLU_E_22KT_M0                            = 0x0086  # U16
+    BLU_E_22KT_M1                            = 0x0087  # U16
+    BLU_E_23KT_M0                            = 0x0088  # U16
+    BLU_E_23KT_M1                            = 0x0089  # U16
+    BLU_E_25KT_M0                            = 0x008A  # U16
+    BLU_E_3KT_M3                             = 0x00C9  # U16
+    BLU_E_3KT_M4                             = 0x00CA  # U16
+    BLU_E_3KT_M5                             = 0x00CB  # U16
+    BLU_E_3_6KT_M2                           = 0x00CC  # U16
+    BLU_E_3_6KT_M3                           = 0x00CD  # U16
+    BLU_E_3_6KT_M4                           = 0x00CE  # U16
+    BLU_E_3_6KT_M5                           = 0x00CF  # U16
+    BLU_E_4KT_M2                             = 0x00D0  # U16
+    BLU_E_4KT_M3                             = 0x00D1  # U16
+    BLU_E_4KT_M4                             = 0x00D2  # U16
+    BLU_E_4KT_M5                             = 0x00D3  # U16
+    BLU_E_5KT_M2                             = 0x00D4  # U16
+    BLU_E_5KT_M3                             = 0x00D5  # U16
+    BLU_E_5KT_M4                             = 0x00D6  # U16
+    BLU_E_5KT_M5                             = 0x00D7  # U16
+    BLU_E_6KT_M2                             = 0x00D8  # U16
+    BLU_E_6KT_M3                             = 0x00D9  # U16
+    BLU_E_6KT_M4                             = 0x00DA  # U16
+    BLU_E_6KT_M5                             = 0x00DB  # U16
+    BLU_E_8KT_M2                             = 0x00DC  # U16
+    BLU_E_8KT_M3                             = 0x00DD  # U16
+    BLU_E_8KT_M4                             = 0x00DE  # U16
+    BLU_E_8KT_M5                             = 0x00DF  # U16
+    BLU_E_10KT_M2                            = 0x00E0  # U16
+    BLU_E_10KT_M3                            = 0x00E1  # U16
+    BLU_E_10KT_M4                            = 0x00E2  # U16
+    BLU_E_10KT_M5                            = 0x00E3  # U16
+    BLU_E_12KT_M2                            = 0x00E4  # U16
+    BLU_E_12KT_M3                            = 0x00E5  # U16
+    BLU_E_12KT_M4                            = 0x00E6  # U16
+    BLU_E_12KT_M5                            = 0x00E7  # U16
+    BLU_E_15KT_M4                            = 0x00E8  # U16
+    BLU_E_15KT_M5                            = 0x00E9  # U16
+    BLU_E_17KT_M2                            = 0x00EA  # U16
+    BLU_E_17KT_M3                            = 0x00EB  # U16
+    BLU_E_17KT_M4                            = 0x00EC  # U16
+    BLU_E_17KT_M5                            = 0x00ED  # U16
+    BLU_E_20KT_M2                            = 0x00EE  # U16
+    BLU_E_20KT_M3                            = 0x00EF  # U16
+    BLU_E_20KT_M4                            = 0x00F0  # U16
+    BLU_E_20KT_M5                            = 0x00F1  # U16
+    BLU_E_22KT_M2                            = 0x00F2  # U16
+    BLU_E_22KT_M3                            = 0x00F3  # U16
+    BLU_E_22KT_M4                            = 0x00F4  # U16
+    BLU_E_22KT_M5                            = 0x00F5  # U16
+    BLU_E_23KT_M2                            = 0x00F6  # U16
+    BLU_E_23KT_M3                            = 0x00F7  # U16
+    BLU_E_23KT_M4                            = 0x00F8  # U16
+    BLU_E_23KT_M5                            = 0x00F9  # U16
+    BLU_E_25KT_M2                            = 0x00FA  # U16
+    BLU_E_25KT_M3                            = 0x00FB  # U16
+    BLU_E_25KT_M4                            = 0x00FC  # U16
+    BLU_E_25KT_M5                            = 0x00FD  # U16
     PV_VOLTAGE                               = 0x0BB8  # U16, scale V 0.1
     PV2_INPUT_VOLTAGE                        = 0x0BB9  # U16, scale V 0.1
     PV3_INPUT_VOLTAGE                        = 0x0BBA  # U16, scale V 0.1
     PV1_INPUT_CURRENT                        = 0x0BBB  # U16, scale A 0.01
     PV2_INPUT_CURRENT                        = 0x0BBC  # U16, scale A 0.01
     PV3_INPUT_CURRENT                        = 0x0BBD  # U16, scale A 0.01
-    MPPT1_POWER_LOW                          = 0x0BBE  # S32, scale W 1
-    MPPT1_POWER_HIGH                         = 0x0BBF
-    RS_PHASE_GRID_FREQUENCY                  = 0x0BC9  # U16, scale Hz 0.01
-    TEMPERATURE                              = 0x0BD2  # S16
     INPUT_MODE                               = 0x0BDD  # U16
-    REACTIVE_POWER                           = 0x0BEE  # S32
-    REACTIVE_POWER_HIGH                      = 0x0BEF
+    CUMULATIVE_PRODUCTION_L                  = 0x0BDE  # U32, scale Kwh 0.1
+    CUMULATIVE_PRODUCTION_L_HIGH             = 0x0BDF
+    POWER_ON_DELAY                           = 0x0BE4  # U16
     PV1_STRING_CURRENT_1                     = 0x0BF8  # S16, scale A 0.01
     PV1_STRING_CURRENT_2                     = 0x0BF9  # S16, scale A 0.01
     PV1_STRING_CURRENT_3                     = 0x0BFA  # S16, scale A 0.01
@@ -100,22 +138,17 @@ class RegisterMap:
     PV2_STRING_CURRENT_3                     = 0x0BFE  # S16, scale A 0.01
     PV2_STRING_CURRENT_4                     = 0x0BFF  # S16, scale A 0.01
     PV3_STRING_CURRENT_1                     = 0x0C00  # S16, scale A 0.01
+    SECOND                                   = 0x0C28  # U16
+    REG_485ADDRESS2                          = 0x0C2D  # U16
     L1_CURRENT                               = 0x0C34  # U16, scale A
-    GRID_S_VOLTAGE                           = 0x0C37  # U16
-    GRID_T_VOLTAGE                           = 0x0C3E  # U16
-    L3_VOLTAGE                               = 0x0C3F  # U16
     AC_POWER                                 = 0x0C4E  # U16
     PV1_CURRENTCALIBRATIONCOEFFICIENT        = 0x0C8E  # U16
     PV2_CURRENTCALIBRATIONCOEFFICIENT        = 0x0C8F  # U16
     PV3PV12_CURRENTCALIBRATIONCOEFFICIENT    = 0x0C90  # U16
-    CLOCK_INFORMATION                        = 0x0CE4  # U16
-    MONTH_TENS_PLACE                         = 0x0CE5  # ASCII
-    DAY_TENS_PLACE                           = 0x0CE6  # ASCII
-    HOUR_TENS_PLACE                          = 0x0CE7  # ASCII
-    MPPT3_CURRENT                            = 0x0FC5  # S16
-    L3_CURRENT                               = 0x0FCE  # U16
+    MPPT3_CURRENT                            = 0x0CE4  # U16
     PV1_CURRENT_POINT_1                      = 0x1389  # S16, scale A 0.01
     PV1_VOLTAGE_POINT_2                      = 0x138A  # U16, scale V 0.1
+    PV1_CURRENT_POINT_2                      = 0x138B  # S16, scale A 0.01
     PV1_VOLTAGE_POINT_99                     = 0x144C  # U16, scale V 0.1
     PV1_CURRENT_POINT_99                     = 0x144D  # S16, scale A 0.01
     PV1_VOLTAGE_POINT_100                    = 0x144E  # U16, scale V 0.1
@@ -142,25 +175,21 @@ class RegisterMap:
     # =========================================================================
     # Status & Temperature
     # =========================================================================
-    POWER_ON_DELAY                           = 0x0BE4  # U16
-    REG_485_AGREEMENT                        = 0x0C2F  # U16
-    INTERNAL_USE_REGISTERSMALL_THREE_PHASE   = 0x0C52  # U16
-    LOW_PENETRATIONCOEFFICIENT               = 0x0C9D  # U16
+    OPERATING_MODE_OF_THEINVERTER            = 0x0BD6  # U16
+    INVERTER_STATUS                          = 0x0BE2  # U16, scale Kwh
+    GRID_PROTECTED_MODE                      = 0x0CAE  # U16
+    SET_THE_REACTIVECONTROL_MODE             = 0x0FA6  # U16
+    INPUT_MODE_SETTINGS                      = 0x0FAC  # U16
 
     # =========================================================================
     # Alarm / Error Codes
     # =========================================================================
+    INVERTER_CURRENT_OVER                    = 0x000A  # U16
+    ERROR_CODE2                              = 0x000E  # U16
     ERROR_CODE3                              = 0x0BD3  # U16
     DSP_ERROR_CODE_L                         = 0x0BD4  # U32
     DSP_ERROR_CODE_L_HIGH                    = 0x0BD5
     DSP_ALARM_CODE_H                         = 0x0BDC  # U16
-    POWER_PEAK_AFTER_STARTING                = 0x0C18  # U32, scale W
-    POWER_PEAK_AFTER_STARTING_HIGH           = 0x0C19
-    WEEK_GENERATION                          = 0x0C1C  # U32, scale Kwh
-    WEEK_GENERATION_HIGH                     = 0x0C1D
-    REG_485_ADDRESS1                         = 0x0C30  # U16
-    FROZEN_UP_VOLT_START_STARTING_VALUE_OFOVERVOLTAGE_DERATING = 0x0C4F  # U16, scale V 0.1
-    FROZEN_UP_VOLT_END_END_VALUE_OFOVERVOLTAGE_DERATING = 0x0C50  # U16, scale V 0.1
     FUSE_ALARM_INFORMATION                   = 0x0C81  # U32
     FUSE_ALARM_INFORMATION_HIGH              = 0x0C82
     OVER_TEMPERATUREDERATING_WARNINGENABLE   = 0x0C9B  # U16
@@ -188,13 +217,18 @@ class RegisterMap:
 
     # --- RTU modbus_handler / simulator 필수 alias ---
     INNER_TEMP                               = TEMPERATURE
+    INVERTER_MODE                            = INVERTER_STATUS
     TOTAL_ENERGY                             = CUMULATIVE_ENERGY
-    ERROR_CODE1                              = ERROR_CODE3
+    ERROR_CODE1                              = INVERTER_CURRENT_OVER
     DER_POWER_FACTOR_SET                     = 0x07D0
     DER_ACTION_MODE                          = 0x07D1
     DER_REACTIVE_POWER_PCT                   = 0x07D2
     DER_ACTIVE_POWER_PCT                     = 0x07D3
     INVERTER_ON_OFF                          = 0x0834
+    MPPT_NUMBER                              = 0x1A4A  # default MPPT count register
+    MPPT1_VOLTAGE                            = PV_VOLTAGE
+    CUMULATIVE_ENERGY_LOW                    = CUMULATIVE_ENERGY
+    DER_AVM_DIGITAL_METERCONNECT_STATUS      = 0x1210
 
     # =========================================================================
     # IV Scan Data Registers
@@ -292,7 +326,7 @@ class IVScanBodyType:
 
 
 class ErrorCode1:
-    """Error Code Table1 (0x0BD3) — Bit field"""
+    """Error Code Table1 (0x000A) — Bit field"""
     BITS = {
     }
 
@@ -306,7 +340,7 @@ class ErrorCode1:
 
 
 class ErrorCode2:
-    """Error Code Table2 (0x0BD4) — Bit field"""
+    """Error Code Table2 (0x000E) — Bit field"""
     BITS = {
     }
 
@@ -320,7 +354,7 @@ class ErrorCode2:
 
 
 class ErrorCode3:
-    """Error Code Table3 (0x0BDC) — Bit field"""
+    """Error Code Table3 (0x0BD3) — Bit field"""
     BITS = {
     }
 
@@ -334,7 +368,7 @@ class ErrorCode3:
 
 
 class ErrorCode4:
-    """Error Code Table4 (0x0C18) — Bit field"""
+    """Error Code Table4 (0x0BD4) — Bit field"""
     BITS = {
     }
 
@@ -348,7 +382,7 @@ class ErrorCode4:
 
 
 class ErrorCode5:
-    """Error Code Table5 (0x0C1C) — Bit field"""
+    """Error Code Table5 (0x0BDC) — Bit field"""
     BITS = {
     }
 
@@ -362,7 +396,7 @@ class ErrorCode5:
 
 
 class ErrorCode6:
-    """Error Code Table6 (0x0C30) — Bit field"""
+    """Error Code Table6 (0x0C81) — Bit field"""
     BITS = {
     }
 
@@ -376,7 +410,7 @@ class ErrorCode6:
 
 
 class ErrorCode7:
-    """Error Code Table7 (0x0C4F) — Bit field"""
+    """Error Code Table7 (0x0C9B) — Bit field"""
     BITS = {
     }
 
@@ -390,7 +424,7 @@ class ErrorCode7:
 
 
 class ErrorCode8:
-    """Error Code Table8 (0x0C50) — Bit field"""
+    """Error Code Table8 (0x0CB0) — Bit field"""
     BITS = {
     }
 
@@ -404,7 +438,7 @@ class ErrorCode8:
 
 
 class ErrorCode9:
-    """Error Code Table9 (0x0C81) — Bit field"""
+    """Error Code Table9 (0x0FC1) — Bit field"""
     BITS = {
     }
 
@@ -418,49 +452,7 @@ class ErrorCode9:
 
 
 class ErrorCode10:
-    """Error Code Table10 (0x0C9B) — Bit field"""
-    BITS = {
-    }
-
-    @classmethod
-    def decode(cls, value):
-        return [f"E{b}:{d}" for b, d in cls.BITS.items() if value & (1 << b)]
-
-    @classmethod
-    def to_string(cls, value):
-        return ", ".join(cls.decode(value)) if value else "OK"
-
-
-class ErrorCode11:
-    """Error Code Table11 (0x0CB0) — Bit field"""
-    BITS = {
-    }
-
-    @classmethod
-    def decode(cls, value):
-        return [f"E{b}:{d}" for b, d in cls.BITS.items() if value & (1 << b)]
-
-    @classmethod
-    def to_string(cls, value):
-        return ", ".join(cls.decode(value)) if value else "OK"
-
-
-class ErrorCode12:
-    """Error Code Table12 (0x0FC1) — Bit field"""
-    BITS = {
-    }
-
-    @classmethod
-    def decode(cls, value):
-        return [f"E{b}:{d}" for b, d in cls.BITS.items() if value & (1 << b)]
-
-    @classmethod
-    def to_string(cls, value):
-        return ", ".join(cls.decode(value)) if value else "OK"
-
-
-class ErrorCode13:
-    """Error Code Table13 (0xFFFF) — Bit field"""
+    """Error Code Table10 (0xFFFF) — Bit field"""
     BITS = {
     }
 
@@ -607,62 +599,107 @@ def generate_iv_current_data(isc, voc, v_min, data_points=64):
 
 DATA_TYPES = {
     'POWER_FACTOR': 'U16',
-    'INVALID_FUNCTION_CODE': 'U16',
-    'BYTECOUNT': 'U16',
-    'INVALID_DATA_ADDRESS': 'U16',
-    'READ_KEEP_REGISTER_FOR_QUERYINGINVERTER_INFORMATION': 'U16',
-    'READ_INPUT_REGISTER_FOR_QUERYINGINVERTER_INFORMATION': 'U16',
-    'NULL': 'U16',
+    'TEMPERATURE': 'U16',
     'FREQUENCY': 'U16',
-    'INVERTER_DC_CURRERNT_OVER': 'U16',
+    'REACTIVE_POWER': 'U16',
     'L1_VOLTAGE': 'U16',
+    'PV_PARALLEL_OPEN': 'U16',
+    'INVERTER_CURRENT_OVER': 'U16',
+    'PV_POWER': 'U16',
     'L2_VOLTAGE': 'U16',
     'ERROR_CODE2': 'U16',
     'BIT17': 'U16',
     'BIT18': 'U16',
     'BIT19': 'U16',
-    'BIT20': 'U16',
-    'BIT21': 'U16',
-    'BIT22': 'U16',
-    'BIT23': 'U16',
-    'BIT24': 'U16',
-    'BLOCK3_COUNT': 'U16',
+    'L3_CURRENT': 'U16',
+    'L3_VOLTAGE': 'U16',
     'BIT26': 'U16',
-    'BIT27': 'U16',
-    'BIT28': 'U16',
-    'BIT29': 'U16',
-    'BIT30': 'U16',
-    'BIT31': 'U16',
-    'BLU_E_12KT_M1': 'U16',
-    'BLU_E_15KT_M0': 'U16',
-    'BLU_E_15KT_M1': 'U16',
-    'BLU_E_15KT_M3': 'U16',
-    'BLU_E_17KT_M1': 'U16',
-    'BLU_E_25KT_M1': 'U16',
-    'PV_POWER': 'S32',
+    'CUMULATIVE_ENERGY': 'U16',
+    'BLU_E_10KT_M1': 'U16',
+    'BLU_E_12KT_M0': 'U16',
+    'MPPT2_VOLTAGE': 'U16',
+    'BLU_E_15KT_M2': 'U16',
+    'MPPT3_VOLTAGE': 'U16',
+    'BLU_E_17KT_M0': 'U16',
+    'BLU_E_20KT_M0': 'U16',
+    'BLU_E_20KT_M1': 'U16',
+    'BLU_E_22KT_M0': 'U16',
+    'BLU_E_22KT_M1': 'U16',
+    'BLU_E_23KT_M0': 'U16',
+    'BLU_E_23KT_M1': 'U16',
+    'BLU_E_25KT_M0': 'U16',
+    'BLU_E_3KT_M3': 'U16',
+    'BLU_E_3KT_M4': 'U16',
+    'BLU_E_3KT_M5': 'U16',
+    'BLU_E_3_6KT_M2': 'U16',
+    'BLU_E_3_6KT_M3': 'U16',
+    'BLU_E_3_6KT_M4': 'U16',
+    'BLU_E_3_6KT_M5': 'U16',
+    'BLU_E_4KT_M2': 'U16',
+    'BLU_E_4KT_M3': 'U16',
+    'BLU_E_4KT_M4': 'U16',
+    'BLU_E_4KT_M5': 'U16',
+    'BLU_E_5KT_M2': 'U16',
+    'BLU_E_5KT_M3': 'U16',
+    'BLU_E_5KT_M4': 'U16',
+    'BLU_E_5KT_M5': 'U16',
+    'BLU_E_6KT_M2': 'U16',
+    'BLU_E_6KT_M3': 'U16',
+    'BLU_E_6KT_M4': 'U16',
+    'BLU_E_6KT_M5': 'U16',
+    'BLU_E_8KT_M2': 'U16',
+    'BLU_E_8KT_M3': 'U16',
+    'BLU_E_8KT_M4': 'U16',
+    'BLU_E_8KT_M5': 'U16',
+    'BLU_E_10KT_M2': 'U16',
+    'BLU_E_10KT_M3': 'U16',
+    'BLU_E_10KT_M4': 'U16',
+    'BLU_E_10KT_M5': 'U16',
+    'BLU_E_12KT_M2': 'U16',
+    'BLU_E_12KT_M3': 'U16',
+    'BLU_E_12KT_M4': 'U16',
+    'BLU_E_12KT_M5': 'U16',
+    'BLU_E_15KT_M4': 'U16',
+    'BLU_E_15KT_M5': 'U16',
+    'BLU_E_17KT_M2': 'U16',
+    'BLU_E_17KT_M3': 'U16',
+    'BLU_E_17KT_M4': 'U16',
+    'BLU_E_17KT_M5': 'U16',
+    'BLU_E_20KT_M2': 'U16',
+    'BLU_E_20KT_M3': 'U16',
+    'BLU_E_20KT_M4': 'U16',
+    'BLU_E_20KT_M5': 'U16',
+    'BLU_E_22KT_M2': 'U16',
+    'BLU_E_22KT_M3': 'U16',
+    'BLU_E_22KT_M4': 'U16',
+    'BLU_E_22KT_M5': 'U16',
+    'BLU_E_23KT_M2': 'U16',
+    'BLU_E_23KT_M3': 'U16',
+    'BLU_E_23KT_M4': 'U16',
+    'BLU_E_23KT_M5': 'U16',
+    'BLU_E_25KT_M2': 'U16',
+    'BLU_E_25KT_M3': 'U16',
+    'BLU_E_25KT_M4': 'U16',
+    'BLU_E_25KT_M5': 'U16',
     'PV_VOLTAGE': 'U16',
     'PV2_INPUT_VOLTAGE': 'U16',
     'PV3_INPUT_VOLTAGE': 'U16',
     'PV1_INPUT_CURRENT': 'U16',
     'PV2_INPUT_CURRENT': 'U16',
     'PV3_INPUT_CURRENT': 'U16',
-    'PV1_POWER': 'S32',
     'PBUS_VOLTAGE': 'U16',
     'NBUS_VOLTAGE': 'U16',
-    'RS_PHASE_GRID_FREQUENCY': 'U16',
     'S_PHASE_GRID_TIED_CURRENT': 'U16',
-    'TEMPERATURE': 'S16',
     'ERROR_CODE3': 'U16',
     'DSP_ERROR_CODE_L': 'U32',
+    'OPERATING_MODE_OF_THEINVERTER': 'U16',
     'DSP_ALARM_CODE_H': 'U16',
     'INPUT_MODE': 'U16',
-    'CUMULATIVE_ENERGY': 'U32',
+    'CUMULATIVE_PRODUCTION_L': 'U32',
+    'INVERTER_STATUS': 'U16',
     'POWER_ON_DELAY': 'U16',
     'APPARENT_POWER': 'S32',
-    'REACTIVE_POWER': 'S32',
     'DC_INSULATION_RESISTANCE': 'U16',
-    'OVERFREQUENCY_DERATING': 'U16',
-    'OVERFREQUENCY_DERATINGTHRESHOLD': 'U16',
     'PV1_STRING_CURRENT_1': 'S16',
     'PV1_STRING_CURRENT_2': 'S16',
     'PV1_STRING_CURRENT_3': 'S16',
@@ -672,19 +709,11 @@ DATA_TYPES = {
     'PV2_STRING_CURRENT_3': 'S16',
     'PV2_STRING_CURRENT_4': 'S16',
     'PV3_STRING_CURRENT_1': 'S16',
-    'POWER_PEAK_AFTER_STARTING': 'U32',
-    'WEEK_GENERATION': 'U32',
+    'RUNNING_TIME': 'U32',
+    'SECOND': 'U16',
     'REG_485ADDRESS2': 'U16',
-    'REG_485_AGREEMENT': 'U16',
-    'REG_485_ADDRESS1': 'U16',
     'L1_CURRENT': 'U16',
-    'GRID_S_VOLTAGE': 'U16',
-    'GRID_T_VOLTAGE': 'U16',
-    'L3_VOLTAGE': 'U16',
-    'SLOW_INCREASE_IN_POWER': 'U16',
     'AC_POWER': 'U16',
-    'FROZEN_UP_VOLT_START_STARTING_VALUE_OFOVERVOLTAGE_DERATING': 'U16',
-    'FROZEN_UP_VOLT_END_END_VALUE_OFOVERVOLTAGE_DERATING': 'U16',
     'INTERNAL_USE_REGISTERSMALL_THREE_PHASE': 'U16',
     'SETTING_VALUE_OF_RATEDPOWER_FOR_ANTI_BACKFLOW': 'U16',
     'MODEL_NAME_BASE': 'ASCII',
@@ -698,18 +727,14 @@ DATA_TYPES = {
     'INVERTER_MODEL_NEW': 'ASCII',
     'OVER_TEMPERATUREDERATING_WARNINGENABLE': 'U16',
     'SERIAL_NUMBER_BASE': 'U16',
-    'LOW_PENETRATIONCOEFFICIENT': 'U16',
+    'GRID_PROTECTED_MODE': 'U16',
     'FAULT_RECOVERY_TIME': 'U16',
-    'CLOCK_INFORMATION': 'U16',
-    'MONTH_TENS_PLACE': 'ASCII',
-    'DAY_TENS_PLACE': 'ASCII',
-    'HOUR_TENS_PLACE': 'ASCII',
+    'MPPT3_CURRENT': 'U16',
     'SETTING_INVERTER_SN': 'ASCII',
     'DEVICE_MODEL': 'U16',
+    'SET_THE_REACTIVECONTROL_MODE': 'U16',
+    'INPUT_MODE_SETTINGS': 'U16',
     'CLEAR_FAULT_RECORD': 'U16',
-    'MPPT3_CURRENT': 'S16',
-    'L3_CURRENT': 'U16',
-    'IV_DATA_BASE': 'U16',
     'PV1_CURRENT_POINT_1': 'S16',
     'PV1_VOLTAGE_POINT_2': 'U16',
     'PV1_CURRENT_POINT_2': 'S16',
@@ -751,13 +776,14 @@ STRING_CURRENT_MONITOR = False
 # RTU 배치 읽기 블록 — start/count/fc 지정으로 트랜잭션 최소화
 READ_BLOCKS = [
     {'start': 0x0000, 'count':  32, 'fc': 3},
-    {'start': 0x007D, 'count':   7, 'fc': 3},
+    {'start': 0x007B, 'count':  16, 'fc': 3},
+    {'start': 0x00C9, 'count':  53, 'fc': 3},
     {'start': 0x0B96, 'count': 125, 'fc': 3},
-    {'start': 0x0C13, 'count':  64, 'fc': 3},
+    {'start': 0x0C13, 'count':  60, 'fc': 3},
     {'start': 0x0C81, 'count':  48, 'fc': 3},
     {'start': 0x0CE4, 'count':   4, 'fc': 3},
-    {'start': 0x0FB6, 'count':  25, 'fc': 3},
-    {'start': 0x1389, 'count':   2, 'fc': 3},
+    {'start': 0x0FA6, 'count':  41, 'fc': 3},
+    {'start': 0x1389, 'count':   3, 'fc': 3},
     {'start': 0x144C, 'count':   8, 'fc': 3},
     {'start': 0x1514, 'count':   5, 'fc': 3},
     {'start': 0x15E0, 'count':   1, 'fc': 3},
@@ -778,21 +804,21 @@ READ_BLOCKS = [
 # modbus_handler._read_inverter_data_dynamic()이 이 매핑을 사용한다.
 DATA_PARSER = {
     'mode                ': 'INVERTER_MODE',
-    'r_voltage           ': 'DEA_L1_VOLTAGE (0x03EE~0x03EF); READ_INPUT_REGISTER_FOR_QUERYINGINVERTER_INFORMATION (0x0004); L1_VOLTAGE (0x000C); RS_PHASE_GRID_FREQUENCY (0x0BC9)',
-    's_voltage           ': 'DEA_L2_VOLTAGE (0x03F0~0x03F1); L2_VOLTAGE (0x000D); BLOCK3_COUNT (0x0019); GRID_S_VOLTAGE (0x0C37)',
-    't_voltage           ': 'DEA_L3_VOLTAGE (0x03F2~0x03F3); ERROR_CODE2 (0x000E); BIT22 (0x0016); BIT30 (0x001E); GRID_T_VOLTAGE (0x0C3E); L3_VOLTAGE (0x0C3F)',
+    'r_voltage           ': 'DEA_L1_VOLTAGE (0x03EE~0x03EF); L1_VOLTAGE (0x0004)',
+    's_voltage           ': 'DEA_L2_VOLTAGE (0x03F0~0x03F1); L2_VOLTAGE (0x000D)',
+    't_voltage           ': 'DEA_L3_VOLTAGE (0x03F2~0x03F3); BIT18 (0x0012); L3_VOLTAGE (0x0016); BIT26 (0x001A); ERROR_CODE2 (0x000E)',
     'r_current           ': 'DEA_L1_CURRENT (0x03E8~0x03E9); INPUT_MODE (0x0BDD); L1_CURRENT (0x0C34)',
-    's_current           ': 'DEA_L2_CURRENT (0x03EA~0x03EB)',
-    't_current           ': 'DEA_L3_CURRENT (0x03EC~0x03ED); BIT20 (0x0014); L3_CURRENT (0x0FCE)',
-    'frequency           ': 'DEA_FREQUENCY (0x03FA~0x03FB); INVALID_DATA_ADDRESS (0x0002); NULL (0x0008); FREQUENCY (0x0009); BIT31 (0x001F)',
-    'ac_power            ': 'DEA_TOTAL_ACTIVE_POWER (0x03F4~0x03F5); AC_POWER (0x0C4E)',
-    'cumulative_energy   ': 'CUMULATIVE_ENERGY (0x0BE0); BIT28 (0x001C)',
-    'alarm1              ': 'ERROR_CODE3 (0x0BD3)',
-    'mppt1_voltage'        : 'BLU_E_12KT_M1',
-    'mppt1_current'        : 'BLU_E_15KT_M0',
-    'mppt2_voltage'        : 'BLU_E_15KT_M1',
-    'mppt2_current'        : 'PV2_INPUT_CURRENT',
-    'mppt3_voltage'        : 'BLU_E_15KT_M3',
+    's_current           ': 'DEA_L2_CURRENT (0x03EA~0x03EB); CUMULATIVE_PRODUCTION_L (0x0BDE)',
+    't_current           ': 'DEA_L3_CURRENT (0x03EC~0x03ED); L3_CURRENT (0x0014)',
+    'frequency           ': 'DEA_FREQUENCY (0x03FA~0x03FB); FREQUENCY (0x0002); PV_PARALLEL_OPEN (0x0007); BLU_E_17KT_M0 (0x0082); BLU_E_22KT_M1 (0x0087); SECOND (0x0C28); ERROR_CODE3 (0x0BD3)',
+    'ac_power            ': 'DEA_TOTAL_ACTIVE_POWER (0x03F4~0x03F5); BIT17 (0x0011); AC_POWER (0x0C4E)',
+    'cumulative_energy   ': 'REG_485ADDRESS2 (0x0C2D); CUMULATIVE_ENERGY (0x001C)',
+    'alarm1              ': 'ERROR_CODE2 (0x000E); INVERTER_CURRENT_OVER (0x000A)',
+    'mppt1_voltage'        : 'PV_VOLTAGE',
+    'mppt1_current'        : 'PV1_INPUT_CURRENT',
+    'mppt2_voltage'        : 'MPPT2_VOLTAGE',
+    'mppt2_current'        : 'BLU_E_15KT_M2',
+    'mppt3_voltage'        : 'MPPT3_VOLTAGE',
     'mppt3_current'        : 'PV3_INPUT_CURRENT',
 }
 
@@ -805,43 +831,45 @@ DATA_PARSER = {
 # PV1_VOLTAGE/PV1_CURRENT/PV1_POWER: simulator writes PV data per-MPPT to FC04
 RegisterMap.PV1_VOLTAGE          = RegisterMap.PV_VOLTAGE          # 0x0BB8 (3000)
 RegisterMap.PV1_CURRENT          = RegisterMap.PV1_INPUT_CURRENT   # 0x0BBB (3003)
+RegisterMap.MPPT1_POWER_LOW      = 0x0BBE  # (3006) MPPT1 power S32 low word
 RegisterMap.PV1_POWER            = RegisterMap.MPPT1_POWER_LOW     # 0x0BBE (3006)
 
 # Cumulative/daily production (FC04)
-RegisterMap.CUMULATIVE_PRODUCTION_L = RegisterMap.CUMULATIVE_ENERGY   # 0x0BDE (3038)
+RegisterMap.CUMULATIVE_PRODUCTION_L = 0x0BDE  # (3038) cumulative energy U32 low word, 0.1kWh
 RegisterMap.DAILY_PRODUCTION     = 0x0BE0  # (3040) daily energy in 0.1kWh
 
 # System/Inverter status (FC04) -- Kstar uses these in FC04 input registers
 RegisterMap.SYSTEM_STATUS        = 0x0BE1  # (3041) system operation status
-RegisterMap.INVERTER_STATUS      = 0x0BE2  # (3042) inverter run status
 
 # Temperature (FC04)
-RegisterMap.RADIATOR_TEMP        = 0x0BD2  # = TEMPERATURE (3026) radiator temp 0.1C
-RegisterMap.CHASSIS_TEMP         = 0x0BD3  # = ERROR_CODE3 (3027) chassis temp 0.1C
+RegisterMap.RADIATOR_TEMP        = 0x0BD2  # (3026) radiator temp 0.1C
+RegisterMap.CHASSIS_TEMP         = 0x0BD3  # (3027) chassis temp 0.1C
 
 # Grid frequency (FC04 Block2)
 RegisterMap.GRID_FREQUENCY       = 0x0C1A  # (3098) grid frequency 0.01Hz
 
 # R phase (FC04 Block2): inverter output voltage/current
 RegisterMap.INV_R_VOLTAGE        = 0x0C19  # (3097) R phase voltage 0.1V
-RegisterMap.INV_R_CURRENT        = 0x0C34  # (3124) = L1_CURRENT, R phase current 0.01A
-RegisterMap.INV_S_FREQUENCY      = 0x0C35  # (3125) S phase frequency (block3 start area)
+RegisterMap.INV_R_CURRENT        = 0x0C34  # (3124) R phase current 0.01A
+RegisterMap.INV_S_FREQUENCY      = 0x0C35  # (3125) S phase frequency
 
 # R/S/T phase power (FC04 Block3)
 RegisterMap.INV_R_POWER          = 0x0C36  # (3126) R phase active power W (S16)
-RegisterMap.INV_S_VOLTAGE        = 0x0C37  # (3127) = GRID_S_VOLTAGE
+RegisterMap.INV_S_VOLTAGE        = 0x0C37  # (3127) S phase voltage
 RegisterMap.INV_S_CURRENT        = 0x0C3C  # (3132) S phase current 0.01A
 RegisterMap.INV_S_POWER          = 0x0C3D  # (3133) S phase active power W (S16)
-RegisterMap.INV_T_VOLTAGE        = 0x0C3E  # (3134) = GRID_T_VOLTAGE
+RegisterMap.INV_T_VOLTAGE        = 0x0C3E  # (3134) T phase voltage
 RegisterMap.INV_T_CURRENT        = 0x0C43  # (3139) T phase current 0.01A
 RegisterMap.INV_T_POWER          = 0x0C44  # (3140) T phase active power W (S16)
 
 # Grid voltage (FC04 Block2/3)
 RegisterMap.GRID_R_VOLTAGE       = 0x0C19  # (3097) grid R phase voltage 0.1V
+RegisterMap.GRID_S_VOLTAGE       = 0x0C37  # (3127) grid S phase voltage 0.1V
+RegisterMap.GRID_T_VOLTAGE       = 0x0C3E  # (3134) grid T phase voltage 0.1V
 
 # Firmware version aliases (FC03)
 RegisterMap.ARM_VERSION          = 0x0C90  # (3216) ARM firmware version
-RegisterMap.DSP_VERSION          = 0x0C91  # (3217) = FIRMWARE_VERSION
+RegisterMap.DSP_VERSION          = 0x0C91  # (3217) DSP firmware version
 
 # DSP alarm code low word alias
 RegisterMap.DSP_ALARM_CODE_L     = RegisterMap.DSP_ERROR_CODE_L  # 0x0BD4 (3028)
@@ -852,28 +880,28 @@ RegisterMap.BLOCK1_COUNT         = 60      # 3000~3059
 RegisterMap.BLOCK2_START         = 0x0BF4  # (3060)
 RegisterMap.BLOCK2_COUNT         = 65      # 3060~3124
 RegisterMap.BLOCK3_START         = 0x0C35  # (3125)
-# Note: BLOCK3_COUNT already exists as register 0x0019=25 which is the correct count
+RegisterMap.BLOCK3_COUNT         = 25      # 3125~3149
 
 # IV Scan registers
 RegisterMap.IV_SCAN_COMMAND      = 0x0FC3  # (4035) FC06 write trigger for IV scan
-RegisterMap.IV_SCAN_STATUS       = 0x0C36  # (3126) FC04 IV scan status: low=state, high=progress%
+RegisterMap.IV_SCAN_STATUS       = 0x0C36  # (3126) FC04 IV scan status
 RegisterMap.IV_POINTS_PER_STRING = 100     # 100 V/I data points per string
+RegisterMap.IV_DATA_BASE         = 0x1388  # (5000) IV data start address
 RegisterMap.IV_REGS_PER_STRING   = 200     # 100 voltage + 100 current registers
 
 
 class KstarSystemStatus:
-    """Kstar system_status register → InverterMode 변환 테이블"""
-    # Kstar SYSTEM_STATUS(FC04) 값 → Solarize InverterMode 매핑
-    STANDBY  = 0  # 대기
-    RUNNING  = 1  # 운전 중
-    FAULT    = 2  # 고장
-    SHUTDOWN = 3  # 정지
+    """Kstar system_status register -> InverterMode conversion table"""
+    STANDBY  = 0
+    RUNNING  = 1
+    FAULT    = 2
+    SHUTDOWN = 3
 
     _TO_INVERTER_MODE = {
-        0: InverterMode.STANDBY,    # 대기 → Standby
-        1: InverterMode.ON_GRID,    # 운전 → On-Grid
-        2: InverterMode.FAULT,      # 고장 → Fault
-        3: InverterMode.SHUTDOWN,   # 정지 → Shutdown
+        0: InverterMode.STANDBY,
+        1: InverterMode.ON_GRID,
+        2: InverterMode.FAULT,
+        3: InverterMode.SHUTDOWN,
     }
 
     @classmethod
@@ -882,18 +910,8 @@ class KstarSystemStatus:
 
 
 def calc_pv_total_power(block1_regs):
-    """Block1(FC04, 3000~3059) 레지스터에서 PV 총 발전량 W를 계산한다.
-    MPPT1~3 power를 합산. power는 S32 (2 regs each)."""
-    base = RegisterMap.BLOCK1_START
+    """Block1(FC04, 3000~3059) -> total PV power W. Sum MPPT1~3 S32 power."""
     total = 0
-    # MPPT1 power: 0x0BBE~0x0BBF (offset 6~7 from base)
-    offsets = [
-        RegisterMap.MPPT1_POWER_LOW - base,   # MPPT1
-    ]
-    # MPPT 2,3 power: PV2=offset 8~9, PV3=offset 10~11 based on Kstar layout
-    # But safer: PV_POWER (0x0B96) is total - however that's FC03 not FC04
-    # In Kstar Block1, MPPT1_POWER is at offset 6-7 from base
-    # Simply: sum(PV power S32 pairs for each MPPT)
     mppt_power_offsets = [6, 8, 10]  # offsets for MPPT1, 2, 3 power low words
     for off in mppt_power_offsets:
         if off + 1 < len(block1_regs):
@@ -905,21 +923,20 @@ def calc_pv_total_power(block1_regs):
 
 
 def calc_ac_total_power(block3_regs):
-    """Block3(FC04, 3125~3149) 레지스터에서 AC 총 유효전력 W를 계산한다.
-    R/S/T상 전력 합산 (각 S16, 1W 단위)."""
+    """Block3(FC04, 3125~3149) -> total AC active power W. Sum R/S/T phase."""
     base = RegisterMap.BLOCK3_START
 
-    def s16(v):
+    def _s16(v):
         return v - 65536 if v > 32767 else v
 
-    p_r = s16(block3_regs[RegisterMap.INV_R_POWER - base])   # 3126
-    p_s = s16(block3_regs[RegisterMap.INV_S_POWER - base])   # 3133
-    p_t = s16(block3_regs[RegisterMap.INV_T_POWER - base])   # 3140
+    p_r = _s16(block3_regs[RegisterMap.INV_R_POWER - base])   # 3126
+    p_s = _s16(block3_regs[RegisterMap.INV_S_POWER - base])   # 3133
+    p_t = _s16(block3_regs[RegisterMap.INV_T_POWER - base])   # 3140
     return abs(p_r + p_s + p_t)
 
 
 def get_mppt_data(block1_regs, mppt_num):
-    """Block1에서 MPPT N번의 voltage(0.1V), current(0.01A), power(W)를 추출."""
+    """Block1 -> MPPT N voltage(0.1V), current(0.01A), power(W)."""
     base = RegisterMap.BLOCK1_START
     v_offset = (RegisterMap.PV1_VOLTAGE + mppt_num - 1) - base
     c_offset = (RegisterMap.PV1_CURRENT + mppt_num - 1) - base
@@ -935,12 +952,11 @@ def get_mppt_data(block1_regs, mppt_num):
 
 
 def get_string_currents(block1_regs, strings_per_mppt=3):
-    """Block1에서 스트링 전류 목록을 추출한다.
-    Kstar는 string 전류 레지스터가 없으므로 MPPT 전류를 strings_per_mppt 등분."""
+    """Block1 -> string currents. Kstar has no string regs; split MPPT current."""
     result = []
     for mppt_num in range(1, 4):
         m = get_mppt_data(block1_regs, mppt_num)
-        mppt_current = m['current']  # raw 0.01A
+        mppt_current = m['current']
         per_string = mppt_current // strings_per_mppt if strings_per_mppt > 0 else 0
         for s in range(strings_per_mppt):
             result.append({'raw_current': per_string})
@@ -948,11 +964,10 @@ def get_string_currents(block1_regs, strings_per_mppt=3):
 
 
 def get_cumulative_energy_wh(block1_regs):
-    """Block1에서 누적발전량을 Wh로 반환.
-    Kstar CUMULATIVE_ENERGY는 U32, 0.1kWh 단위."""
+    """Block1 -> cumulative energy in Wh. Kstar unit: 0.1kWh."""
     base = RegisterMap.BLOCK1_START
     offset = RegisterMap.CUMULATIVE_PRODUCTION_L - base
     if offset + 1 < len(block1_regs):
         raw = registers_to_u32(block1_regs[offset], block1_regs[offset + 1])
-        return raw * 100  # 0.1kWh → Wh
+        return raw * 100  # 0.1kWh -> Wh
     return 0

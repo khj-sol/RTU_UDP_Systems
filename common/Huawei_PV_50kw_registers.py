@@ -16,23 +16,23 @@ class RegisterMap:
     # =========================================================================
     # Device Information
     # =========================================================================
-    C10_11                                   = 0x0012  # U16
-    AS4777                                   = 0x0013  # U16
+    FREQUENCY                                = 0x000F  # U16
     SERIAL_NUMBER                            = 0x0014  # U16
-    REAL_TIME_DATA_OFOPTIMIZER_1             = 0x001A  # U16
     FIRMWARE_VERSION                         = 0x001E  # U16
-    REG_0X2B                                 = 0x002B  # U16
+    NRS_097_2_1                              = 0x002D  # U16
     PV_POWER                                 = 0x0036  # U16
-    CEI0_21_MV480                            = 0x004A  # U16
-    NAMIBIA_MV800                            = 0x009A  # U16
+    ZAMBIA_MV480                             = 0x0063  # U16
     LOW_INSULATION_RESISTANCE                = 0x080E  # U16
     MODEL                                    = 0x7530  # STRING
     SOFTWAREVERSION                          = 0x7562  # STRING
     PROTOCOLVERSION_MODBUS                   = 0x7574  # U32
     PROTOCOLVERSION_MODBUS_HIGH              = 0x7575
     MODEL_ID                                 = 0x7576  # U16
+    NUMBEROF_MPPTS                           = 0x7578  # U16, scale 1
     RATEDPOWER                               = 0x7579  # U32, scale kW 1000
     RATEDPOWER_HIGH                          = 0x757A
+    PRODUCT_SOFTWARE_VERSION_NUMBER          = 0x759C  # U16
+    POWER_GRID_STANDARD_CODE_PROTOCOL_VERSION = 0x759D  # U16
     THIRD_PARTYLABELING_SN                   = 0x75EF  # STRING
     THIRD_PARTYLABEL_MANUFACTURERMODEL       = 0x75F9  # U16
     MONITORING_BOARD_SN                      = 0x7927  # STRING
@@ -57,8 +57,8 @@ class RegisterMap:
     LATEST_HISTORICAL_ALARM_SERIAL_NUMBER    = 0x7DAE  # U32
     LATEST_HISTORICAL_ALARM_SERIAL_NUMBER_HIGH = 0x7DAF
     TOTALBUSVOLTAGE                          = 0x7DB0  # S16, scale V 10
-    MPPT3DCTOTAL_ENERGY_YIELD                = 0x7DD8  # U32, scale kWh 100
-    MPPT3DCTOTAL_ENERGY_YIELD_HIGH           = 0x7DD9
+    CUMULATIVE_ENERGY                        = 0x7DD8  # U32, scale kWh 100
+    CUMULATIVE_ENERGY_HIGH                   = 0x7DD9
     RUNNINGTIMEOFCAPACITORBANK               = 0x88B8  # U32, scale 10
     RUNNINGTIMEOFCAPACITORBANK_HIGH          = 0x88B9
     INTERNALFAN1RUNNINGTIME                  = 0x88BA  # U32, scale 10
@@ -73,8 +73,6 @@ class RegisterMap:
     NEGATIVEBUSVOLTAGE                       = 0x88E3  # S16, scale V 10
     BUSNEGATIVEVOLTAGETOGROUND               = 0x88E4  # S16, scale V 10
     LICENSE_SN                               = 0x8949  # STRING, scale 1
-    L1_VOLTAGE                               = 0x90ED  # S32, scale V 10
-    L1_VOLTAGE_HIGH                          = 0x90EE
     GRIDCURRENTPHASE_ACURRENT                = 0x90F3  # S32, scale A 100
     GRIDCURRENTPHASE_ACURRENT_HIGH           = 0x90F4
     METER_MODEL_CHECK_RESULT                 = 0x9112  # U16
@@ -88,6 +86,7 @@ class RegisterMap:
     APPARENTPOWERREFERENCE_HIGH              = 0xA42A
     PHASEPROTECTIONPOINT                     = 0xA473  # U16, scale 10
     VPHASE_TOGROUND                          = 0xA483  # U16
+    SCIENCEAND_TECHNOLOGY_JINGKE_PROTOCOL_VERSION = 0xAC47  # U16
     CLEAR_THERUNNINGTIMEINFORMATION          = 0xAFD3  # U16
     ESNVALIDATIONCOMMAND                     = 0xAFD7  # U16, scale 1
     METERMODEL                               = 0xB8C7  # U16
@@ -96,42 +95,46 @@ class RegisterMap:
     # Monitoring Data
     # =========================================================================
     POWER_FACTOR                             = 0x0000  # U16
-    NUMBER_OF_POINTS                         = 0x0001  # U16, scale A 1
-    FEATURE_DATA_SEQUENCENUMBER              = 0x0002  # U16
-    UTE_C_15_712_1B                          = 0x0003  # U16
-    FREQUENCY                                = 0x0004  # U16
-    BDEW_MV                                  = 0x0008  # U16
-    G59_ENGLAND                              = 0x0009  # U16
-    G83_ENGLAND                              = 0x000B  # U16
+    TEMPERATURE                              = 0x0001  # U16, scale A 1
+    REACTIVE_POWER                           = 0x0003  # U16
+    VDE_0126_1_1_GRB                         = 0x0007  # U16
+    L1_VOLTAGE                               = 0x0009  # U16
     L2_VOLTAGE                               = 0x000D  # U16
-    L3_VOLTAGE                               = 0x000E  # U16
-    PV_STRING_REG_COUNT                      = 0x0010  # U16
-    CUSTOM_60_HZ                             = 0x0016  # U16, scale Hz
-    CEI0_16                                  = 0x0017  # U16
-    BDEW_MV480                               = 0x001C  # U16
-    G59_ENGLAND_MV480                        = 0x001F  # U16
-    TAI_MEA_MV480                            = 0x0023  # U16
-    C11_C10_MV480                            = 0x0029  # U16
-    NRS_097_2_1_MV480                        = 0x002E  # U16
-    ANRE_MV480                               = 0x0035  # U16
-    EN50438_IE                               = 0x003E  # U16
-    REG_0X41                                 = 0x0041  # U16
-    CEI0_16_MV480                            = 0x0046  # U16
-    PO12_3                                   = 0x0047  # U16
-    PRC_024_ERCOT_MV600                      = 0x0055  # U16
+    AS4777                                   = 0x0013  # U16
+    CUSTOM_50_HZ                             = 0x0015  # U16, scale Hz
+    L3_VOLTAGE                               = 0x0016  # U16, scale Hz
+    TAI_MEA                                  = 0x001B  # U16
+    UTE_C_15_712_1_MV480                     = 0x0021  # U16
+    L2_CURRENT                               = 0x0029  # U16
+    REG_0X2B                                 = 0x002B  # U16
+    IEEE_1547_MV480                          = 0x0030  # U16
+    ANRE                                     = 0x0034  # U16
+    HECO_MV480                               = 0x0037  # U16
+    PRC_024_EASTERN_MV480                    = 0x0038  # U16
+    PRC_024_WESTERN_MV480                    = 0x0039  # U16
+    PRC_024_ERCOT_MV480                      = 0x003B  # U16
+    EN50438_IE_MV480                         = 0x003D  # U16
+    IEEE_1547A_MV480                         = 0x003F  # U16
+    MPPT3_CURRENT                            = 0x0047  # U16
+    CEI0_21_MV480                            = 0x004A  # U16
+    HECO_MV600                               = 0x0051  # U16
+    PRC_024_WESTERN_MV600                    = 0x0053  # U16
+    ZAMBIA                                   = 0x0062  # U16
     L1_CURRENT                               = 0x0073  # U16
-    L2_CURRENT                               = 0x0074  # U16
     L3_CURRENT                               = 0x0075  # U16
-    ABNT_NBR_16149_MV800                     = 0x007D  # U16
-    UTE_C_15_712_1_MV800                     = 0x007E  # U16
-    REG_0X83                                 = 0x0083  # U16
-    REG_0X87                                 = 0x0087  # U16
-    IEC_61727_MV800_60HZ                     = 0x0090  # U16
-    PRC_024_WESTERN_MV800                    = 0x00BD  # U16
-    G99_TYPEC_HV_MV800                       = 0x0107  # U16
-    CEA_MV800                                = 0x010A  # U16
-    PRODUCTSALESAREA                         = 0x7599  # STRING
-    PRODUCTSOFTWARE_ID                       = 0x759B  # U16
+    BDEW_MV800                               = 0x007C  # U16
+    NO_PERMISSION                            = 0x0080  # U16
+    TAI_PEA_MV800                            = 0x0082  # U16
+    NRS_097_2_1_MV800                        = 0x0085  # U16
+    CEI0_21_MV800                            = 0x008F  # U16
+    CEI0_16_MV800                            = 0x0097  # U16
+    NICARAGUA_MV800                          = 0x00B8  # U16
+    PRC_024_ERCOT_MV800                      = 0x00BF  # U16
+    TAI_MEA_MV800                            = 0x00F8  # U16
+    C10_11_MV800                             = 0x00FE  # U16
+    G99_TYPEB_HV_MV480                       = 0x0105  # U16
+    G99_TYPEB_HV_MV800                       = 0x0106  # U16
+    MPPT2_VOLTAGE                            = 0x0107  # U16
     PV_VOLTAGE                               = 0x7D10  # S16, scale V 10
     PV1CURRENT                               = 0x7D11  # S16, scale A 100
     PV2VOLTAGE                               = 0x7D12  # S16, scale V 10
@@ -140,17 +143,6 @@ class RegisterMap:
     PV3CURRENT                               = 0x7D15  # S16, scale A 100
     PV4VOLTAGE                               = 0x7D16  # S16, scale V 10
     PV4CURRENT                               = 0x7D17  # S16, scale A 100
-    REACTIVE_POWER                           = 0x7D52  # S32, scale 1000
-    REACTIVE_POWER_HIGH                      = 0x7D53
-    CUMULATIVE_ENERGY                        = 0x7D6A  # U32, scale kWh 100
-    CUMULATIVE_ENERGY_HIGH                   = 0x7D6B
-    INTERNAL_TEMPERATURE1                    = 0x88CD  # S16, scale 10
-    INTERNAL_TEMPERATURE2                    = 0x88CE  # S16, scale 10
-    INTERNAL_TEMPERATURE3                    = 0x88CF  # S16, scale 10
-    INTERNAL_TEMPERATURE4                    = 0x88D0  # S16, scale 10
-    INTERNAL_TEMPERATURE5                    = 0x88D1  # S16, scale 10
-    INTERNAL_TEMPERATURE6                    = 0x88D2  # S16, scale 10
-    TEMPERATURE                              = 0xAD78  # S16, scale 10
 
     # =========================================================================
     # Status & Temperature
@@ -159,7 +151,7 @@ class RegisterMap:
     REMOTESIGNAL_RUNNINGSTATUSMONITORING     = 0x7D02  # U16
     REMOTESIGNAL_RUNNINGSTATUSPOWERPROCESSING = 0x7D03  # U32, scale 1
     REMOTESIGNAL_RUNNINGSTATUSPOWERPROCESSING_HIGH = 0x7D04
-    DEVICE_STATUS                            = 0x7D59  # U16
+    INVERTER_MODE                            = 0x7D59  # U16
     BUILT_IN_PIDRUNNINGSTATUS                = 0x7DBE  # U16
     STRING_1ACCESSSTATUS                     = 0x7E2C  # STRINGING
     STRING_2ACCESSSTATUS                     = 0x7E2D  # STRINGING
@@ -171,14 +163,12 @@ class RegisterMap:
     STRING_8ACCESSSTATUS                     = 0x7E33  # STRINGING
     STENT_SYSTEM_STATUS                      = 0x84D0  # U32
     STENT_SYSTEM_STATUS_HIGH                 = 0x84D1
+    OPERATINGMODE                            = 0x84F4  # U16
     SUPPORTACCESSSTATUS                      = 0x84F6  # U32, scale 1
     SUPPORTACCESSSTATUS_HIGH                 = 0x84F7
-    WORKINGMODEMASK                          = 0x84F8  # U32, scale 1
-    WORKINGMODEMASK_HIGH                     = 0x84F9
     I_VSCANSTATUS                            = 0x8916  # U16
     STAWLANLISTSCANNINGSTATUS                = 0x8921  # U16
     NTPLAST_NTPSYNCHRONIZATIONSTATUS         = 0x8928  # U16, scale 1
-    DEFERREDACTIVATIONSTATE                  = 0x892B  # U16
     REG_4GTRAFFICSTATUS                      = 0x8932  # U16
     STAROUTERCONNECTIONSTATUS                = 0x8935  # U16
     FECONNECTIONSTATUS                       = 0x8936  # U16, scale 1
@@ -201,36 +191,36 @@ class RegisterMap:
     UPGRADE_STATUS                           = 0x9279  # U16
     INVERTERCOMPREHENSIVESTATUS              = 0x928E  # U16
     INVERTERINTEGRATEDSTATUSSUPPORTFLAG      = 0x928F  # U16, scale 1
-    Q_UCHARACTERISTICCURVEMODE               = 0x9C65  # U16
-    OUTPUTMODE                               = 0xA411  # U16
-    OF_FGRIDSWITCHOVERMODE                   = 0xA43C  # U16
-    OFF_GRIDMODE                             = 0xA43D  # U16
-    FAILUREPROTECTIONREACTIVEPOWERMODE       = 0xA45F  # U16
-    BUILT_IN_PIDMODE                         = 0xA4C4  # U16
-    OPERATINGMODE                            = 0xA5A9  # U16
-    MANAGEMENT_SYSTEM_PORTMODE               = 0xA85C  # U16
-    STAWIRELESS_ROUTING_ENCRYPTION_MODE      = 0xA89C  # U16
-    REG_4GNETWORKMODE                        = 0xA9A6  # U16
+    PQMODE                                   = 0xA43E  # U16
+    STRINGCONNECTIONMODE                     = 0xA441  # U16
+    POWER_QUALITY_OPTIMIZATION_MODE          = 0xA451  # U16
+    FAILUREPROTECTIONACTIVEPOWERMODE         = 0xA45C  # U16
+    PARALLELCOMMUNICATIONMODE                = 0xA961  # U16
+    REG_4GAPNMODE                            = 0xA9A7  # U16
+    SECURITYMODE                             = 0xB834  # U16
+    ACTIVEPOWERCONTROLMODE                   = 0xB937  # U16
+    RESTRICTIONMODE                          = 0xB93B  # U16
+    REACTIVEPOWERCONTROLMODE                 = 0xB941  # U16
 
     # =========================================================================
     # Alarm / Error Codes
     # =========================================================================
-    VDE_0126_1_1_BU                          = 0x0005  # U16
-    PO12_3_MV480                             = 0x003C  # U16
-    IEEE_1547A_MV480                         = 0x003F  # U16
-    PRC_024_QUEBEC_MV600                     = 0x0054  # U16
-    IEEE_1547A_MV600                         = 0x0056  # U16
-    NAMIBIA                                  = 0x005B  # U16
-    ABNT_NBR_16149                           = 0x005C  # U16
-    SA_RPPS_MV480                            = 0x005F  # U16
-    NIGERIA                                  = 0x006E  # U16
-    NIGERIA_MV480                            = 0x006F  # U16
-    IEEE_1547_MV800                          = 0x00B7  # U16
+    P_P_VALUE_AT_POINT_1N                    = 0x000A  # U16, scale 10
+    KENYA_ETHIOPIA                           = 0x006B  # U16
+    FEATURE_DATA_OF_OPTIMIZER1               = 0x006C  # U16
+    G59_ENGLAND_MV800                        = 0x006D  # U16
     G99_TYPEA_LV                             = 0x0102  # U16
+    G99_TYPEB_LV                             = 0x0103  # U16
     ERROR_CODE2                              = 0x080D  # U16
     ERROR_CODE3                              = 0x0810  # U16
     FAULTY_POWER_COLLECTOR2                  = 0x0813  # U16
+    BATTERY_ABNORMAL                         = 0x0814  # U16
     OPTIMIZER_FAULT5                         = 0x0821  # U16
+    ON_GRID_OFF_GRID_CONTROLLERABNORMAL4     = 0x0822  # U16
+    BUILT_IN_PID_OPERATIONABNORMAL6          = 0x0825  # U16
+    EXTERNAL_FAN_ABNORMAL                    = 0x0826  # U16
+    INTERNAL_FAN_ABNORMAL                    = 0x0827  # U16
+    DC_PROTECTION_UNIT_ABNORMAL8             = 0x0828  # U16
     REMOTESIGNAL_ALARM_1                     = 0x7D08  # U16
     REMOTESIGNAL_ALARM_2                     = 0x7D09  # U16
     REMOTESIGNAL_ALARM_3                     = 0x7D0A  # U16
@@ -299,7 +289,6 @@ class RegisterMap:
     INTERNALALARM                            = 0x88C2  # U16, scale V 1
     AUDIBLEANDVISUALALARM                    = 0xA432  # U16
     POWERGRIDFAULTRECOVERYAUTOMATICSTARTUP   = 0xA44D  # U16
-    ABNORMALGROUNDINGSHUTDOWN                = 0xA454  # U16
     POWER_ONSOFTSTARTTIMEDUETOPOWERGRIDFAULTS = 0xA474  # U16, scale 1
     POWERGRIDFAULTRECOVERYTIME               = 0xA478  # U16, scale 1
     GRIDFAULTZEROCURRENTMODE                 = 0xA47E  # U16
@@ -341,14 +330,17 @@ class RegisterMap:
 
     # --- RTU modbus_handler / simulator 필수 alias ---
     INNER_TEMP                               = TEMPERATURE
-    INVERTER_MODE                            = DEVICE_STATUS
     TOTAL_ENERGY                             = CUMULATIVE_ENERGY
-    ERROR_CODE1                              = VDE_0126_1_1_BU
+    ERROR_CODE1                              = L2_VOLTAGE
     DER_POWER_FACTOR_SET                     = 0x07D0
     DER_ACTION_MODE                          = 0x07D1
     DER_REACTIVE_POWER_PCT                   = 0x07D2
     DER_ACTIVE_POWER_PCT                     = 0x07D3
     INVERTER_ON_OFF                          = 0x0834
+    MPPT_NUMBER                              = 0x1A4A  # default MPPT count register
+    MPPT1_VOLTAGE                            = PV_VOLTAGE
+    CUMULATIVE_ENERGY_LOW                    = CUMULATIVE_ENERGY
+    DER_AVM_DIGITAL_METERCONNECT_STATUS      = 0x1210
 
 
 
@@ -421,7 +413,7 @@ class ErrorCode1:
 
 
 class ErrorCode2:
-    """Error Code Table2 (0x003C) — Bit field"""
+    """Error Code Table2 (0x000A) — Bit field"""
     BITS = {
     }
 
@@ -435,7 +427,7 @@ class ErrorCode2:
 
 
 class ErrorCode3:
-    """Error Code Table3 (0x003F) — Bit field"""
+    """Error Code Table3 (0x000E) — Bit field"""
     BITS = {
     }
 
@@ -449,7 +441,7 @@ class ErrorCode3:
 
 
 class ErrorCode4:
-    """Error Code Table4 (0x0054) — Bit field"""
+    """Error Code Table4 (0x005A) — Bit field"""
     BITS = {
     }
 
@@ -463,7 +455,7 @@ class ErrorCode4:
 
 
 class ErrorCode5:
-    """Error Code Table5 (0x0056) — Bit field"""
+    """Error Code Table5 (0x006B) — Bit field"""
     BITS = {
     }
 
@@ -477,7 +469,7 @@ class ErrorCode5:
 
 
 class ErrorCode6:
-    """Error Code Table6 (0x005A) — Bit field"""
+    """Error Code Table6 (0x006C) — Bit field"""
     BITS = {
     }
 
@@ -491,7 +483,7 @@ class ErrorCode6:
 
 
 class ErrorCode7:
-    """Error Code Table7 (0x005B) — Bit field"""
+    """Error Code Table7 (0x006D) — Bit field"""
     BITS = {
     }
 
@@ -505,7 +497,7 @@ class ErrorCode7:
 
 
 class ErrorCode8:
-    """Error Code Table8 (0x005C) — Bit field"""
+    """Error Code Table8 (0x0070) — Bit field"""
     BITS = {
     }
 
@@ -519,7 +511,7 @@ class ErrorCode8:
 
 
 class ErrorCode9:
-    """Error Code Table9 (0x005F) — Bit field"""
+    """Error Code Table9 (0x0071) — Bit field"""
     BITS = {
     }
 
@@ -533,7 +525,7 @@ class ErrorCode9:
 
 
 class ErrorCode10:
-    """Error Code Table10 (0x006E) — Bit field"""
+    """Error Code Table10 (0x0102) — Bit field"""
     BITS = {
     }
 
@@ -547,7 +539,7 @@ class ErrorCode10:
 
 
 class ErrorCode11:
-    """Error Code Table11 (0x006F) — Bit field"""
+    """Error Code Table11 (0x0103) — Bit field"""
     BITS = {
     }
 
@@ -561,7 +553,7 @@ class ErrorCode11:
 
 
 class ErrorCode12:
-    """Error Code Table12 (0x00B7) — Bit field"""
+    """Error Code Table12 (0x080D) — Bit field"""
     BITS = {
     }
 
@@ -575,7 +567,7 @@ class ErrorCode12:
 
 
 class ErrorCode13:
-    """Error Code Table13 (0x0102) — Bit field"""
+    """Error Code Table13 (0x0810) — Bit field"""
     BITS = {
     }
 
@@ -589,7 +581,7 @@ class ErrorCode13:
 
 
 class ErrorCode14:
-    """Error Code Table14 (0x080D) — Bit field"""
+    """Error Code Table14 (0x0813) — Bit field"""
     BITS = {
     }
 
@@ -603,7 +595,7 @@ class ErrorCode14:
 
 
 class ErrorCode15:
-    """Error Code Table15 (0x0810) — Bit field"""
+    """Error Code Table15 (0x0814) — Bit field"""
     BITS = {
     }
 
@@ -617,7 +609,7 @@ class ErrorCode15:
 
 
 class ErrorCode16:
-    """Error Code Table16 (0x0813) — Bit field"""
+    """Error Code Table16 (0x0821) — Bit field"""
     BITS = {
     }
 
@@ -631,7 +623,7 @@ class ErrorCode16:
 
 
 class ErrorCode17:
-    """Error Code Table17 (0x0821) — Bit field"""
+    """Error Code Table17 (0x0822) — Bit field"""
     BITS = {
     }
 
@@ -645,7 +637,7 @@ class ErrorCode17:
 
 
 class ErrorCode18:
-    """Error Code Table18 (0x7D08) — Bit field"""
+    """Error Code Table18 (0x0825) — Bit field"""
     BITS = {
     }
 
@@ -659,7 +651,7 @@ class ErrorCode18:
 
 
 class ErrorCode19:
-    """Error Code Table19 (0x7D09) — Bit field"""
+    """Error Code Table19 (0x0826) — Bit field"""
     BITS = {
     }
 
@@ -673,7 +665,7 @@ class ErrorCode19:
 
 
 class ErrorCode20:
-    """Error Code Table20 (0x7D0A) — Bit field"""
+    """Error Code Table20 (0x0827) — Bit field"""
     BITS = {
     }
 
@@ -687,7 +679,7 @@ class ErrorCode20:
 
 
 class ErrorCode21:
-    """Error Code Table21 (0x7D0B) — Bit field"""
+    """Error Code Table21 (0x0828) — Bit field"""
     BITS = {
     }
 
@@ -701,7 +693,7 @@ class ErrorCode21:
 
 
 class ErrorCode22:
-    """Error Code Table22 (0x7D0C) — Bit field"""
+    """Error Code Table22 (0x7D08) — Bit field"""
     BITS = {
     }
 
@@ -715,7 +707,7 @@ class ErrorCode22:
 
 
 class ErrorCode23:
-    """Error Code Table23 (0x7D0D) — Bit field"""
+    """Error Code Table23 (0x7D09) — Bit field"""
     BITS = {
     }
 
@@ -729,7 +721,7 @@ class ErrorCode23:
 
 
 class ErrorCode24:
-    """Error Code Table24 (0x7D5A) — Bit field"""
+    """Error Code Table24 (0x7D0A) — Bit field"""
     BITS = {
     }
 
@@ -743,7 +735,7 @@ class ErrorCode24:
 
 
 class ErrorCode25:
-    """Error Code Table25 (0x7D97) — Bit field"""
+    """Error Code Table25 (0x7D0B) — Bit field"""
     BITS = {
     }
 
@@ -757,7 +749,7 @@ class ErrorCode25:
 
 
 class ErrorCode26:
-    """Error Code Table26 (0x7D98) — Bit field"""
+    """Error Code Table26 (0x7D0C) — Bit field"""
     BITS = {
     }
 
@@ -771,7 +763,7 @@ class ErrorCode26:
 
 
 class ErrorCode27:
-    """Error Code Table27 (0x7D99) — Bit field"""
+    """Error Code Table27 (0x7D0D) — Bit field"""
     BITS = {
     }
 
@@ -785,7 +777,7 @@ class ErrorCode27:
 
 
 class ErrorCode28:
-    """Error Code Table28 (0x7D9A) — Bit field"""
+    """Error Code Table28 (0x7D5A) — Bit field"""
     BITS = {
     }
 
@@ -799,7 +791,7 @@ class ErrorCode28:
 
 
 class ErrorCode29:
-    """Error Code Table29 (0x7DFC) — Bit field"""
+    """Error Code Table29 (0x7D97) — Bit field"""
     BITS = {
     }
 
@@ -813,7 +805,7 @@ class ErrorCode29:
 
 
 class ErrorCode30:
-    """Error Code Table30 (0x7DFD) — Bit field"""
+    """Error Code Table30 (0x7D98) — Bit field"""
     BITS = {
     }
 
@@ -827,7 +819,7 @@ class ErrorCode30:
 
 
 class ErrorCode31:
-    """Error Code Table31 (0x7DFE) — Bit field"""
+    """Error Code Table31 (0x7D99) — Bit field"""
     BITS = {
     }
 
@@ -841,7 +833,7 @@ class ErrorCode31:
 
 
 class ErrorCode32:
-    """Error Code Table32 (0x7DFF) — Bit field"""
+    """Error Code Table32 (0x7D9A) — Bit field"""
     BITS = {
     }
 
@@ -855,7 +847,7 @@ class ErrorCode32:
 
 
 class ErrorCode33:
-    """Error Code Table33 (0x7E00) — Bit field"""
+    """Error Code Table33 (0x7DFC) — Bit field"""
     BITS = {
     }
 
@@ -869,7 +861,7 @@ class ErrorCode33:
 
 
 class ErrorCode34:
-    """Error Code Table34 (0x7E01) — Bit field"""
+    """Error Code Table34 (0x7DFD) — Bit field"""
     BITS = {
     }
 
@@ -883,7 +875,7 @@ class ErrorCode34:
 
 
 class ErrorCode35:
-    """Error Code Table35 (0x7E02) — Bit field"""
+    """Error Code Table35 (0x7DFE) — Bit field"""
     BITS = {
     }
 
@@ -897,7 +889,7 @@ class ErrorCode35:
 
 
 class ErrorCode36:
-    """Error Code Table36 (0x7E03) — Bit field"""
+    """Error Code Table36 (0x7DFF) — Bit field"""
     BITS = {
     }
 
@@ -911,7 +903,7 @@ class ErrorCode36:
 
 
 class ErrorCode37:
-    """Error Code Table37 (0x7E04) — Bit field"""
+    """Error Code Table37 (0x7E00) — Bit field"""
     BITS = {
     }
 
@@ -925,7 +917,7 @@ class ErrorCode37:
 
 
 class ErrorCode38:
-    """Error Code Table38 (0x7E05) — Bit field"""
+    """Error Code Table38 (0x7E01) — Bit field"""
     BITS = {
     }
 
@@ -939,7 +931,7 @@ class ErrorCode38:
 
 
 class ErrorCode39:
-    """Error Code Table39 (0x7E06) — Bit field"""
+    """Error Code Table39 (0x7E02) — Bit field"""
     BITS = {
     }
 
@@ -953,7 +945,7 @@ class ErrorCode39:
 
 
 class ErrorCode40:
-    """Error Code Table40 (0x7E07) — Bit field"""
+    """Error Code Table40 (0x7E03) — Bit field"""
     BITS = {
     }
 
@@ -967,7 +959,7 @@ class ErrorCode40:
 
 
 class ErrorCode41:
-    """Error Code Table41 (0x7E08) — Bit field"""
+    """Error Code Table41 (0x7E04) — Bit field"""
     BITS = {
     }
 
@@ -981,7 +973,7 @@ class ErrorCode41:
 
 
 class ErrorCode42:
-    """Error Code Table42 (0x7E09) — Bit field"""
+    """Error Code Table42 (0x7E05) — Bit field"""
     BITS = {
     }
 
@@ -995,7 +987,7 @@ class ErrorCode42:
 
 
 class ErrorCode43:
-    """Error Code Table43 (0x7E0A) — Bit field"""
+    """Error Code Table43 (0x7E06) — Bit field"""
     BITS = {
     }
 
@@ -1009,7 +1001,7 @@ class ErrorCode43:
 
 
 class ErrorCode44:
-    """Error Code Table44 (0x7E0B) — Bit field"""
+    """Error Code Table44 (0x7E07) — Bit field"""
     BITS = {
     }
 
@@ -1023,7 +1015,7 @@ class ErrorCode44:
 
 
 class ErrorCode45:
-    """Error Code Table45 (0x7E0C) — Bit field"""
+    """Error Code Table45 (0x7E08) — Bit field"""
     BITS = {
     }
 
@@ -1037,7 +1029,7 @@ class ErrorCode45:
 
 
 class ErrorCode46:
-    """Error Code Table46 (0x7E0D) — Bit field"""
+    """Error Code Table46 (0x7E09) — Bit field"""
     BITS = {
     }
 
@@ -1051,7 +1043,7 @@ class ErrorCode46:
 
 
 class ErrorCode47:
-    """Error Code Table47 (0x7E0E) — Bit field"""
+    """Error Code Table47 (0x7E0A) — Bit field"""
     BITS = {
     }
 
@@ -1065,7 +1057,7 @@ class ErrorCode47:
 
 
 class ErrorCode48:
-    """Error Code Table48 (0x7E0F) — Bit field"""
+    """Error Code Table48 (0x7E0B) — Bit field"""
     BITS = {
     }
 
@@ -1079,7 +1071,7 @@ class ErrorCode48:
 
 
 class ErrorCode49:
-    """Error Code Table49 (0x7E10) — Bit field"""
+    """Error Code Table49 (0x7E0C) — Bit field"""
     BITS = {
     }
 
@@ -1093,7 +1085,7 @@ class ErrorCode49:
 
 
 class ErrorCode50:
-    """Error Code Table50 (0x7E11) — Bit field"""
+    """Error Code Table50 (0x7E0D) — Bit field"""
     BITS = {
     }
 
@@ -1107,7 +1099,7 @@ class ErrorCode50:
 
 
 class ErrorCode51:
-    """Error Code Table51 (0x851B) — Bit field"""
+    """Error Code Table51 (0x7E0E) — Bit field"""
     BITS = {
     }
 
@@ -1121,7 +1113,7 @@ class ErrorCode51:
 
 
 class ErrorCode52:
-    """Error Code Table52 (0x851C) — Bit field"""
+    """Error Code Table52 (0x7E0F) — Bit field"""
     BITS = {
     }
 
@@ -1135,7 +1127,7 @@ class ErrorCode52:
 
 
 class ErrorCode53:
-    """Error Code Table53 (0x851D) — Bit field"""
+    """Error Code Table53 (0x7E10) — Bit field"""
     BITS = {
     }
 
@@ -1149,7 +1141,7 @@ class ErrorCode53:
 
 
 class ErrorCode54:
-    """Error Code Table54 (0x851E) — Bit field"""
+    """Error Code Table54 (0x7E11) — Bit field"""
     BITS = {
     }
 
@@ -1163,7 +1155,7 @@ class ErrorCode54:
 
 
 class ErrorCode55:
-    """Error Code Table55 (0x851F) — Bit field"""
+    """Error Code Table55 (0x851B) — Bit field"""
     BITS = {
     }
 
@@ -1177,7 +1169,7 @@ class ErrorCode55:
 
 
 class ErrorCode56:
-    """Error Code Table56 (0x8520) — Bit field"""
+    """Error Code Table56 (0x851C) — Bit field"""
     BITS = {
     }
 
@@ -1191,7 +1183,7 @@ class ErrorCode56:
 
 
 class ErrorCode57:
-    """Error Code Table57 (0x8521) — Bit field"""
+    """Error Code Table57 (0x851D) — Bit field"""
     BITS = {
     }
 
@@ -1205,7 +1197,7 @@ class ErrorCode57:
 
 
 class ErrorCode58:
-    """Error Code Table58 (0x8522) — Bit field"""
+    """Error Code Table58 (0x851E) — Bit field"""
     BITS = {
     }
 
@@ -1219,7 +1211,7 @@ class ErrorCode58:
 
 
 class ErrorCode59:
-    """Error Code Table59 (0x8523) — Bit field"""
+    """Error Code Table59 (0x851F) — Bit field"""
     BITS = {
     }
 
@@ -1233,7 +1225,7 @@ class ErrorCode59:
 
 
 class ErrorCode60:
-    """Error Code Table60 (0x8524) — Bit field"""
+    """Error Code Table60 (0x8520) — Bit field"""
     BITS = {
     }
 
@@ -1247,7 +1239,7 @@ class ErrorCode60:
 
 
 class ErrorCode61:
-    """Error Code Table61 (0x8525) — Bit field"""
+    """Error Code Table61 (0x8521) — Bit field"""
     BITS = {
     }
 
@@ -1261,7 +1253,7 @@ class ErrorCode61:
 
 
 class ErrorCode62:
-    """Error Code Table62 (0x8526) — Bit field"""
+    """Error Code Table62 (0x8522) — Bit field"""
     BITS = {
     }
 
@@ -1275,7 +1267,7 @@ class ErrorCode62:
 
 
 class ErrorCode63:
-    """Error Code Table63 (0x8527) — Bit field"""
+    """Error Code Table63 (0x8523) — Bit field"""
     BITS = {
     }
 
@@ -1289,7 +1281,7 @@ class ErrorCode63:
 
 
 class ErrorCode64:
-    """Error Code Table64 (0x8528) — Bit field"""
+    """Error Code Table64 (0x8524) — Bit field"""
     BITS = {
     }
 
@@ -1303,7 +1295,7 @@ class ErrorCode64:
 
 
 class ErrorCode65:
-    """Error Code Table65 (0x8529) — Bit field"""
+    """Error Code Table65 (0x8525) — Bit field"""
     BITS = {
     }
 
@@ -1317,7 +1309,7 @@ class ErrorCode65:
 
 
 class ErrorCode66:
-    """Error Code Table66 (0x852A) — Bit field"""
+    """Error Code Table66 (0x8526) — Bit field"""
     BITS = {
     }
 
@@ -1331,7 +1323,7 @@ class ErrorCode66:
 
 
 class ErrorCode67:
-    """Error Code Table67 (0x852B) — Bit field"""
+    """Error Code Table67 (0x8527) — Bit field"""
     BITS = {
     }
 
@@ -1345,7 +1337,7 @@ class ErrorCode67:
 
 
 class ErrorCode68:
-    """Error Code Table68 (0x852C) — Bit field"""
+    """Error Code Table68 (0x8528) — Bit field"""
     BITS = {
     }
 
@@ -1359,7 +1351,7 @@ class ErrorCode68:
 
 
 class ErrorCode69:
-    """Error Code Table69 (0x852D) — Bit field"""
+    """Error Code Table69 (0x8529) — Bit field"""
     BITS = {
     }
 
@@ -1373,7 +1365,7 @@ class ErrorCode69:
 
 
 class ErrorCode70:
-    """Error Code Table70 (0x852E) — Bit field"""
+    """Error Code Table70 (0x852A) — Bit field"""
     BITS = {
     }
 
@@ -1387,7 +1379,7 @@ class ErrorCode70:
 
 
 class ErrorCode71:
-    """Error Code Table71 (0x852F) — Bit field"""
+    """Error Code Table71 (0x852B) — Bit field"""
     BITS = {
     }
 
@@ -1401,7 +1393,7 @@ class ErrorCode71:
 
 
 class ErrorCode72:
-    """Error Code Table72 (0x8530) — Bit field"""
+    """Error Code Table72 (0x852C) — Bit field"""
     BITS = {
     }
 
@@ -1415,7 +1407,7 @@ class ErrorCode72:
 
 
 class ErrorCode73:
-    """Error Code Table73 (0x8531) — Bit field"""
+    """Error Code Table73 (0x852D) — Bit field"""
     BITS = {
     }
 
@@ -1429,7 +1421,7 @@ class ErrorCode73:
 
 
 class ErrorCode74:
-    """Error Code Table74 (0x8532) — Bit field"""
+    """Error Code Table74 (0x852E) — Bit field"""
     BITS = {
     }
 
@@ -1443,7 +1435,7 @@ class ErrorCode74:
 
 
 class ErrorCode75:
-    """Error Code Table75 (0x8533) — Bit field"""
+    """Error Code Table75 (0x852F) — Bit field"""
     BITS = {
     }
 
@@ -1457,7 +1449,7 @@ class ErrorCode75:
 
 
 class ErrorCode76:
-    """Error Code Table76 (0x8534) — Bit field"""
+    """Error Code Table76 (0x8530) — Bit field"""
     BITS = {
     }
 
@@ -1471,7 +1463,7 @@ class ErrorCode76:
 
 
 class ErrorCode77:
-    """Error Code Table77 (0x8535) — Bit field"""
+    """Error Code Table77 (0x8531) — Bit field"""
     BITS = {
     }
 
@@ -1485,7 +1477,7 @@ class ErrorCode77:
 
 
 class ErrorCode78:
-    """Error Code Table78 (0x8536) — Bit field"""
+    """Error Code Table78 (0x8532) — Bit field"""
     BITS = {
     }
 
@@ -1499,7 +1491,7 @@ class ErrorCode78:
 
 
 class ErrorCode79:
-    """Error Code Table79 (0x8537) — Bit field"""
+    """Error Code Table79 (0x8533) — Bit field"""
     BITS = {
     }
 
@@ -1513,7 +1505,7 @@ class ErrorCode79:
 
 
 class ErrorCode80:
-    """Error Code Table80 (0x8538) — Bit field"""
+    """Error Code Table80 (0x8534) — Bit field"""
     BITS = {
     }
 
@@ -1527,7 +1519,7 @@ class ErrorCode80:
 
 
 class ErrorCode81:
-    """Error Code Table81 (0x8539) — Bit field"""
+    """Error Code Table81 (0x8535) — Bit field"""
     BITS = {
     }
 
@@ -1541,7 +1533,7 @@ class ErrorCode81:
 
 
 class ErrorCode82:
-    """Error Code Table82 (0x853A) — Bit field"""
+    """Error Code Table82 (0x8536) — Bit field"""
     BITS = {
     }
 
@@ -1555,7 +1547,7 @@ class ErrorCode82:
 
 
 class ErrorCode83:
-    """Error Code Table83 (0x88C2) — Bit field"""
+    """Error Code Table83 (0x8537) — Bit field"""
     BITS = {
     }
 
@@ -1569,7 +1561,7 @@ class ErrorCode83:
 
 
 class ErrorCode84:
-    """Error Code Table84 (0xA432) — Bit field"""
+    """Error Code Table84 (0x8538) — Bit field"""
     BITS = {
     }
 
@@ -1583,7 +1575,7 @@ class ErrorCode84:
 
 
 class ErrorCode85:
-    """Error Code Table85 (0xA44D) — Bit field"""
+    """Error Code Table85 (0x8539) — Bit field"""
     BITS = {
     }
 
@@ -1597,7 +1589,7 @@ class ErrorCode85:
 
 
 class ErrorCode86:
-    """Error Code Table86 (0xA454) — Bit field"""
+    """Error Code Table86 (0x853A) — Bit field"""
     BITS = {
     }
 
@@ -1611,7 +1603,7 @@ class ErrorCode86:
 
 
 class ErrorCode87:
-    """Error Code Table87 (0xA474) — Bit field"""
+    """Error Code Table87 (0x88C2) — Bit field"""
     BITS = {
     }
 
@@ -1625,7 +1617,7 @@ class ErrorCode87:
 
 
 class ErrorCode88:
-    """Error Code Table88 (0xA478) — Bit field"""
+    """Error Code Table88 (0xA432) — Bit field"""
     BITS = {
     }
 
@@ -1639,7 +1631,7 @@ class ErrorCode88:
 
 
 class ErrorCode89:
-    """Error Code Table89 (0xA47E) — Bit field"""
+    """Error Code Table89 (0xA44D) — Bit field"""
     BITS = {
     }
 
@@ -1653,7 +1645,7 @@ class ErrorCode89:
 
 
 class ErrorCode90:
-    """Error Code Table90 (0xA9A9) — Bit field"""
+    """Error Code Table90 (0xA474) — Bit field"""
     BITS = {
     }
 
@@ -1667,7 +1659,7 @@ class ErrorCode90:
 
 
 class ErrorCode91:
-    """Error Code Table91 (0xA9AA) — Bit field"""
+    """Error Code Table91 (0xA478) — Bit field"""
     BITS = {
     }
 
@@ -1681,7 +1673,7 @@ class ErrorCode91:
 
 
 class ErrorCode92:
-    """Error Code Table92 (0xA9CA) — Bit field"""
+    """Error Code Table92 (0xA47E) — Bit field"""
     BITS = {
     }
 
@@ -1695,7 +1687,7 @@ class ErrorCode92:
 
 
 class ErrorCode93:
-    """Error Code Table93 (0xAC32) — Bit field"""
+    """Error Code Table93 (0xA9A9) — Bit field"""
     BITS = {
     }
 
@@ -1709,7 +1701,7 @@ class ErrorCode93:
 
 
 class ErrorCode94:
-    """Error Code Table94 (0xAD10) — Bit field"""
+    """Error Code Table94 (0xA9AA) — Bit field"""
     BITS = {
     }
 
@@ -1723,7 +1715,7 @@ class ErrorCode94:
 
 
 class ErrorCode95:
-    """Error Code Table95 (0xAFC9) — Bit field"""
+    """Error Code Table95 (0xA9CA) — Bit field"""
     BITS = {
     }
 
@@ -1737,7 +1729,7 @@ class ErrorCode95:
 
 
 class ErrorCode96:
-    """Error Code Table96 (0xAFCB) — Bit field"""
+    """Error Code Table96 (0xAC32) — Bit field"""
     BITS = {
     }
 
@@ -1751,7 +1743,7 @@ class ErrorCode96:
 
 
 class ErrorCode97:
-    """Error Code Table97 (0xAFCD) — Bit field"""
+    """Error Code Table97 (0xAD10) — Bit field"""
     BITS = {
     }
 
@@ -1765,7 +1757,7 @@ class ErrorCode97:
 
 
 class ErrorCode98:
-    """Error Code Table98 (0xAFCE) — Bit field"""
+    """Error Code Table98 (0xAFC9) — Bit field"""
     BITS = {
     }
 
@@ -1779,7 +1771,7 @@ class ErrorCode98:
 
 
 class ErrorCode99:
-    """Error Code Table99 (0xAFED) — Bit field"""
+    """Error Code Table99 (0xAFCB) — Bit field"""
     BITS = {
     }
 
@@ -1793,7 +1785,7 @@ class ErrorCode99:
 
 
 class ErrorCode100:
-    """Error Code Table100 (0xAFF0) — Bit field"""
+    """Error Code Table100 (0xAFCD) — Bit field"""
     BITS = {
     }
 
@@ -1807,7 +1799,7 @@ class ErrorCode100:
 
 
 class ErrorCode101:
-    """Error Code Table101 (0xBA3B) — Bit field"""
+    """Error Code Table101 (0xAFCE) — Bit field"""
     BITS = {
     }
 
@@ -1821,7 +1813,7 @@ class ErrorCode101:
 
 
 class ErrorCode102:
-    """Error Code Table102 (0xBA3D) — Bit field"""
+    """Error Code Table102 (0xAFED) — Bit field"""
     BITS = {
     }
 
@@ -1835,7 +1827,49 @@ class ErrorCode102:
 
 
 class ErrorCode103:
-    """Error Code Table103 (0xF000) — Bit field"""
+    """Error Code Table103 (0xAFF0) — Bit field"""
+    BITS = {
+    }
+
+    @classmethod
+    def decode(cls, value):
+        return [f"E{b}:{d}" for b, d in cls.BITS.items() if value & (1 << b)]
+
+    @classmethod
+    def to_string(cls, value):
+        return ", ".join(cls.decode(value)) if value else "OK"
+
+
+class ErrorCode104:
+    """Error Code Table104 (0xBA3B) — Bit field"""
+    BITS = {
+    }
+
+    @classmethod
+    def decode(cls, value):
+        return [f"E{b}:{d}" for b, d in cls.BITS.items() if value & (1 << b)]
+
+    @classmethod
+    def to_string(cls, value):
+        return ", ".join(cls.decode(value)) if value else "OK"
+
+
+class ErrorCode105:
+    """Error Code Table105 (0xBA3D) — Bit field"""
+    BITS = {
+    }
+
+    @classmethod
+    def decode(cls, value):
+        return [f"E{b}:{d}" for b, d in cls.BITS.items() if value & (1 << b)]
+
+    @classmethod
+    def to_string(cls, value):
+        return ", ".join(cls.decode(value)) if value else "OK"
+
+
+class ErrorCode106:
+    """Error Code Table106 (0xF000) — Bit field"""
     BITS = {
     }
 
@@ -1982,75 +2016,78 @@ def generate_iv_current_data(isc, voc, v_min, data_points=64):
 
 DATA_TYPES = {
     'POWER_FACTOR': 'U16',
-    'NUMBER_OF_POINTS': 'U16',
-    'FEATURE_DATA_SEQUENCENUMBER': 'U16',
-    'UTE_C_15_712_1B': 'U16',
+    'TEMPERATURE': 'U16',
     'FREQUENCY': 'U16',
-    'VDE_0126_1_1_BU': 'U16',
-    'BDEW_MV': 'U16',
-    'G59_ENGLAND': 'U16',
-    'G83_ENGLAND': 'U16',
-    'L1_VOLTAGE': 'U16',
+    'REACTIVE_POWER': 'U16',
     'L2_VOLTAGE': 'U16',
+    'VDE_0126_1_1_GRB': 'U16',
+    'L1_VOLTAGE': 'U16',
+    'P_P_VALUE_AT_POINT_1N': 'U16',
+    'PV_POWER': 'U16',
     'L3_VOLTAGE': 'U16',
-    'PV_STRING_REG_COUNT': 'U16',
-    'C10_11': 'U16',
     'AS4777': 'U16',
     'SERIAL_NUMBER': 'U16',
-    'CUSTOM_60_HZ': 'U16',
-    'CEI0_16': 'U16',
-    'REAL_TIME_DATA_OFOPTIMIZER_1': 'U16',
-    'BDEW_MV480': 'U16',
+    'CUSTOM_50_HZ': 'U16',
+    'TAI_MEA': 'U16',
+    'CUMULATIVE_ENERGY': 'U16',
     'FIRMWARE_VERSION': 'U16',
-    'G59_ENGLAND_MV480': 'U16',
-    'TAI_MEA_MV480': 'U16',
-    'C11_C10_MV480': 'U16',
-    'REG_0X2B': 'U16',
-    'NRS_097_2_1_MV480': 'U16',
-    'ANRE_MV480': 'U16',
-    'PV_POWER': 'U16',
-    'PO12_3_MV480': 'U16',
-    'EN50438_IE': 'U16',
-    'IEEE_1547A_MV480': 'U16',
-    'REG_0X41': 'U16',
-    'CEI0_16_MV480': 'U16',
-    'PO12_3': 'U16',
-    'CEI0_21_MV480': 'U16',
-    'PRC_024_QUEBEC_MV600': 'U16',
-    'PRC_024_ERCOT_MV600': 'U16',
-    'IEEE_1547A_MV600': 'U16',
-    'REACTIVE_POWER': 'U16',
-    'NAMIBIA': 'U16',
-    'ABNT_NBR_16149': 'U16',
-    'SA_RPPS_MV480': 'U16',
-    'NIGERIA': 'U16',
-    'NIGERIA_MV480': 'U16',
-    'L1_CURRENT': 'U16',
+    'UTE_C_15_712_1_MV480': 'U16',
     'L2_CURRENT': 'U16',
+    'REG_0X2B': 'U16',
+    'NRS_097_2_1': 'U16',
+    'IEEE_1547_MV480': 'U16',
+    'ANRE': 'U16',
+    'HECO_MV480': 'U16',
+    'PRC_024_EASTERN_MV480': 'U16',
+    'PRC_024_WESTERN_MV480': 'U16',
+    'PRC_024_ERCOT_MV480': 'U16',
+    'EN50438_IE_MV480': 'U16',
+    'IEEE_1547A_MV480': 'U16',
+    'MPPT3_CURRENT': 'U16',
+    'CEI0_21_MV480': 'U16',
+    'HECO_MV600': 'U16',
+    'PRC_024_WESTERN_MV600': 'U16',
+    'ZAMBIA': 'U16',
+    'ZAMBIA_MV480': 'U16',
+    'KENYA_ETHIOPIA': 'U16',
+    'FEATURE_DATA_OF_OPTIMIZER1': 'U16',
+    'G59_ENGLAND_MV800': 'U16',
+    'L1_CURRENT': 'U16',
     'L3_CURRENT': 'U16',
-    'ABNT_NBR_16149_MV800': 'U16',
-    'UTE_C_15_712_1_MV800': 'U16',
-    'REG_0X83': 'U16',
-    'REG_0X87': 'U16',
-    'IEC_61727_MV800_60HZ': 'U16',
-    'NAMIBIA_MV800': 'U16',
-    'IEEE_1547_MV800': 'U16',
-    'PRC_024_WESTERN_MV800': 'U16',
+    'BDEW_MV800': 'U16',
+    'NO_PERMISSION': 'U16',
+    'TAI_PEA_MV800': 'U16',
+    'NRS_097_2_1_MV800': 'U16',
+    'CEI0_21_MV800': 'U16',
+    'CEI0_16_MV800': 'U16',
+    'NICARAGUA_MV800': 'U16',
+    'PRC_024_ERCOT_MV800': 'U16',
+    'TAI_MEA_MV800': 'U16',
+    'C10_11_MV800': 'U16',
     'G99_TYPEA_LV': 'U16',
-    'G99_TYPEC_HV_MV800': 'U16',
-    'CEA_MV800': 'U16',
+    'G99_TYPEB_LV': 'U16',
+    'G99_TYPEB_HV_MV480': 'U16',
+    'G99_TYPEB_HV_MV800': 'U16',
+    'MPPT2_VOLTAGE': 'U16',
     'ERROR_CODE2': 'U16',
     'LOW_INSULATION_RESISTANCE': 'U16',
     'ERROR_CODE3': 'U16',
     'FAULTY_POWER_COLLECTOR2': 'U16',
+    'BATTERY_ABNORMAL': 'U16',
     'OPTIMIZER_FAULT5': 'U16',
+    'ON_GRID_OFF_GRID_CONTROLLERABNORMAL4': 'U16',
+    'BUILT_IN_PID_OPERATIONABNORMAL6': 'U16',
+    'EXTERNAL_FAN_ABNORMAL': 'U16',
+    'INTERNAL_FAN_ABNORMAL': 'U16',
+    'DC_PROTECTION_UNIT_ABNORMAL8': 'U16',
     'MODEL': 'STRING',
     'SOFTWAREVERSION': 'STRING',
     'PROTOCOLVERSION_MODBUS': 'U32',
     'MODEL_ID': 'U16',
+    'NUMBEROF_MPPTS': 'U16',
     'RATEDPOWER': 'U32',
-    'PRODUCTSALESAREA': 'STRING',
-    'PRODUCTSOFTWARE_ID': 'U16',
+    'PRODUCT_SOFTWARE_VERSION_NUMBER': 'U16',
+    'POWER_GRID_STANDARD_CODE_PROTOCOL_VERSION': 'U16',
     'THIRD_PARTYLABELING_SN': 'STRING',
     'THIRD_PARTYLABEL_MANUFACTURERMODEL': 'U16',
     'MONITORING_BOARD_SN': 'STRING',
@@ -2082,9 +2119,8 @@ DATA_TYPES = {
     'PHASE_AACTIVEPOWER': 'S32',
     'INTERNALTEMPERATURE': 'S16',
     'INSULATIONIMPEDANCE': 'U16',
-    'DEVICE_STATUS': 'U16',
+    'INVERTER_MODE': 'U16',
     'FAULT_CODE': 'U16',
-    'CUMULATIVE_ENERGY': 'U32',
     'NUMBEROFCRITICALALARMS': 'U16',
     'NUMBEROFMAJORALARMS': 'U16',
     'NUMBEROF_MINOR_ALARMS': 'U16',
@@ -2094,7 +2130,6 @@ DATA_TYPES = {
     'LATEST_HISTORICAL_ALARM_SERIAL_NUMBER': 'U32',
     'TOTALBUSVOLTAGE': 'S16',
     'BUILT_IN_PIDRUNNINGSTATUS': 'U16',
-    'MPPT3DCTOTAL_ENERGY_YIELD': 'U32',
     'MONITORINGALARM_1': 'U16',
     'MONITORINGALARM_2': 'U16',
     'MONITORALARM_3': 'U16',
@@ -2126,8 +2161,8 @@ DATA_TYPES = {
     'STRING_7ACCESSSTATUS': 'STRINGING',
     'STRING_8ACCESSSTATUS': 'STRINGING',
     'STENT_SYSTEM_STATUS': 'U32',
+    'OPERATINGMODE': 'U16',
     'SUPPORTACCESSSTATUS': 'U32',
-    'WORKINGMODEMASK': 'U32',
     'SUPPORT_1GENERAL_FAULT_STATUS': 'U16',
     'SUPPORT_1USER_DEFINEDFAULTSTATUS': 'U16',
     'SUPPORT_2GENERAL_FAULT_STATUS': 'U16',
@@ -2163,12 +2198,6 @@ DATA_TYPES = {
     'RUNNINGTIMEOFCAPACITORBANK': 'U32',
     'INTERNALFAN1RUNNINGTIME': 'U32',
     'INTERNALALARM': 'U16',
-    'INTERNAL_TEMPERATURE1': 'S16',
-    'INTERNAL_TEMPERATURE2': 'S16',
-    'INTERNAL_TEMPERATURE3': 'S16',
-    'INTERNAL_TEMPERATURE4': 'S16',
-    'INTERNAL_TEMPERATURE5': 'S16',
-    'INTERNAL_TEMPERATURE6': 'S16',
     'INTERNALTEMPERATURE7': 'S16',
     'INTERNALTEMPERATURE8': 'S16',
     'INTERNALTEMPERATURE9': 'S16',
@@ -2181,7 +2210,6 @@ DATA_TYPES = {
     'I_VSCANSTATUS': 'U16',
     'STAWLANLISTSCANNINGSTATUS': 'U16',
     'NTPLAST_NTPSYNCHRONIZATIONSTATUS': 'U16',
-    'DEFERREDACTIVATIONSTATE': 'U16',
     'REG_4GTRAFFICSTATUS': 'U16',
     'STAROUTERCONNECTIONSTATUS': 'U16',
     'FECONNECTIONSTATUS': 'U16',
@@ -2209,33 +2237,28 @@ DATA_TYPES = {
     'UPGRADE_STATUS': 'U16',
     'INVERTERCOMPREHENSIVESTATUS': 'U16',
     'INVERTERINTEGRATEDSTATUSSUPPORTFLAG': 'U16',
-    'Q_UCHARACTERISTICCURVEMODE': 'U16',
     'INSULATIONIMPEDANCEDIAGNOSIS': 'U16',
-    'OUTPUTMODE': 'U16',
     'REPLACETHETARGETMODEL': 'U16',
     'MAXIMUMAPPARENTPOWER': 'U32',
     'APPARENTPOWERREFERENCE': 'U32',
     'AUDIBLEANDVISUALALARM': 'U16',
-    'OF_FGRIDSWITCHOVERMODE': 'U16',
-    'OFF_GRIDMODE': 'U16',
+    'PQMODE': 'U16',
+    'STRINGCONNECTIONMODE': 'U16',
     'POWERGRIDFAULTRECOVERYAUTOMATICSTARTUP': 'U16',
-    'ABNORMALGROUNDINGSHUTDOWN': 'U16',
-    'FAILUREPROTECTIONREACTIVEPOWERMODE': 'U16',
+    'POWER_QUALITY_OPTIMIZATION_MODE': 'U16',
+    'FAILUREPROTECTIONACTIVEPOWERMODE': 'U16',
     'PHASEPROTECTIONPOINT': 'U16',
     'POWER_ONSOFTSTARTTIMEDUETOPOWERGRIDFAULTS': 'U16',
     'POWERGRIDFAULTRECOVERYTIME': 'U16',
     'GRIDFAULTZEROCURRENTMODE': 'U16',
     'VPHASE_TOGROUND': 'U16',
-    'BUILT_IN_PIDMODE': 'U16',
-    'OPERATINGMODE': 'U16',
-    'MANAGEMENT_SYSTEM_PORTMODE': 'U16',
-    'STAWIRELESS_ROUTING_ENCRYPTION_MODE': 'U16',
-    'REG_4GNETWORKMODE': 'U16',
+    'PARALLELCOMMUNICATIONMODE': 'U16',
+    'REG_4GAPNMODE': 'U16',
     'REG_4GDEFAULT_IDENTITYAUTHENTICATIONTYPE': 'U16',
     'REG_4GDEFAULT_APN': 'STRING',
     'REG_4GDEFAULT_APNUSERNAME': 'STRING',
     'SUPPORT_FAULT_CLEARANCE': 'U16',
-    'TEMPERATURE': 'S16',
+    'SCIENCEAND_TECHNOLOGY_JINGKE_PROTOCOL_VERSION': 'U16',
     'CLEARINGACTIVEALARMS': 'U16',
     'ALARMSETTING': 'U16',
     'ALARMCLEARANCE': 'U16',
@@ -2244,7 +2267,11 @@ DATA_TYPES = {
     'ESNVALIDATIONCOMMAND': 'U16',
     'ALARMPORTSELF_CHECKSTART': 'U16',
     'AUDIBLEANDVISUALALARMCONFIRMATION': 'U16',
+    'SECURITYMODE': 'U16',
     'METERMODEL': 'U16',
+    'ACTIVEPOWERCONTROLMODE': 'U16',
+    'RESTRICTIONMODE': 'U16',
+    'REACTIVEPOWERCONTROLMODE': 'U16',
     'MAXIMUM_FEED_GRID_POWER_DEFAULT': 'S32',
     'DEFAULTACTIVEPOWERCHANGEGRADIENT': 'U32',
     'FAULTY_MONITORING_UNIT': 'U16',
@@ -2264,15 +2291,14 @@ STRING_CURRENT_MONITOR = False
 READ_BLOCKS = [
     {'start': 0x0000, 'count': 125, 'fc': 3},
     {'start': 0x007D, 'count':  87, 'fc': 3},
-    {'start': 0x0102, 'count':  13, 'fc': 3},
-    {'start': 0x07F2, 'count':  48, 'fc': 3},
-    {'start': 0x7599, 'count':   3, 'fc': 3},
+    {'start': 0x00F8, 'count':  23, 'fc': 3},
+    {'start': 0x07F2, 'count':  55, 'fc': 3},
     {'start': 0x7D00, 'count':  24, 'fc': 3},
     {'start': 0x7D40, 'count':  46, 'fc': 3},
     {'start': 0x7D97, 'count':   4, 'fc': 3},
     {'start': 0x7DBE, 'count': 118, 'fc': 3},
     {'start': 0x84D0, 'count':   2, 'fc': 3},
-    {'start': 0x84F6, 'count':   4, 'fc': 3},
+    {'start': 0x84F4, 'count':   4, 'fc': 3},
     {'start': 0x851B, 'count':  32, 'fc': 3},
     {'start': 0x88C2, 'count':  32, 'fc': 3},
     {'start': 0x8916, 'count':  45, 'fc': 3},
@@ -2284,22 +2310,20 @@ READ_BLOCKS = [
     {'start': 0x9156, 'count':   7, 'fc': 3},
     {'start': 0x9185, 'count':   2, 'fc': 3},
     {'start': 0x9263, 'count':  45, 'fc': 3},
-    {'start': 0x9C65, 'count':   1, 'fc': 3},
     {'start': 0x9CBA, 'count':   1, 'fc': 3},
-    {'start': 0xA411, 'count': 110, 'fc': 3},
-    {'start': 0xA4C4, 'count':  21, 'fc': 3},
-    {'start': 0xA5A9, 'count':   1, 'fc': 3},
-    {'start': 0xA85C, 'count':   1, 'fc': 3},
-    {'start': 0xA89C, 'count':   1, 'fc': 3},
-    {'start': 0xA9A6, 'count':  37, 'fc': 3},
+    {'start': 0xA413, 'count': 108, 'fc': 3},
+    {'start': 0xA4D8, 'count':   1, 'fc': 3},
+    {'start': 0xA961, 'count':   1, 'fc': 3},
+    {'start': 0xA9A7, 'count':  36, 'fc': 3},
     {'start': 0xABE1, 'count':   1, 'fc': 3},
     {'start': 0xAC32, 'count':   1, 'fc': 3},
     {'start': 0xAD10, 'count':   1, 'fc': 3},
     {'start': 0xAD78, 'count':   1, 'fc': 3},
     {'start': 0xAFC9, 'count':  40, 'fc': 3},
     {'start': 0xB79C, 'count':   1, 'fc': 3},
-    {'start': 0xB829, 'count':   1, 'fc': 3},
+    {'start': 0xB829, 'count':  12, 'fc': 3},
     {'start': 0xB8C6, 'count':   1, 'fc': 3},
+    {'start': 0xB937, 'count':  11, 'fc': 3},
     {'start': 0xBA3B, 'count':   4, 'fc': 3},
     {'start': 0xF000, 'count':   1, 'fc': 3},
 ]
@@ -2310,22 +2334,22 @@ READ_BLOCKS = [
 # modbus_handler._read_inverter_data_dynamic()이 이 매핑을 사용한다.
 DATA_PARSER = {
     'mode                ': 'INVERTER_MODE',
-    'r_voltage           ': 'DEA_L1_VOLTAGE (0x03EE~0x03EF); G59_ENGLAND (0x0009); L1_VOLTAGE (0x000C)',
-    's_voltage           ': 'DEA_L2_VOLTAGE (0x03F0~0x03F1); L2_VOLTAGE (0x000D); CEI0_16 (0x0017); VDE_0126_1_1_BU (0x0005)',
-    't_voltage           ': 'DEA_L3_VOLTAGE (0x03F2~0x03F3); L3_VOLTAGE (0x000E); CUSTOM_60_HZ (0x0016)',
+    'r_voltage           ': 'DEA_L1_VOLTAGE (0x03EE~0x03EF); L1_VOLTAGE (0x0009); KENYA_ETHIOPIA (0x006B); G99_TYPEA_LV (0x0102); G99_TYPEB_LV (0x0103)',
+    's_voltage           ': 'DEA_L2_VOLTAGE (0x03F0~0x03F1); L2_VOLTAGE (0x000D); FEATURE_DATA_OF_OPTIMIZER1 (0x006C)',
+    't_voltage           ': 'DEA_L3_VOLTAGE (0x03F2~0x03F3); L3_VOLTAGE (0x0016); IEEE_1547A_MV480 (0x003F); ERROR_CODE2 (0x080D)',
     'r_current           ': 'DEA_L1_CURRENT (0x03E8~0x03E9); L1_CURRENT (0x0073)',
-    's_current           ': 'DEA_L2_CURRENT (0x03EA~0x03EB); C11_C10_MV480 (0x0029); L2_CURRENT (0x0074)',
+    's_current           ': 'DEA_L2_CURRENT (0x03EA~0x03EB); L2_CURRENT (0x0029); REG_0X2B (0x002B); C10_11_MV800 (0x00FE)',
     't_current           ': 'DEA_L3_CURRENT (0x03EC~0x03ED); L3_CURRENT (0x0075)',
-    'frequency           ': 'DEA_FREQUENCY (0x03FA~0x03FB); FEATURE_DATA_SEQUENCENUMBER (0x0002); FREQUENCY (0x0004); BDEW_MV (0x0008); G59_ENGLAND_MV480 (0x001F); REG_0X41 (0x0041); REG_0X87 (0x0087)',
+    'frequency           ': 'DEA_FREQUENCY (0x03FA~0x03FB); FREQUENCY (0x0002); VDE_0126_1_1_GRB (0x0007); UTE_C_15_712_1_MV480 (0x0021); IEEE_1547_MV480 (0x0030); ANRE (0x0034); HECO_MV480 (0x0037); PRC_024_EASTERN_MV480 (0x0038); HECO_MV600 (0x0051); ZAMBIA (0x0062); BDEW_MV800 (0x007C); TAI_PEA_MV800 (0x0082); G59_ENGLAND_MV800 (0x006D); ERROR_CODE3 (0x0810)',
     'ac_power            ': 'DEA_TOTAL_ACTIVE_POWER (0x03F4~0x03F5)',
-    'cumulative_energy   ': 'CUMULATIVE_ENERGY (0x7D6A); BDEW_MV480 (0x001C); TAI_MEA_MV480 (0x0023); NRS_097_2_1_MV480 (0x002E); ANRE_MV480 (0x0035); PRC_024_ERCOT_MV600 (0x0055); MPPT3DCTOTAL_ENERGY_YIELD (0x7DD8)',
-    'alarm1              ': 'ERROR_CODE2 (0x080D)',
-    'mppt1_voltage'        : 'ABNT_NBR_16149_MV800',
-    'mppt1_current'        : 'UTE_C_15_712_1_MV800',
-    'mppt2_voltage'        : 'G99_TYPEC_HV_MV800',
-    'mppt2_current'        : 'PV2CURRENT',
+    'cumulative_energy   ': 'CUMULATIVE_ENERGY (0x7D6A); PRC_024_ERCOT_MV480 (0x003B); NRS_097_2_1_MV800 (0x0085); NICARAGUA_MV800 (0x00B8); PRC_024_ERCOT_MV800 (0x00BF); TAI_MEA_MV800 (0x00F8)',
+    'alarm1              ': 'ERROR_CODE2 (0x080D); P_P_VALUE_AT_POINT_1N (0x000A)',
+    'mppt1_voltage'        : 'PV_VOLTAGE',
+    'mppt1_current'        : 'PV1CURRENT',
+    'mppt2_voltage'        : 'G99_TYPEB_HV_MV480',
+    'mppt2_current'        : 'NO_PERMISSION',
     'mppt3_voltage'        : 'PV3VOLTAGE',
-    'mppt3_current'        : 'PO12_3',
+    'mppt3_current'        : 'MPPT3_CURRENT',
     'mppt4_voltage'        : 'PV4VOLTAGE',
     'mppt4_current'        : 'PV4CURRENT',
 }
@@ -2355,22 +2379,19 @@ def s16(value):
 def get_pv_string_data(regs):
     """Parse PV string data from 16 registers (32016~32031).
     Returns list of 8 dicts: {'voltage': raw, 'current': raw}.
-    Layout: [PV1_V, PV1_I, PV2_V, PV2_I, ..., PV8_V, PV8_I]
-    Voltage: S16, 10V scale; Current: S16, 100mA scale."""
+    Layout: [PV1_V, PV1_I, PV2_V, PV2_I, ..., PV8_V, PV8_I]"""
     result = []
     for i in range(0, min(len(regs), 16), 2):
-        voltage = s16(regs[i])    # S16, 0.1V (10V unit in Huawei scale)
-        current = s16(regs[i + 1]) if i + 1 < len(regs) else 0  # S16, 0.01A
+        voltage = s16(regs[i])
+        current = s16(regs[i + 1]) if i + 1 < len(regs) else 0
         result.append({'voltage': voltage, 'current': current})
-    # Pad to 8 strings
     while len(result) < 8:
         result.append({'voltage': 0, 'current': 0})
     return result
 
 
 def get_mppt_from_strings(pv_data, strings_per_mppt=2):
-    """Aggregate string data into MPPT data.
-    Default 2 strings per MPPT, 4 MPPTs total."""
+    """Aggregate string data into MPPT data. 2 strings per MPPT, 4 MPPTs."""
     mppt_data = []
     for mppt_idx in range(4):
         start = mppt_idx * strings_per_mppt
@@ -2379,22 +2400,20 @@ def get_mppt_from_strings(pv_data, strings_per_mppt=2):
         if not strings:
             mppt_data.append({'voltage': 0, 'current': 0, 'power': 0})
             continue
-        # MPPT voltage = average of connected string voltages
-        connected = [s for s in strings if abs(s['voltage']) >= 100]  # >= 10V
+        connected = [s for s in strings if abs(s['voltage']) >= 100]
         avg_v = sum(s['voltage'] for s in connected) // len(connected) if connected else 0
         total_i = sum(abs(s['current']) for s in strings)
-        power = abs(avg_v * total_i) // 100  # voltage*current / scale → W
+        power = abs(avg_v * total_i) // 100
         mppt_data.append({'voltage': avg_v, 'current': total_i, 'power': power})
     return mppt_data
 
 
 def get_string_currents(pv_data):
-    """Extract string currents from pv_data for H01 body.
-    Returns list of dicts: {'raw_current': value}."""
+    """Extract string currents from pv_data for H01 body."""
     return [{'raw_current': abs(s['current'])} for s in pv_data[:8]]
 
 
 def get_cumulative_energy_wh(low, high):
     """Convert Huawei cumulative energy U32 (1kWh) to Wh."""
     raw = registers_to_u32(low, high)
-    return raw * 1000  # kWh → Wh
+    return raw * 1000
