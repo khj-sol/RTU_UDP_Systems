@@ -97,6 +97,11 @@ class RegisterMap:
     STRING4_CURRENT                          = 0x0063  # S16, 0.01A
 
 
+    # IV Scan block layout
+    IV_TRACKER_BLOCK_SIZE             = 0x0100  # 256 regs per tracker
+    IV_SCAN_DATA_POINTS              = 64      # default data points
+
+
 class InverterMode:
     """Inverter Mode Table (0x101D)"""
     INITIAL      = 0x00
