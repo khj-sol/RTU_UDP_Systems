@@ -1297,10 +1297,10 @@ class ModbusHandlerHAT:
                 return None
 
             # Read entire DEA block at once (0x03E8 ~ 0x03FD = 22 registers)
-            result = self.master.read_holding_registers(dea_start, 22, self.slave_id)
-            
+            result = self._read_reg(dea_start, 22)
+
             if not result or len(result) < 22:
-                self.logger.error(f"Failed to read DEA block: result={result}, len={len(result) if result else 0}")
+                self.logger.warning(f"read_monitor_data: DEA block read failed (got {len(result) if result else 0}/22)")
                 return None
             
             # Parse the block
