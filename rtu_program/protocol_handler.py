@@ -77,24 +77,29 @@ class ProtocolHandler:
             device_model, body_type, backup_data, sequence
         )
 
+        def _u16(v): return max(0, min(65535, int(v)))
+        def _s16(v): return max(-32768, min(32767, int(v)))
+        def _u32(v): return max(0, min(0xFFFFFFFF, int(v)))
+        def _u64(v): return max(0, int(v))
+
         basic = struct.pack(INV_BASIC_FORMAT,
-            int(data.get('pv_voltage', 0)),
-            int(data.get('pv_current', 0)),
-            int(data.get('pv_power', 0)),
-            int(data.get('r_voltage', 0)),
-            int(data.get('s_voltage', 0)),
-            int(data.get('t_voltage', 0)),
-            int(data.get('r_current', 0)),
-            int(data.get('s_current', 0)),
-            int(data.get('t_current', 0)),
-            int(data.get('ac_power', 0)),
-            int(data.get('power_factor', 1000)),
-            int(data.get('frequency', 600)),
-            int(data.get('cumulative_energy', 0)),
-            int(data.get('status', INV_STATUS_ON_GRID)),
-            int(data.get('alarm1', 0)),
-            int(data.get('alarm2', 0)),
-            int(data.get('alarm3', 0))
+            _u16(data.get('pv_voltage', 0)),
+            _u16(data.get('pv_current', 0)),
+            _u32(data.get('pv_power', 0)),
+            _u16(data.get('r_voltage', 0)),
+            _u16(data.get('s_voltage', 0)),
+            _u16(data.get('t_voltage', 0)),
+            _u16(data.get('r_current', 0)),
+            _u16(data.get('s_current', 0)),
+            _u16(data.get('t_current', 0)),
+            _u32(data.get('ac_power', 0)),
+            _s16(data.get('power_factor', 1000)),
+            _u16(data.get('frequency', 600)),
+            _u64(data.get('cumulative_energy', 0)),
+            _u16(data.get('status', INV_STATUS_ON_GRID)),
+            _u16(data.get('alarm1', 0)),
+            _u16(data.get('alarm2', 0)),
+            _u16(data.get('alarm3', 0))
         )
 
         body = basic

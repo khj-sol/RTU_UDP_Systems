@@ -661,8 +661,8 @@ class InverterSimulator:
             self.store.setValues(3, base_addr, [str_voltage, str_current])
 
         # Power registers
-        self.store.setValues(3, RegisterMap.PV_POWER + 1, [pv_power & 0xFFFF, (pv_power >> 16) & 0xFFFF])
-        self.store.setValues(3, RegisterMap.AC_POWER + 1, [ac_power & 0xFFFF, (ac_power >> 16) & 0xFFFF])
+        self.store.setValues(3, RegisterMap.PV_POWER, [pv_power & 0xFFFF, (pv_power >> 16) & 0xFFFF])
+        self.store.setValues(3, RegisterMap.AC_POWER, [ac_power & 0xFFFF, (ac_power >> 16) & 0xFFFF])
 
         # Mode and status
         mode_val = InverterMode.STANDBY if self.on_off == 1 else self.mode
