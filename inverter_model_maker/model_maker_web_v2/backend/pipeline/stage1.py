@@ -1616,6 +1616,11 @@ def build_h01_match_table(categorized: dict, meta: dict) -> List[dict]:
         rows[-1]['note'] = status_note
 
     alarm_regs = categorized.get('ALARM', [])
+    # MONITORING 레지스터 주소와 겹치는 alarm 제거 (PDF 파싱 오류 방지)
+    mon_addrs = {r.address for r in categorized.get('MONITORING', [])
+                 if isinstance(r.address, int)}
+    alarm_regs = [r for r in alarm_regs
+                  if not isinstance(r.address, int) or r.address not in mon_addrs]
     alarm_dist = distribute_alarms(alarm_regs)
     # alarm1이 없으면 MONITORING 범주에서 fault/alarm code 레지스터 검색
     if not alarm_dist.get('alarm1'):
