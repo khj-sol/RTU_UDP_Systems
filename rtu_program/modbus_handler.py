@@ -307,7 +307,11 @@ def _init_reg_attrs(handler, reg_module):
     # DATA_PARSER / READ_BLOCKS — Stage 3 생성 파일에 포함된 경우 바인딩
     handler.data_parser = getattr(mod, 'DATA_PARSER', None)
     handler.read_blocks = getattr(mod, 'READ_BLOCKS', None)
-    handler.use_block_read = bool(handler.read_blocks and handler.data_parser)
+    # use_block_read: READ_BLOCKS + DATA_PARSER가 tuple 형식 (blk_idx, offset, dtype, scale)일 때만
+    # Stage3가 생성하는 DATA_PARSER는 문자열 형식 → block read 미사용
+    _dp = handler.data_parser
+    _dp_is_tuple = (_dp and isinstance(next(iter(_dp.values()), None), (tuple, list)))
+    handler.use_block_read = bool(handler.read_blocks and _dp_is_tuple)
 
     # Detect non-Solarize register layout: if AC_POWER address differs from
     # the hardcoded Solarize default (0x1037), use dynamic register reading.
