@@ -1586,6 +1586,14 @@ class HuaweiSimulator:
         self.store.setValues(3, HuaweiRegisters.POWER_FACTOR, [1000])
         # Internal temp: 35.0°C → 350 (0.1°C)
         self.store.setValues(3, HuaweiRegisters.INTERNALTEMPERATURE, [350])
+        # AC 전류 초기화 (S32×3 = 6 regs, 0)
+        self.store.setValues(3, HuaweiRegisters.POWERGRIDPHASE_ACURRENT, [0]*6)
+        # AC 전압 초기화 (U16×3)
+        self.store.setValues(3, HuaweiRegisters.POWERGRIDPHASE_AVOLTAGE, [0, 0, 0])
+        # Active power 초기화 (S32 = 2 regs)
+        self.store.setValues(3, HuaweiRegisters.PHASE_AACTIVEPOWER, [0, 0])
+        # PV 전력 초기화
+        self.store.setValues(3, HuaweiRegisters.PV_POWER, [0, 0])
 
     def _get_sun_factor(self):
         """Get sun factor from shared environment."""
