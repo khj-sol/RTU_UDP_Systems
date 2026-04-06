@@ -473,6 +473,11 @@ class KstarStatusConverter:
     def to_inverter_mode(cls, raw):
         return raw
 
+    @classmethod
+    def to_solarize(cls, raw):
+        """RTU 호환 alias — to_inverter_mode와 동일"""
+        return cls.to_inverter_mode(raw)
+
 
 # Dynamic-loader alias required by modbus_handler.load_register_module
 StatusConverter = KstarStatusConverter

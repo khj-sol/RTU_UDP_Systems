@@ -906,8 +906,15 @@ class ModbusHandlerHAT:
 
             # 블록 단위 읽기
             block_data: dict = {}
-            for i, (start_addr, count) in enumerate(read_blocks):
-                if fc == 4:
+            for i, blk in enumerate(read_blocks):
+                if isinstance(blk, dict):
+                    start_addr = blk['start']
+                    count = blk['count']
+                    blk_fc = blk.get('fc', fc)
+                else:
+                    start_addr, count = blk[0], blk[1]
+                    blk_fc = fc
+                if blk_fc == 4:
                     result = self.master.read_input_registers(
                         start_addr, count, self.slave_id)
                 else:
