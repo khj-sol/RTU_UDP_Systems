@@ -1710,20 +1710,41 @@ def build_h01_match_table(categorized: dict, meta: dict) -> List[dict]:
             reg = _find_matched_reg(categorized, field)
 
             # current인 경우 주소 근접성 검증 (voltage ±10 범위)
-            if reg and mtype == 'current' and n in mppt_v_addrs and isinstance(reg.address, int):
+            if mtype == 'current' and n in mppt_v_addrs:
                 v_addr = mppt_v_addrs[n]
-                if abs(reg.address - v_addr) > 10:
-                    # 잘못된 매칭 — voltage 근처에서 current 재검색
+                need_fix = False
+                if reg and isinstance(reg.address, int):
+                    if abs(reg.address - v_addr) > 10:
+                        need_fix = True
+                    # 다른 MPPT의 voltage/current와 주소 중복 확인
+                    for other_n, other_v in mppt_v_addrs.items():
+                        if other_n != n and reg.address in (other_v, other_v + 1):
+                            need_fix = True
+                            break
+                elif not reg:
+                    need_fix = True
+
+                if need_fix:
+                    # voltage 주소 +1 에서 current 찾기 (V/I 연속 쌍 패턴)
                     better = None
-                    for cat in ['MONITORING', 'INFO']:
+                    target_addr = v_addr + 1
+                    for cat in ['MONITORING', 'ALARM', 'INFO']:
                         for r in categorized.get(cat, []):
-                            if not isinstance(r.address, int): continue
-                            dl = r.definition.lower()
-                            if any(k in dl for k in ['current', 'curr', '전류']):
-                                if abs(r.address - v_addr) <= 3:
-                                    better = r
-                                    break
+                            if isinstance(r.address, int) and r.address == target_addr:
+                                better = r
+                                break
                         if better: break
+                    # 못 찾으면 voltage ±3 범위에서 current 키워드로 검색
+                    if not better:
+                        for cat in ['MONITORING', 'INFO']:
+                            for r in categorized.get(cat, []):
+                                if not isinstance(r.address, int): continue
+                                dl = r.definition.lower()
+                                if any(k in dl for k in ['current', 'curr', '전류']):
+                                    if abs(r.address - v_addr) <= 3:
+                                        better = r
+                                        break
+                            if better: break
                     if better:
                         reg = better
 
