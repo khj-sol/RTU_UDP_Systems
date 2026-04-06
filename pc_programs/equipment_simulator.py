@@ -134,6 +134,117 @@ except ImportError:
 
 
 # =============================================================================
+# Shared Solar Environment Model
+# =============================================================================
+
+class SolarEnvironment:
+    """Shared realistic solar plant environment model.
+
+    Provides time-of-day based radiation, temperature, humidity, wind, and
+    cloud effects that all simulators can reference for consistent data.
+    """
+
+    def __init__(self):
+        # Cloud effect state: random dips that persist 1-3 minutes
+        self._cloud_factor = 1.0          # 0.85-1.0 (1.0 = clear)
+        self._cloud_end_time = 0.0        # when current cloud event ends
+        self._next_cloud_time = time.time() + random.uniform(60, 300)
+        # Frequency random walk state
+        self._freq_hz = 60.0
+        # Lock for thread safety
+        self._lock = threading.Lock()
+        # Cached values (updated each tick)
+        self.radiation = 0.0              # W/m2
+        self.air_temp = 20.0              # C
+        self.humidity = 60.0              # %
+        self.wind_speed = 2.0             # m/s
+        self.wind_direction = 180.0       # degrees
+        self.module_temp = 20.0           # C
+        self.frequency = 60.0             # Hz
+        self.cloud_factor = 1.0           # current multiplier
+
+    def update(self):
+        """Call once per second from the update loop."""
+        with self._lock:
+            now = datetime.now()
+            hour = now.hour + now.minute / 60.0 + now.second / 3600.0
+            t = time.time()
+
+            # --- Cloud effect ---
+            if t >= self._cloud_end_time:
+                # Cloud event finished
+                self._cloud_factor = 1.0
+            if t >= self._next_cloud_time and self._cloud_factor >= 0.99:
+                # Start new cloud event
+                self._cloud_factor = random.uniform(0.85, 0.95)
+                duration = random.uniform(60, 180)  # 1-3 minutes
+                self._cloud_end_time = t + duration
+                self._next_cloud_time = t + duration + random.uniform(120, 600)
+            self.cloud_factor = self._cloud_factor
+
+            # --- Solar radiation: sun arc with cloud + noise ---
+            sunrise, sunset = 5.5, 18.5
+            if hour < sunrise or hour > sunset:
+                base_radiation = 0.0
+            else:
+                day_frac = (hour - sunrise) / (sunset - sunrise)
+                base_radiation = 1000.0 * math.sin(day_frac * math.pi)
+            noise = 1.0 + random.uniform(-0.03, 0.03)
+            self.radiation = max(0.0, base_radiation * self.cloud_factor * noise)
+
+            # --- Air temperature: lags radiation by ~2hrs ---
+            # Min ~15C at 05:00, max ~30C at 14:00
+            temp_hour = hour - 14.0  # phase so peak is at 14:00
+            self.air_temp = 22.5 + 7.5 * math.sin(temp_hour / 24.0 * 2 * math.pi)
+            self.air_temp += random.uniform(-0.5, 0.5)
+
+            # --- Humidity: inversely correlated with temperature ---
+            # 80% at night low temp, 40% at midday high temp
+            temp_norm = (self.air_temp - 15.0) / 15.0  # 0..1 range
+            temp_norm = max(0.0, min(1.0, temp_norm))
+            self.humidity = 80.0 - 40.0 * temp_norm + random.uniform(-3, 3)
+            self.humidity = max(20.0, min(95.0, self.humidity))
+
+            # --- Wind: slight increase in afternoon ---
+            base_wind = 2.0
+            if 12.0 <= hour <= 17.0:
+                base_wind = 3.5
+            self.wind_speed = max(0.0, base_wind + random.uniform(-1.5, 2.5))
+            self.wind_direction += random.uniform(-5, 5)
+            self.wind_direction = self.wind_direction % 360.0
+
+            # --- Module temperature: air_temp + radiation/30 ---
+            self.module_temp = self.air_temp + self.radiation / 30.0 + random.uniform(-1, 1)
+
+            # --- Grid frequency: small random walk around 60Hz ---
+            self._freq_hz += random.uniform(-0.005, 0.005)
+            self._freq_hz = max(59.95, min(60.05, self._freq_hz))
+            self.frequency = self._freq_hz
+
+    def get_sun_fraction(self):
+        """Return 0.0-1.0 sun fraction (radiation / 1000) for inverter scaling."""
+        return max(0.0, min(1.0, self.radiation / 1000.0))
+
+    def get_pv_voltage_factor(self):
+        """PV voltage is higher in cold temperature, lower in hot.
+        Returns multiplier around 1.0 based on module temperature."""
+        # ~+0.3%/C below 25C, -0.3%/C above 25C (simplified)
+        return 1.0 + (25.0 - self.module_temp) * 0.003
+
+
+# Singleton environment — created by EquipmentSimulator and passed to all sims
+_shared_env = None
+
+
+def _get_shared_env():
+    """Get or create the shared environment singleton."""
+    global _shared_env
+    if _shared_env is None:
+        _shared_env = SolarEnvironment()
+    return _shared_env
+
+
+# =============================================================================
 # Modbus Data Blocks with Logging
 # =============================================================================
 
@@ -322,18 +433,19 @@ class ModbusLoggedInputBlock(ModbusSequentialDataBlock):
 
 class InverterSimulator:
     """Solarize Inverter Modbus Simulator - Slave ID 1"""
-    
-    VERSION = "1.1.0"
+
+    VERSION = "1.2.0"
     MODEL_NAME = "SRPV-3-50-KS"
     SERIAL_NUMBER = "SRZ2024001234"
     FIRMWARE_VERSION = "V2.1.5"
     NOMINAL_POWER = 50000  # 50kW
     IV_SCAN_DURATION = 5.0
-    
-    def __init__(self, logger=None):
+
+    def __init__(self, logger=None, env=None):
         self.logger = logger or logging.getLogger("InvSim")
         self.running = False
-        
+        self.env = env or _get_shared_env()
+
         # Simulation state
         self.start_time = time.time()
         self.total_energy = 1000.0
@@ -447,45 +559,34 @@ class InverterSimulator:
                 self.store.setValues(3, i_regs['base'], currents)
     
     def _get_sun_factor(self):
-        """Get sun intensity based on time"""
-        now = datetime.now()
-        hour = now.hour + now.minute / 60.0
-        
-        if hour < 5.0 or hour >= 19.0:
-            return 0.0
-        if hour < 6.0:
-            return (hour - 5.0) * 0.1
-        if hour < 12.0:
-            return 0.1 + (hour - 6.0) / 6.0 * 0.9
-        if hour < 18.0:
-            return 1.0 - (hour - 12.0) / 6.0 * 0.9
-        return (19.0 - hour) * 0.1
-    
+        """Get sun intensity from shared environment."""
+        return self.env.get_sun_fraction()
+
     def _update_registers(self):
         """Update register values using store.setValues()"""
+        env = self.env
         sun_factor = self._get_sun_factor()
-        
+
         if self.on_off == 1 or self.mode != InverterMode.ON_GRID:
             sun_factor = 0
-        
-        power_cap = self.NOMINAL_POWER * (self.power_limit / 1000.0)
-        EFFICIENCY = 0.975
 
-        # AC 출력 먼저 결정 → PV 역산 (효율 97.5%)
+        power_cap = self.NOMINAL_POWER * (self.power_limit / 1000.0)
+        EFFICIENCY = 0.97
+
+        # PV voltage: 600-800V range, affected by temperature
+        pv_v_factor = env.get_pv_voltage_factor()
+
+        # AC output first, then back-calculate PV
         if sun_factor > 0:
             possible_ac_w = sun_factor * self.NOMINAL_POWER * EFFICIENCY
             ac_power_w = min(possible_ac_w, power_cap)
             pv_power_w = ac_power_w / EFFICIENCY
-            pv_voltage = int(300 + sun_factor * 180)
-            pv_current_a = pv_power_w / pv_voltage if pv_voltage > 0 else 0
         else:
             ac_power_w = 0
             pv_power_w = 0
-            pv_voltage = 0
-            pv_current_a = 0
 
         pv_power = int(pv_power_w * 10)
-        
+
         if self.control_mode == 'PF':
             pf = self.power_factor_set / 1000.0
             pf = max(0.85, min(1.0, abs(pf)))
@@ -505,38 +606,38 @@ class InverterSimulator:
                 pf = ac_power_w / apparent if apparent > 0 else 1.0
             else:
                 pf = 1.0
-        
+
         ac_power = int(ac_power_w * 10)
-        ac_voltage = 3800
-        ac_freq = 6000
+        ac_voltage = 3800 + int(random.uniform(-20, 20))
+        ac_freq = int(env.frequency * 100)  # 0.01Hz units
         phase_power = ac_power // 3
-        
+
         apparent_power = math.sqrt(ac_power_w**2 + reactive_power_w**2) if ac_power_w > 0 else 0
-        # 3상 전류 계산: I = S / (sqrt(3) * V_line). 단위: 0.01A
-        # apparent_power/3 → 1상 피상전력(VA), /380(V) → 전류(A), *100 → 0.01A 단위
         phase_current = int((apparent_power / math.sqrt(3)) / 380 * 100) if apparent_power > 0 else 0
-        
+
         if ac_power > 0:
-            self.total_energy += (ac_power / 10) / 3600000  # Wh → kWh (누적, kWh)
-            self.today_energy += (ac_power / 10) / 3600     # Wh/s → Wh (당일, Wh 단위. 레지스터 기록 시 /10 → 0.1kWh)
-        
+            self.total_energy += (ac_power / 10) / 3600000
+            self.today_energy += (ac_power / 10) / 3600
+
         # Phase data (L1, L2, L3)
         for base in [RegisterMap.L1_VOLTAGE, RegisterMap.L2_VOLTAGE, RegisterMap.L3_VOLTAGE]:
             self.store.setValues(3, base, [ac_voltage, phase_current, phase_power & 0xFFFF, (phase_power >> 16) & 0xFFFF, ac_freq])
-        
-        # MPPT data
+
+        # MPPT data — realistic PV voltage 600-800V range
         mppt_addresses = [
             (RegisterMap.MPPT1_VOLTAGE, RegisterMap.MPPT1_CURRENT, RegisterMap.MPPT1_POWER + 1),
             (RegisterMap.MPPT2_VOLTAGE, RegisterMap.MPPT2_CURRENT, RegisterMap.MPPT2_POWER + 1),
             (RegisterMap.MPPT3_VOLTAGE, RegisterMap.MPPT3_CURRENT, RegisterMap.MPPT3_POWER + 1),
             (RegisterMap.MPPT4_VOLTAGE, RegisterMap.MPPT4_CURRENT, RegisterMap.MPPT4_POWER + 1),
         ]
-        
+
         for i, (v_addr, c_addr, p_addr) in enumerate(mppt_addresses):
             if pv_power_w > 0:
-                mppt_v = int((300 + sun_factor * 180 + i * 3) * 10)
+                # Base PV voltage ~700V, varies with temperature and sun
+                base_v = 700.0 * pv_v_factor + i * 5.0 + random.uniform(-3, 3)
+                mppt_v = int(base_v * 10)  # 0.1V units
                 mppt_power_w = pv_power_w / 4
-                mppt_c = int((mppt_power_w / (mppt_v / 10)) * 100)
+                mppt_c = int((mppt_power_w / base_v) * 100) if base_v > 0 else 0  # 0.01A
                 mppt_p = int(mppt_power_w * 10)
             else:
                 mppt_v = 0
@@ -545,35 +646,37 @@ class InverterSimulator:
             self.store.setValues(3, v_addr, [mppt_v])
             self.store.setValues(3, c_addr, [mppt_c])
             self.store.setValues(3, p_addr, [mppt_p & 0xFFFF, (mppt_p >> 16) & 0xFFFF])
-        
+
         # String data
         for i in range(self.string_count):
             mppt_idx = i // 2
             if pv_power_w > 0:
-                str_voltage = int((300 + sun_factor * 180 + mppt_idx * 3 + (i % 2) * 2) * 10)
-                # 각 스트링 전류 = MPPT 전류 / strings_per_mppt
-                mppt_current_a = (pv_power_w / 4) / (str_voltage / 10) if str_voltage > 0 else 0
+                base_v = 700.0 * pv_v_factor + mppt_idx * 5.0 + (i % 2) * 2.0
+                str_voltage = int(base_v * 10)
+                mppt_current_a = (pv_power_w / 4) / base_v if base_v > 0 else 0
                 str_current = int((mppt_current_a / self.strings_per_mppt + (i % 2) * 0.3) * 100)
             else:
                 str_voltage = 0
                 str_current = 0
             base_addr = RegisterMap.STRING1_VOLTAGE + i * 2
             self.store.setValues(3, base_addr, [str_voltage, str_current])
-        
+
         # Power registers
         self.store.setValues(3, RegisterMap.PV_POWER + 1, [pv_power & 0xFFFF, (pv_power >> 16) & 0xFFFF])
         self.store.setValues(3, RegisterMap.AC_POWER + 1, [ac_power & 0xFFFF, (ac_power >> 16) & 0xFFFF])
-        
+
         # Mode and status
         mode_val = InverterMode.STANDBY if self.on_off == 1 else self.mode
         self.store.setValues(3, RegisterMap.INVERTER_MODE, [mode_val])
-        self.store.setValues(3, RegisterMap.INNER_TEMP, [45])
-        self.store.setValues(3, RegisterMap.ERROR_CODE1, [0, 0, 0])  # ERROR_CODE1, 2, 3
-        
+        # Inner temperature from environment
+        inner_temp = int(env.air_temp + sun_factor * 25.0 + random.uniform(-2, 2))
+        self.store.setValues(3, RegisterMap.INNER_TEMP, [max(0, inner_temp)])
+        self.store.setValues(3, RegisterMap.ERROR_CODE1, [0, 0, 0])
+
         # Energy registers
         total_kwh = int(self.total_energy)
         self.store.setValues(3, RegisterMap.CUMULATIVE_ENERGY_LOW, [total_kwh & 0xFFFF, (total_kwh >> 16) & 0xFFFF])
-        
+
         # Power factor
         pf_reg = int(pf * 1000)
         self.store.setValues(3, RegisterMap.POWER_FACTOR, [pf_reg & 0xFFFF])
@@ -639,20 +742,44 @@ class InverterSimulator:
         }
     
     def _regenerate_iv_data(self):
-        """Regenerate IV Scan data using store.setValues()"""
+        """Regenerate IV Scan data with realistic single-diode model curves.
+
+        I(V) = Isc * (1 - exp((V - Voc) / (n * Vt)))
+        where Vt ~ 1.5V (thermal voltage), n ~ 1.3 (ideality factor)
+        Isc is scaled by current radiation level.
+        """
+        env = self.env
+        sun_frac = max(0.1, env.get_sun_fraction())  # at least 10% for valid curve
+
         for mppt in range(1, self.mppt_count + 1):
-            voc = self.tracker_voc[mppt - 1] + (time.time() % 5) - 2.5
+            voc = self.tracker_voc[mppt - 1] + random.uniform(-3, 3)
             v_min = self.tracker_v_min[mppt - 1]
-            
+
             v_regs = get_iv_tracker_voltage_registers(mppt, self.iv_scan_data_points)
             voltages = generate_iv_voltage_data(voc, v_min, self.iv_scan_data_points)
             self.store.setValues(3, v_regs['base'], voltages)
-            
+
             for string in range(1, self.strings_per_mppt + 1):
                 string_idx = (mppt - 1) * self.strings_per_mppt + (string - 1)
-                isc = self.string_isc[string_idx] + (time.time() % 3) * 0.1 - 0.15
+                # Isc scales linearly with radiation
+                isc = self.string_isc[string_idx] * sun_frac + random.uniform(-0.2, 0.2)
+                isc = max(0.5, isc)
+
+                # Generate realistic IV curve using single-diode approximation
+                n_vt = 1.3 * 1.5  # n * Vt
+                n_pts = self.iv_scan_data_points
+                currents = []
+                for p in range(n_pts):
+                    v = v_min + (voc - v_min) * p / max(1, n_pts - 1)
+                    i_val = isc * (1.0 - math.exp((v - voc) / n_vt))
+                    i_val = max(0.0, i_val)
+                    # Convert to register format (0.01A, S16)
+                    i_reg = int(i_val * 100)
+                    if i_reg < 0:
+                        i_reg += 65536
+                    currents.append(i_reg)
+
                 i_regs = get_iv_string_current_registers(mppt, string, self.iv_scan_data_points)
-                currents = generate_iv_current_data(isc, voc, v_min, self.iv_scan_data_points)
                 self.store.setValues(3, i_regs['base'], currents)
     
     def _check_control_changes(self):
@@ -694,35 +821,36 @@ class InverterSimulator:
 
 class RelaySimulator:
     """KDU-300 Protection Relay Simulator - Slave ID 2
-    
-    24-hour factory load pattern (100kW base)
-    Uses Holding Register (FC03) for simulator compatibility
+
+    Realistic factory load pattern with weekday/weekend distinction.
+    Uses Holding Register (FC03) for simulator compatibility.
     """
-    
-    VERSION = "1.1.0"
+
+    VERSION = "1.2.0"
     NOMINAL_LINE_VOLTAGE = 380.0
     NOMINAL_PHASE_VOLTAGE = 220.0
     NOMINAL_FREQUENCY = 60.0
-    NOMINAL_POWER = 100000.0
-    NOMINAL_POWER_FACTOR = 0.90
-    
-    def __init__(self, logger=None, inverter_sims=None):
+    NOMINAL_POWER = 300000.0       # 300kW factory peak
+    NOMINAL_POWER_FACTOR = 0.93    # Industrial motors
+
+    def __init__(self, logger=None, inverter_sims=None, env=None):
         self.logger = logger or logging.getLogger("RelaySim")
         self.running = False
-        self.inverter_sims = inverter_sims or []  # Reference to inverter simulators
+        self.inverter_sims = inverter_sims or []
+        self.env = env or _get_shared_env()
 
         self.start_time = time.time()
-        self.received_energy_wh = 50000.0   # 수전유효전력량 (+WH)
-        self.sent_energy_wh = 0.0           # 송전유효전력량 (-WH)
+        self.received_energy_wh = 50000.0   # Grid import (+WH)
+        self.sent_energy_wh = 0.0           # Grid export (-WH)
         self.total_energy_varh = 20000.0
-        
+
         self.max_values = {
             'v12': 0.0, 'v23': 0.0, 'v31': 0.0,
             'v1': 0.0, 'v2': 0.0, 'v3': 0.0,
             'a1': 0.0, 'a2': 0.0, 'a3': 0.0,
             'w': 0.0
         }
-        
+
         self.store = self._create_datastore()
         self._current = {}
     
@@ -751,44 +879,58 @@ class RelaySimulator:
         return total
 
     def _get_load_power_w(self, inverter_power_w):
-        """Get factory load power (W) — peak is ~2x inverter generation
+        """Get factory load power (W) — realistic weekday/weekend pattern.
 
-        Factory load pattern based on time of day:
-        - 06~09: Morning ramp-up (0.5~1.5x inverter power)
-        - 09~12: Morning peak (1.5~2.0x)
-        - 12~13: Lunch dip (1.0x)
-        - 13~18: Afternoon peak (1.5~2.0x)
-        - 18~22: Evening decline (0.8~0.3x)
-        - 22~06: Night base load (0.2~0.1x)
+        Weekday (Mon-Fri):
+          00:00-06:00: Base load 30kW (security, HVAC standby)
+          06:00-08:00: Ramp up to 250kW (factory startup)
+          08:00-12:00: Full load 280-300kW (production, +/-5%)
+          12:00-13:00: Reduced 200kW (lunch break)
+          13:00-18:00: Full load 280-300kW (afternoon production)
+          18:00-20:00: Ramp down to 80kW (shutdown, cleaning)
+          20:00-24:00: Low load 50kW (night shift minimal)
+
+        Weekend (Sat-Sun):
+          All day: Base load 30-40kW (security, HVAC, refrigeration)
         """
         now = datetime.now()
         hour = now.hour + now.minute / 60.0
+        is_weekend = now.weekday() >= 5  # Saturday=5, Sunday=6
+
+        if is_weekend:
+            load_w = 35000.0 + random.uniform(-5000, 5000)
+            return max(20000.0, load_w)
+
+        # Weekday pattern
         fluctuation = random.uniform(-0.05, 0.05)
-
-        # Base multiplier relative to inverter power
         if hour < 6.0:
-            mult = 0.15
-        elif hour < 9.0:
-            mult = 0.5 + (hour - 6.0) / 3.0 * 1.0  # 0.5 → 1.5
+            base_load = 30000.0
+        elif hour < 8.0:
+            # Ramp from 30kW to 250kW
+            frac = (hour - 6.0) / 2.0
+            base_load = 30000.0 + frac * 220000.0
         elif hour < 12.0:
-            mult = 1.5 + 0.5 * math.sin((hour - 9.0) / 3.0 * math.pi)  # 1.5 → 2.0 → 1.5
+            # Full production 280-300kW
+            base_load = 290000.0
         elif hour < 13.0:
-            mult = 1.0  # Lunch dip
+            # Lunch break reduced to 200kW
+            base_load = 200000.0
         elif hour < 18.0:
-            mult = 1.5 + 0.5 * math.sin((hour - 13.0) / 5.0 * math.pi)  # 1.5 → 2.0 → 1.5
-        elif hour < 22.0:
-            mult = 0.8 - (hour - 18.0) / 4.0 * 0.5  # 0.8 → 0.3
+            # Afternoon full production 280-300kW
+            base_load = 290000.0
+        elif hour < 20.0:
+            # Ramp down from 290kW to 80kW
+            frac = (hour - 18.0) / 2.0
+            base_load = 290000.0 - frac * 210000.0
         else:
-            mult = 0.2 - (hour - 22.0) / 2.0 * 0.1  # 0.2 → 0.1
+            # Night shift minimal 50kW
+            base_load = 50000.0
 
-        mult = max(0.1, mult + fluctuation)
-
-        # Use inverter power as reference, with minimum base load of 30kW
-        ref_power = max(inverter_power_w, 50000.0)
-        return ref_power * mult
+        return max(20000.0, base_load * (1.0 + fluctuation))
     
     def _update_registers(self):
         """Update all register values — PCC net power model"""
+        env = self.env
         # Get inverter generation and factory load
         inverter_power_w = self._get_total_inverter_power_w()
         load_power_w = self._get_load_power_w(inverter_power_w)
@@ -797,9 +939,10 @@ class RelaySimulator:
         # Positive = consuming from grid, Negative = exporting to grid
         net_power_w = load_power_w - inverter_power_w
 
-        pf = self.NOMINAL_POWER_FACTOR + random.uniform(-0.03, 0.03)
+        # Industrial power factor: 0.92-0.95
+        pf = self.NOMINAL_POWER_FACTOR + random.uniform(-0.015, 0.015)
 
-        # Voltage
+        # Voltage from shared environment
         v_base = self.NOMINAL_LINE_VOLTAGE * (1.0 + random.uniform(-0.02, 0.02))
         v12 = v_base * (1.0 + random.uniform(-0.01, 0.01))
         v23 = v_base * (1.0 + random.uniform(-0.01, 0.01))
@@ -809,7 +952,7 @@ class RelaySimulator:
         v2 = v23 / math.sqrt(3) * (1.0 + random.uniform(-0.005, 0.005))
         v3 = v31 / math.sqrt(3) * (1.0 + random.uniform(-0.005, 0.005))
 
-        freq = self.NOMINAL_FREQUENCY + random.uniform(-0.1, 0.1)
+        freq = env.frequency
 
         # Power — net_power_w can be negative (export to grid)
         total_w = net_power_w
@@ -942,102 +1085,66 @@ class RelaySimulator:
 
 class WeatherSimulator:
     """SEM5046 Weather Station Simulator - Slave ID 3
-    
-    Time-based solar radiation pattern with realistic weather data
+
+    Realistic daily patterns from shared SolarEnvironment.
     """
-    
-    VERSION = "1.0.0"
-    
-    def __init__(self, logger=None):
+
+    VERSION = "1.1.0"
+
+    def __init__(self, logger=None, env=None):
         self.logger = logger or logging.getLogger("WeatherSim")
         self.running = False
-        
+        self.env = env or _get_shared_env()
+
         self.start_time = time.time()
         self.accum_horizontal = 0.0  # MJ/m²
         self.accum_inclined = 0.0    # MJ/m²
-        
+
         self.store = self._create_datastore()
         self._current = {}
-    
+
     def _create_datastore(self):
         """Create Modbus datastore - Uses Holding Register (FC03)"""
         hr_block = ModbusLoggedHoldingBlock(
             0, [0] * SEM5046RegisterMap.TOTAL_REGISTERS,
             self.logger, simulator=self, name="WTH"
         )
-        
+
         store = ModbusSlaveContext(
             di=ModbusSequentialDataBlock(0, [0] * 100),
             co=ModbusSequentialDataBlock(0, [0] * 100),
             hr=hr_block,
             ir=ModbusSequentialDataBlock(0, [0] * 100)
         )
-        
+
         return store
-    
-    def _get_solar_radiation(self):
-        """Get solar radiation based on time of day (W/m²)"""
-        now = datetime.now()
-        hour = now.hour + now.minute / 60.0
-        
-        # Sunrise ~6:00, Sunset ~18:00 (simplified)
-        sunrise = 6.0
-        sunset = 18.0
-        solar_noon = 12.0
-        
-        if hour < sunrise or hour > sunset:
-            return 0.0
-        
-        # Bell curve pattern
-        day_progress = (hour - sunrise) / (sunset - sunrise)
-        base_radiation = 1000 * math.sin(day_progress * math.pi)
-        
-        # Add cloud variation
-        cloud_factor = 1.0 + random.uniform(-0.15, 0.05)
-        
-        return max(0, base_radiation * cloud_factor)
-    
-    def _get_air_temperature(self):
-        """Get air temperature based on time of day (℃)"""
-        now = datetime.now()
-        hour = now.hour + now.minute / 60.0
-        
-        # Min at 6:00 (~5℃), Max at 14:00 (~25℃)
-        base = 15.0
-        amplitude = 10.0
-        phase_shift = 8.0  # Peak at 14:00
-        
-        temp = base + amplitude * math.sin((hour - phase_shift) / 24.0 * 2 * math.pi)
-        temp += random.uniform(-1.0, 1.0)
-        
-        return temp
-    
+
     def _update_registers(self):
-        """Update all register values using store.setValues()"""
-        # Get environmental data
-        radiation = self._get_solar_radiation()
-        air_temp = self._get_air_temperature()
-        humidity = 50.0 + random.uniform(-15, 15)
-        pressure = 1013.0 + random.uniform(-5, 5)
-        wind_speed = 2.0 + random.uniform(0, 5)
-        wind_direction = random.uniform(0, 360)
-        
-        # Module temperature (higher with more radiation)
-        base_module_temp = air_temp + (radiation / 1000.0) * 30.0
-        module_temp_1 = base_module_temp + random.uniform(-2, 2)
-        module_temp_2 = base_module_temp + random.uniform(-2, 2)
-        module_temp_3 = base_module_temp + random.uniform(-2, 2)
-        module_temp_4 = base_module_temp + random.uniform(-2, 2)
-        
+        """Update all register values from shared environment."""
+        env = self.env
+        radiation = env.radiation
+        air_temp = env.air_temp
+        humidity = env.humidity
+        pressure = 1013.0 + random.uniform(-3, 3)
+        wind_speed = env.wind_speed
+        wind_direction = env.wind_direction
+
+        # Module temperatures (4 sensors with small variance)
+        base_module_temp = env.module_temp
+        module_temp_1 = base_module_temp + random.uniform(-1.5, 1.5)
+        module_temp_2 = base_module_temp + random.uniform(-1.5, 1.5)
+        module_temp_3 = base_module_temp + random.uniform(-1.5, 1.5)
+        module_temp_4 = base_module_temp + random.uniform(-1.5, 1.5)
+
         # Inclined radiation (tilted panel, ~15% more when sun is up)
         inclined_factor = 1.15 if radiation > 0 else 1.0
         inclined_radiation = radiation * inclined_factor
-        
-        # Accumulate radiation (every 2 seconds update)
-        # W/m² * 2s = Ws/m² -> /1000000 = MJ/m²
-        self.accum_horizontal += radiation * 2.0 / 1000000.0
-        self.accum_inclined += inclined_radiation * 2.0 / 1000000.0
-        
+
+        # Accumulate radiation (every 1 second update)
+        # W/m² * 1s = Ws/m² -> /1000000 = MJ/m²
+        self.accum_horizontal += radiation * 1.0 / 1000000.0
+        self.accum_inclined += inclined_radiation * 1.0 / 1000000.0
+
         # Write to registers using store.setValues()
         self.store.setValues(3, SEM5046RegisterMap.AIR_TEMP, [air_temp_to_raw(air_temp)])
         self.store.setValues(3, SEM5046RegisterMap.AIR_HUMIDITY, [humidity_to_raw(humidity)])
@@ -1052,7 +1159,7 @@ class WeatherSimulator:
         self.store.setValues(3, SEM5046RegisterMap.MODULE_TEMP_2, [module_temp_to_raw(module_temp_2)])
         self.store.setValues(3, SEM5046RegisterMap.MODULE_TEMP_3, [module_temp_to_raw(module_temp_3)])
         self.store.setValues(3, SEM5046RegisterMap.MODULE_TEMP_4, [module_temp_to_raw(module_temp_4)])
-        
+
         # Store for display
         self._current = {
             'radiation': radiation,
@@ -1101,12 +1208,14 @@ class KstarSimulator:
     # PV MPPT nominal voltages (0.1V)
     PV_VOLTAGE_NOMINAL = [3900, 3850, 3920]  # MPPT1~3
 
-    def __init__(self, logger=None):
+    def __init__(self, logger=None, env=None):
         self.logger = logger or logging.getLogger("KstarSim")
         self.running = False
+        self.env = env or _get_shared_env()
 
         self.start_time = time.time()
         self.total_energy_wh = 2000000.0   # 초기 누적 발전량 2000kWh (단위: Wh)
+        self.today_energy_wh = 0.0
 
         # DER-AVM Control states
         self.on_off = 0                # 0=ON, 1=OFF
@@ -1180,26 +1289,23 @@ class KstarSimulator:
         self.store.setValues(4, KstarRegisters.SERIAL_NUMBER_BASE, serial_regs)
 
     def _get_sun_factor(self):
-        """현재 시각 기반 일사량 팩터 (0.0~1.0)"""
-        now = datetime.now()
-        hour = now.hour + now.minute / 60.0
-        if 6.0 <= hour <= 18.0:
-            return max(0.0, math.sin(math.pi * (hour - 6.0) / 12.0))
-        return 0.0
+        """Get sun factor from shared environment."""
+        return self.env.get_sun_fraction()
 
     def _update_registers(self):
         """실시간 FC04 레지스터 업데이트"""
+        env = self.env
         sun = self._get_sun_factor()
-        sun_var = sun * (1.0 + random.uniform(-0.03, 0.03))
+        sun_var = sun  # cloud effects already in env
 
         # Kstar: 밤에 인버터 전원 OFF → Modbus FC04 응답 불가 시뮬레이션
         ir_block = self.store.store.get('i')
         if ir_block and hasattr(ir_block, 'night_off'):
             ir_block.night_off = (sun_var <= 0.01 and self.on_off == 0)
 
-        # AC 출력 먼저 결정 → PV 역산 (효율 97.5%)
-        EFFICIENCY = 0.975
+        EFFICIENCY = 0.97
         power_cap = self.NOMINAL_POWER * (self.power_limit / 1000.0)
+        pv_v_factor = env.get_pv_voltage_factor()
 
         if sun_var > 0.01 and self.on_off == 0:
             possible_ac_w = sun_var * self.NOMINAL_POWER * EFFICIENCY
@@ -1209,25 +1315,24 @@ class KstarSimulator:
             ac_power_w = 0
             pv_total_w = 0
 
-        # PV (DC) — 3개 MPPT (전력 역산)
-        pv_voltages = [int(v * (0.95 + 0.05 * sun_var)) for v in self.PV_VOLTAGE_NOMINAL]
+        # PV (DC) — 3 MPPT, voltage affected by temperature
+        pv_voltages = [int(v * pv_v_factor * (0.95 + 0.05 * sun_var) + random.uniform(-10, 10))
+                       if sun_var > 0.01 else 0
+                       for v in self.PV_VOLTAGE_NOMINAL]
         pv_powers_w = [int(pv_total_w / 3 * random.uniform(0.98, 1.02))
                        for _ in range(3)] if pv_total_w > 0 else [0, 0, 0]
         pv_currents = [int(pv_powers_w[i] / (pv_voltages[i] * 0.1) * 100)
                        if pv_voltages[i] > 0 and pv_powers_w[i] > 0 else 0
                        for i in range(3)]
 
-        # FC04: PV 전압 3000~3002 (0.1V), PV4~6 = 0 (미사용)
         self.store.setValues(4, KstarRegisters.PV1_VOLTAGE,
-                             pv_voltages + [0, 0, 0])  # 3000~3005
-        # PV 전류 3012~3014 (0.01A)
+                             pv_voltages + [0, 0, 0])
         self.store.setValues(4, KstarRegisters.PV1_CURRENT,
-                             pv_currents + [0])          # 3012~3015
-        # PV 전력 3024~3026 (W)
+                             pv_currents + [0])
         self.store.setValues(4, KstarRegisters.PV1_POWER,
-                             pv_powers_w + [0])          # 3024~3027
+                             pv_powers_w + [0])
 
-        # PF / 무효전력 제어
+        # PF / reactive power control
         if self.control_mode == 'PF':
             pf = self.power_factor_set / 1000.0
             pf = max(0.85, min(1.0, abs(pf)))
@@ -1238,7 +1343,7 @@ class KstarSimulator:
             else:
                 reactive_power_w = 0
                 pf = 1.0
-        else:  # RP mode
+        else:
             rp_pct = self.reactive_power_set
             if rp_pct >= 32768:
                 rp_pct = rp_pct - 65536
@@ -1249,45 +1354,47 @@ class KstarSimulator:
             else:
                 pf = 1.0
 
+        # Cumulative energy
         self.total_energy_wh += ac_power_w / 3600.0
-        energy_01kwh = int(self.total_energy_wh / 100)   # 0.1kWh 단위
+        self.today_energy_wh += ac_power_w / 3600.0
+        energy_01kwh = int(self.total_energy_wh / 100)
         self.store.setValues(4, KstarRegisters.CUMULATIVE_PRODUCTION_L,
                              [energy_01kwh & 0xFFFF, (energy_01kwh >> 16) & 0xFFFF])
 
-        # 금일 발전량 (0.1kWh 단위, 간단히 누적 에너지의 일부)
-        today_01kwh = int(ac_power_w * (time.time() - self.start_time) / 3600 / 100)
+        today_01kwh = int(self.today_energy_wh / 100)
         self.store.setValues(4, KstarRegisters.DAILY_PRODUCTION, [today_01kwh & 0xFFFF])
 
-        # 상태: 3046 시스템상태, 3047 인버터상태
+        # Status
         if self.on_off == 1:
-            self.store.setValues(4, KstarRegisters.SYSTEM_STATUS, [1])    # Standby
-            self.store.setValues(4, KstarRegisters.INVERTER_STATUS, [1])  # Standby
+            self.store.setValues(4, KstarRegisters.SYSTEM_STATUS, [1])
+            self.store.setValues(4, KstarRegisters.INVERTER_STATUS, [1])
         elif sun_var > 0.01:
-            self.store.setValues(4, KstarRegisters.SYSTEM_STATUS, [0])    # Normal
-            self.store.setValues(4, KstarRegisters.INVERTER_STATUS, [4])  # Running
+            self.store.setValues(4, KstarRegisters.SYSTEM_STATUS, [0])
+            self.store.setValues(4, KstarRegisters.INVERTER_STATUS, [4])
         else:
-            self.store.setValues(4, KstarRegisters.SYSTEM_STATUS, [1])    # Standby
-            self.store.setValues(4, KstarRegisters.INVERTER_STATUS, [1])  # Standby
+            self.store.setValues(4, KstarRegisters.SYSTEM_STATUS, [1])
+            self.store.setValues(4, KstarRegisters.INVERTER_STATUS, [1])
 
-        # 온도: RADIATOR_TEMP = 3055 (0.1℃), CHASSIS_TEMP = 3057 (0.1℃)
-        radiator_temp = int((35.0 + sun_var * 20.0 + random.uniform(-2, 2)) * 10)
-        self.store.setValues(4, KstarRegisters.RADIATOR_TEMP, [radiator_temp & 0xFFFF])
+        # Temperature from environment
+        radiator_temp = int((env.air_temp + sun_var * 25.0 + random.uniform(-2, 2)) * 10)
+        self.store.setValues(4, KstarRegisters.RADIATOR_TEMP, [max(0, radiator_temp) & 0xFFFF])
         self.store.setValues(4, KstarRegisters.CHASSIS_TEMP,
-                             [int(radiator_temp * 0.85) & 0xFFFF])
+                             [max(0, int(radiator_temp * 0.85)) & 0xFFFF])
 
-        # AC 출력 — R/S/T상 (3상 균등 분배, 피상전력 기준 전류 계산)
+        # AC output
         per_phase_w = ac_power_w // 3
-        ac_v = self.NOMINAL_VOLTAGE  # 3800 = 380.0V
+        ac_v = self.NOMINAL_VOLTAGE + int(random.uniform(-20, 20))
         apparent_w = math.sqrt(ac_power_w**2 + reactive_power_w**2) if ac_power_w > 0 else 0
-        ac_cur = int((apparent_w / 3) / (ac_v * 0.1) * 100) if ac_v > 0 else 0  # 0.01A
+        ac_cur = int((apparent_w / 3) / (ac_v * 0.1) * 100) if ac_v > 0 else 0
 
-        # 계통 주파수: GRID_FREQUENCY = 3098 (0.01Hz)
-        self.store.setValues(4, KstarRegisters.GRID_FREQUENCY, [self.NOMINAL_FREQUENCY])
+        # Grid frequency from environment
+        grid_freq = int(env.frequency * 100)  # 0.01Hz
+        self.store.setValues(4, KstarRegisters.GRID_FREQUENCY, [grid_freq])
 
         # R상 전압/전류/전력
         self.store.setValues(4, KstarRegisters.INV_R_VOLTAGE, [ac_v])
         self.store.setValues(4, KstarRegisters.INV_R_CURRENT, [ac_cur])
-        self.store.setValues(4, KstarRegisters.INV_S_FREQUENCY, [self.NOMINAL_FREQUENCY])
+        self.store.setValues(4, KstarRegisters.INV_S_FREQUENCY, [grid_freq])
         self.store.setValues(4, KstarRegisters.INV_R_POWER,
                              [per_phase_w & 0xFFFF])  # S16 범위 내 (60kW/3=20kW)
 
@@ -1404,30 +1511,45 @@ class KstarSimulator:
             self.iv_scan_status = 0
 
     def _init_iv_scan_data(self):
-        """Pre-populate IV curve data in FC04 registers 5000-7399."""
+        """Pre-populate IV curve data in FC04 registers 5000-7399.
+        Uses single-diode model: I(V) = Isc * (1 - exp((V - Voc) / (n * Vt)))
+        """
         from common.Kstar_PV_60kw_registers import generate_iv_voltage_data, generate_iv_current_data
         mppt_count = 3
         strings_per_mppt = 4
         data_points = KstarRegisters.IV_POINTS_PER_STRING  # 100
+        env = self.env
+        sun_frac = max(0.1, env.get_sun_fraction())
 
         for mppt in range(mppt_count):
             voc = 750.0 + mppt * 10.0 + random.uniform(-5, 5)
             v_min = 200.0
-            isc = 12.0 + random.uniform(-0.5, 0.5)
+            isc_base = 12.0 * sun_frac  # Scale Isc by radiation
 
             voltages = generate_iv_voltage_data(voc, v_min, data_points)
 
             for s in range(strings_per_mppt):
                 string_idx = mppt * strings_per_mppt + s
                 base = KstarRegisters.IV_DATA_BASE + string_idx * KstarRegisters.IV_REGS_PER_STRING
-                isc_str = isc + random.uniform(-0.3, 0.3)
-                currents = generate_iv_current_data(isc_str, voc, v_min, data_points)
+                isc_str = max(0.5, isc_base + random.uniform(-0.3, 0.3))
+
+                # Generate realistic IV curve using single-diode approximation
+                n_vt = 1.3 * 1.5  # n * Vt
+                currents = []
+                for p in range(data_points):
+                    v = v_min + (voc - v_min) * p / max(1, data_points - 1)
+                    i_val = isc_str * (1.0 - math.exp((v - voc) / n_vt))
+                    i_val = max(0.0, i_val)
+                    i_reg = int(i_val * 100)
+                    if i_reg < 0:
+                        i_reg += 65536
+                    currents.append(i_reg)
 
                 # Write interleaved V/I pairs to FC04 input registers
                 iv_regs = []
                 for p in range(data_points):
-                    iv_regs.append(voltages[p])   # voltage U16
-                    iv_regs.append(currents[p])   # current S16 (as U16)
+                    iv_regs.append(voltages[p])
+                    iv_regs.append(currents[p])
                 self.store.setValues(4, base, iv_regs)
 
 
@@ -1452,9 +1574,10 @@ class HuaweiSimulator:
     # MPPT별 PV 전압 공칭값 (0.1V 단위) – MPPT1~4
     PV_VOLTAGE_NOMINAL = [4500, 4480, 4520, 4490]
 
-    def __init__(self, logger=None):
+    def __init__(self, logger=None, env=None):
         self.logger = logger or logging.getLogger("HuaweiSim")
         self.running = False
+        self.env = env or _get_shared_env()
 
         self.start_time = time.time()
         self.total_energy_kwh = 3000.0  # 초기 누적 발전량 3000kWh
@@ -1493,105 +1616,100 @@ class HuaweiSimulator:
         self.store.setValues(3, HuaweiRegisters.INTERNALTEMPERATURE, [350])
 
     def _get_sun_factor(self):
-        """현재 시각 기반 일사량 팩터 (0.0~1.0)"""
-        now = datetime.now()
-        hour = now.hour + now.minute / 60.0
-        if 6.0 <= hour <= 18.0:
-            return max(0.0, math.sin(math.pi * (hour - 6.0) / 12.0))
-        return 0.0
+        """Get sun factor from shared environment."""
+        return self.env.get_sun_fraction()
 
     def _update_registers(self):
-        """FC03 Holding Register 업데이트 (Huawei SUN2000 레지스터 맵)"""
-        sun = self._get_sun_factor()
-        sun_var = sun * (1.0 + random.uniform(-0.03, 0.03))
+        """FC03 Holding Register update (Huawei SUN2000 register map)"""
+        env = self.env
+        sun_var = self._get_sun_factor()
+        pv_v_factor = env.get_pv_voltage_factor()
 
-        # ── PV 스트링 데이터 (32016~32031, 16 regs) ─────────────────────────
-        # 4 MPPT × 2 strings = 8 strings  [V0.1V U16, I0.01A S16] × 8
+        # PV string data (32016~32031, 16 regs)
         pv_regs = []
         for mppt_i in range(4):
             v_nom = self.PV_VOLTAGE_NOMINAL[mppt_i]
             for _ in range(2):
                 if sun_var > 0:
-                    v = int(v_nom * (0.92 + 0.08 * sun_var) + random.uniform(-10, 10))
+                    v = int(v_nom * pv_v_factor * (0.92 + 0.08 * sun_var) + random.uniform(-10, 10))
+                    # Current proportional to radiation
                     i = int(sun_var * 1050 + random.uniform(-20, 20))
                     i = max(0, i)
                 else:
                     v = 0
                     i = 0
-                pv_regs.append(v & 0xFFFF)   # U16 voltage (0.1V)
-                pv_regs.append(i & 0xFFFF)   # S16 current (0.01A)
-        self.store.setValues(3, HuaweiRegisters.PV_VOLTAGE, pv_regs)  # 16 regs
+                pv_regs.append(v & 0xFFFF)
+                pv_regs.append(i & 0xFFFF)
+        self.store.setValues(3, HuaweiRegisters.PV_VOLTAGE, pv_regs)
 
-        # ── DC 입력 전력 (32064~32065, S32, 1W) ──────────────────────────────
+        # DC input power (S32, 1W)
         pv_power_w = int(self.NOMINAL_POWER * sun_var * random.uniform(0.97, 1.03)) \
                      if sun_var > 0 else 0
-        # S32 big-endian: hi-word first, lo-word second
         self.store.setValues(3, HuaweiRegisters.PV_POWER,
                              [(pv_power_w >> 16) & 0xFFFF, pv_power_w & 0xFFFF])
 
-        # ── AC 3상 전압 (32069~32071, U16, 1V) ───────────────────────────────
-        ac_v = self.NOMINAL_VOLTAGE
+        # AC 3-phase voltage (U16, 1V)
+        ac_v = self.NOMINAL_VOLTAGE + int(random.uniform(-2, 2))
         self.store.setValues(3, HuaweiRegisters.POWERGRIDPHASE_AVOLTAGE, [ac_v, ac_v, ac_v])
 
-        # ── AC 3상 전류 (32072~32077, S32, 0.001A) ───────────────────────────
-        ac_power_w = int(pv_power_w * 0.975)
+        # AC power and current
+        ac_power_w = int(pv_power_w * 0.97)
         phase_ma = int(ac_power_w / 3 / ac_v * 1000) if (ac_power_w > 0 and ac_v > 0) else 0
-        # S32 big-endian: hi-word first, lo-word second (×3 phases)
         cur_regs = []
         for _ in range(3):
             cur_regs += [(phase_ma >> 16) & 0xFFFF, phase_ma & 0xFFFF]
         self.store.setValues(3, HuaweiRegisters.POWERGRIDPHASE_ACURRENT, cur_regs)
 
-        # ── 유효전력/무효전력/역률/주파수 (32080~32085) ───────────────────────
-        # S32 big-endian: hi-word first, lo-word second
+        # Active power / reactive power / PF / frequency
+        pf_val = int(random.uniform(0.98, 1.0) * 1000) if ac_power_w > 0 else 1000
+        grid_freq = int(env.frequency * 100)
         self.store.setValues(3, HuaweiRegisters.PHASE_AACTIVEPOWER,
                              [(ac_power_w >> 16) & 0xFFFF, ac_power_w & 0xFFFF])
-        self.store.setValues(3, HuaweiRegisters.REACTIVE_POWER, [0, 0])   # 무효전력 0
-        self.store.setValues(3, HuaweiRegisters.POWER_FACTOR, [1000])      # PF = 1.000
-        self.store.setValues(3, HuaweiRegisters.FREQUENCY, [self.NOMINAL_FREQUENCY])
+        self.store.setValues(3, HuaweiRegisters.REACTIVE_POWER, [0, 0])
+        self.store.setValues(3, HuaweiRegisters.POWER_FACTOR, [pf_val])
+        self.store.setValues(3, HuaweiRegisters.FREQUENCY, [grid_freq])
 
-        # ── Running Status (32000) ────────────────────────────────────────────
-        status = 3 if sun_var > 0.01 else 1  # ON_GRID=3, STANDBY=1
+        # Running Status (32000)
+        status = 3 if sun_var > 0.01 else 1
         self.store.setValues(3, HuaweiRegisters.RUNNINGSTATUS, [status])
 
-        # ── 내부 온도 (32087, S16, 0.1°C) ────────────────────────────────────
-        temp = int((35.0 + sun_var * 20.0 + random.uniform(-2, 2)) * 10)
+        # Internal temperature (S16, 0.1C) — from environment
+        temp = int((env.air_temp + sun_var * 25.0 + random.uniform(-2, 2)) * 10)
         self.store.setValues(3, HuaweiRegisters.INTERNALTEMPERATURE, [temp & 0xFFFF])
 
-        # ── 누적 발전량 (32106~32107, U32, 1kWh) ─────────────────────────────
-        self.total_energy_kwh += ac_power_w / 3600000.0   # W→kWh (1초 간격)
+        # Cumulative energy (U32, 1kWh)
+        self.total_energy_kwh += ac_power_w / 3600000.0
         energy_kwh = int(self.total_energy_kwh)
-        # U32 big-endian: hi-word first, lo-word second
         self.store.setValues(3, HuaweiRegisters.CUMULATIVE_ENERGY,
                              [(energy_kwh >> 16) & 0xFFFF, energy_kwh & 0xFFFF])
 
-        # ── DEA-AVM Real-time Monitoring (0x03E8-0x03FD) ──────────────────────
+        # DEA-AVM registers
         def _to_s32_regs(v):
             v = int(v)
             if v < 0: v += 0x100000000
             return [v & 0xFFFF, (v >> 16) & 0xFFFF]
 
-        dea_phase_current = int(phase_ma / 100)  # phase_ma is 0.001A, /100 → 0.1A
-        dea_voltage = 3800                        # 0.1V = 380V
-        dea_active = ac_power_w * 10              # 0.1W
-        dea_reactive = 0                          # 1Var (no reactive power modeled)
-        dea_pf = 1000                             # 0.001 = 1.000
-        dea_freq = 600                            # 0.1Hz = 60.0Hz
+        dea_phase_current = int(phase_ma / 100)
+        dea_voltage = 3800
+        dea_active = ac_power_w * 10
+        dea_reactive = 0
+        dea_pf = pf_val
+        dea_freq = int(env.frequency * 10)
         is_running = sun_var > 0.01
         dea_status = 0x0001 if is_running else 0
 
         dea = []
-        dea += _to_s32_regs(dea_phase_current)  # L1 Current
-        dea += _to_s32_regs(dea_phase_current)  # L2 Current
-        dea += _to_s32_regs(dea_phase_current)  # L3 Current
-        dea += _to_s32_regs(dea_voltage)         # L1 Voltage
-        dea += _to_s32_regs(dea_voltage)         # L2 Voltage
-        dea += _to_s32_regs(dea_voltage)         # L3 Voltage
-        dea += _to_s32_regs(dea_active)           # Active Power
-        dea += _to_s32_regs(dea_reactive)         # Reactive Power
-        dea += _to_s32_regs(dea_pf)               # Power Factor
-        dea += _to_s32_regs(dea_freq)             # Frequency
-        dea += [dea_status & 0xFFFF, 0]           # Status Flags
+        dea += _to_s32_regs(dea_phase_current)
+        dea += _to_s32_regs(dea_phase_current)
+        dea += _to_s32_regs(dea_phase_current)
+        dea += _to_s32_regs(dea_voltage)
+        dea += _to_s32_regs(dea_voltage)
+        dea += _to_s32_regs(dea_voltage)
+        dea += _to_s32_regs(dea_active)
+        dea += _to_s32_regs(dea_reactive)
+        dea += _to_s32_regs(dea_pf)
+        dea += _to_s32_regs(dea_freq)
+        dea += [dea_status & 0xFFFF, 0]
         self.store.setValues(3, 0x03E8, dea)
 
         self._current = {
@@ -1625,9 +1743,10 @@ class EkosSimulator:
     # MPPT nominal voltages (V, real float)
     PV_VOLTAGE_NOMINAL = [390.0, 385.0]
 
-    def __init__(self, logger=None):
+    def __init__(self, logger=None, env=None):
         self.logger = logger or logging.getLogger("EkosSim")
         self.running = False
+        self.env = env or _get_shared_env()
 
         self.start_time = time.time()
         self.total_energy_wh = 2000000.0   # Initial cumulative: 2000kWh in Wh
@@ -1682,19 +1801,16 @@ class EkosSimulator:
             self.store.store['h']._internal_update = False
 
     def _get_sun_factor(self):
-        """Time-based sun intensity (0.0~1.0)"""
-        now = datetime.now()
-        hour = now.hour + now.minute / 60.0
-        if 6.0 <= hour <= 18.0:
-            return max(0.0, math.sin(math.pi * (hour - 6.0) / 12.0))
-        return 0.0
+        """Get sun factor from shared environment."""
+        return self.env.get_sun_fraction()
 
     def _update_registers(self):
         """Update FC03 registers — Float32 for analog values, raw W for power"""
-        sun = self._get_sun_factor()
-        sun_var = sun * (1.0 + random.uniform(-0.03, 0.03))
+        env = self.env
+        sun_var = self._get_sun_factor()
+        pv_v_factor = env.get_pv_voltage_factor()
 
-        EFFICIENCY = 0.975
+        EFFICIENCY = 0.97
         power_cap = self.NOMINAL_POWER * (self.power_limit / 1000.0)
 
         if sun_var > 0.01 and self.on_off == 0:
@@ -1709,7 +1825,7 @@ class EkosSimulator:
         pv_powers_w = []
         for i in range(2):
             if pv_total_w > 0:
-                v = self.PV_VOLTAGE_NOMINAL[i] * (0.92 + 0.08 * sun_var) + random.uniform(-2, 2)
+                v = self.PV_VOLTAGE_NOMINAL[i] * pv_v_factor * (0.92 + 0.08 * sun_var) + random.uniform(-2, 2)
                 pw = pv_total_w / 2 * random.uniform(0.98, 1.02)
                 c = pw / v if v > 0 else 0
                 pv_powers_w.append(pw)
@@ -1767,16 +1883,15 @@ class EkosSimulator:
             self.store.setValues(3, c_addr,
                                  self._float32_to_regs(phase_current_a))
 
-        # Frequency (Float32, Hz)
+        # Frequency (Float32, Hz) — from environment
         self.store.setValues(3, EkosRegisters.FREQUENCY,
-                             self._float32_to_regs(self.NOMINAL_FREQUENCY))
+                             self._float32_to_regs(env.frequency))
 
         # Power factor (Float32)
         self.store.setValues(3, EkosRegisters.POWER_FACTOR,
                              self._float32_to_regs(pf))
 
-        # Inverter mode (U16) — use EKOS raw status values, not Solarize abstract modes
-        # 0x0000=Stop, 0x0002=Waiting(Standby), 0x0008=MPP(On-Grid), 0x0009=Fault
+        # Inverter mode (U16)
         if self.on_off == 1:
             mode = 0x0000  # Stop
         elif sun_var > 0.01:
@@ -1785,9 +1900,9 @@ class EkosSimulator:
             mode = 0x0002  # Waiting Time (Standby)
         self.store.setValues(3, EkosRegisters.INVERTER_MODE, [mode])
 
-        # Inner temp (U16)
-        temp = int(35.0 + sun_var * 20.0 + random.uniform(-2, 2))
-        self.store.setValues(3, EkosRegisters.INNER_TEMP, [temp & 0xFFFF])
+        # Inner temp (U16) — from environment
+        temp = int(env.air_temp + sun_var * 25.0 + random.uniform(-2, 2))
+        self.store.setValues(3, EkosRegisters.INNER_TEMP, [max(0, temp) & 0xFFFF])
 
         # Error codes (U16)
         self.store.setValues(3, EkosRegisters.ERROR_CODE1, [0])
@@ -1902,9 +2017,10 @@ class SungrowSimulator:
     # MPPT nominal voltages (0.1V)
     PV_VOLTAGE_NOMINAL = [3900, 3850, 3920, 3880]
 
-    def __init__(self, logger=None):
+    def __init__(self, logger=None, env=None):
         self.logger = logger or logging.getLogger("SungrowSim")
         self.running = False
+        self.env = env or _get_shared_env()
 
         self.start_time = time.time()
         self.total_energy_01kwh = 20000  # Initial: 2000.0 kWh in 0.1kWh units
@@ -1952,19 +2068,16 @@ class SungrowSimulator:
             self.store.store['h']._internal_update = False
 
     def _get_sun_factor(self):
-        """Time-based sun intensity (0.0~1.0)"""
-        now = datetime.now()
-        hour = now.hour + now.minute / 60.0
-        if 6.0 <= hour <= 18.0:
-            return max(0.0, math.sin(math.pi * (hour - 6.0) / 12.0))
-        return 0.0
+        """Get sun factor from shared environment."""
+        return self.env.get_sun_fraction()
 
     def _update_registers(self):
         """Update FC03 registers — U16/U32 formats, raw W for power"""
-        sun = self._get_sun_factor()
-        sun_var = sun * (1.0 + random.uniform(-0.03, 0.03))
+        env = self.env
+        sun_var = self._get_sun_factor()
+        pv_v_factor = env.get_pv_voltage_factor()
 
-        EFFICIENCY = 0.975
+        EFFICIENCY = 0.97
         power_cap = self.NOMINAL_POWER * (self.power_limit / 1000.0)
 
         if sun_var > 0.01 and self.on_off == 0:
@@ -1976,7 +2089,7 @@ class SungrowSimulator:
             pv_total_w = 0
 
         # PV MPPT data (voltage 0.1V U16, current 0.1A U16)
-        pv_voltages = [int(v * (0.92 + 0.08 * sun_var) + random.uniform(-10, 10))
+        pv_voltages = [int(v * pv_v_factor * (0.92 + 0.08 * sun_var) + random.uniform(-10, 10))
                        if sun_var > 0.01 else 0 for v in self.PV_VOLTAGE_NOMINAL]
         pv_powers_w = [int(pv_total_w / 4 * random.uniform(0.98, 1.02))
                        for _ in range(4)] if pv_total_w > 0 else [0, 0, 0, 0]
@@ -2038,15 +2151,14 @@ class SungrowSimulator:
         self.store.setValues(3, SungrowRegisters.S_PHASE_CURRENT, [phase_current_01a])
         self.store.setValues(3, SungrowRegisters.T_PHASE_CURRENT, [phase_current_01a])
 
-        # Frequency (U16, 0.1Hz)
-        self.store.setValues(3, SungrowRegisters.FREQUENCY, [self.NOMINAL_FREQUENCY])
+        # Frequency (U16, 0.1Hz) — from environment
+        self.store.setValues(3, SungrowRegisters.FREQUENCY, [int(env.frequency * 10)])
 
         # Power factor (S16, 0.001)
         pf_reg = int(pf * 1000)
         self.store.setValues(3, SungrowRegisters.POWER_FACTOR, [pf_reg & 0xFFFF])
 
-        # Inverter mode (U16) — use Sungrow raw codes (not Solarize codes)
-        # SungrowStatusConverter maps: 0x0002→ON_GRID, 0x0001→STANDBY, 0x0005→SHUTDOWN
+        # Inverter mode (U16)
         if self.on_off == 1:
             mode_raw = 0x0005   # Sungrow SHUTDOWN
         elif sun_var > 0.01:
@@ -2055,9 +2167,9 @@ class SungrowSimulator:
             mode_raw = 0x0001   # Sungrow STANDBY
         self.store.setValues(3, SungrowRegisters.INVERTER_MODE, [mode_raw])
 
-        # Inner temp (S16, 0.1 C)
-        temp = int((35.0 + sun_var * 20.0 + random.uniform(-2, 2)) * 10)
-        self.store.setValues(3, SungrowRegisters.INNER_TEMP, [temp & 0xFFFF])
+        # Inner temp (S16, 0.1C) — from environment
+        temp = int((env.air_temp + sun_var * 25.0 + random.uniform(-2, 2)) * 10)
+        self.store.setValues(3, SungrowRegisters.INNER_TEMP, [max(0, temp) & 0xFFFF])
 
         # Error codes (U16)
         self.store.setValues(3, SungrowRegisters.ERROR_CODE1, [0])
@@ -2165,10 +2277,11 @@ class GenericInverterSimulator:
     VERSION = "1.0.0"
     NOMINAL_POWER = 50000  # 50kW default
 
-    def __init__(self, protocol_name, logger=None):
+    def __init__(self, protocol_name, logger=None, env=None):
         self.protocol_name = protocol_name
         self.logger = logger or logging.getLogger(f"Generic-{protocol_name}")
         self.running = False
+        self.env = env or _get_shared_env()
 
         # Load register module dynamically
         self._module = self._load_module(protocol_name)
@@ -2295,12 +2408,8 @@ class GenericInverterSimulator:
             self.store.setValues(fc, addr, [self.on_off])
 
     def _get_sun_factor(self):
-        """Time-based sun intensity (0.0~1.0), sine wave 06:00-18:00."""
-        now = datetime.now()
-        hour = now.hour + now.minute / 60.0
-        if 6.0 <= hour <= 18.0:
-            return max(0.0, math.sin(math.pi * (hour - 6.0) / 12.0))
-        return 0.0
+        """Get sun factor from shared environment."""
+        return self.env.get_sun_fraction()
 
     def _set_reg(self, addr, values):
         """Write values to the correct function code store."""
@@ -2327,10 +2436,12 @@ class GenericInverterSimulator:
 
     def _update_registers(self):
         """Update all register values — called every ~1s by EquipmentSimulator."""
+        env = self.env
         sun = self._get_sun_factor()
-        sun_var = sun * (1.0 + random.uniform(-0.03, 0.03))
+        sun_var = sun
+        pv_v_factor = env.get_pv_voltage_factor()
 
-        EFFICIENCY = 0.975
+        EFFICIENCY = 0.97
         power_cap = self.NOMINAL_POWER * (self.power_limit / 1000.0)
 
         if sun_var > 0.01 and self.on_off == 0:
@@ -2345,7 +2456,7 @@ class GenericInverterSimulator:
         n_mppt = self.mppt_channels or 4
         for i in range(n_mppt):
             if pv_total_w > 0:
-                mppt_v_raw = int(self._pv_v_nom[i] * (0.92 + 0.08 * sun_var)
+                mppt_v_raw = int(self._pv_v_nom[i] * pv_v_factor * (0.92 + 0.08 * sun_var)
                                  + random.uniform(-10, 10))
                 mppt_p_w = pv_total_w / n_mppt * random.uniform(0.98, 1.02)
                 mppt_c_raw = int(mppt_p_w / (mppt_v_raw * self._s_voltage)
@@ -2381,7 +2492,7 @@ class GenericInverterSimulator:
             mppt_idx = i // max(1, self.string_channels // max(1, n_mppt))
             mppt_idx = min(mppt_idx, n_mppt - 1)
             if pv_total_w > 0:
-                str_v_raw = int(self._pv_v_nom[mppt_idx] * (0.92 + 0.08 * sun_var)
+                str_v_raw = int(self._pv_v_nom[mppt_idx] * pv_v_factor * (0.92 + 0.08 * sun_var)
                                 + random.uniform(-5, 5))
                 str_c_raw = int((pv_total_w / n_mppt / max(1, self.string_channels // n_mppt))
                                 / (str_v_raw * self._s_voltage) / self._s_current) if str_v_raw > 0 else 0
@@ -2404,7 +2515,7 @@ class GenericInverterSimulator:
 
         # --- AC phase data ---
         ac_voltage_raw = int(380.0 / self._s_voltage) if ac_power_w > 0 else 0
-        ac_freq_raw = int(60.0 / self._s_freq)
+        ac_freq_raw = int(env.frequency / self._s_freq)
         ac_power_raw = int(ac_power_w / self._s_power)
         pv_power_raw = int(pv_total_w / self._s_power)
 
@@ -2470,10 +2581,11 @@ class GenericInverterSimulator:
             addr = self._find_addr(name)
             self._set_reg(addr, [0])
 
-        # Temperature
+        # Temperature — from environment
+        inner_temp = int(env.air_temp + sun * 25.0 + random.uniform(-2, 2))
         addr = self._find_addr('INNER_TEMP', 'INTERNALTEMPERATURE', 'TEMPERATURE',
                                'INVERTER_INNERTEMPERATURE', 'INVERTER_MODULETEMPERATURE')
-        self._set_reg(addr, [45])
+        self._set_reg(addr, [max(0, inner_temp)])
 
         # Update display dict (thread-safe)
         with self._current_lock:
@@ -2576,6 +2688,11 @@ class EquipmentSimulator:
         self.running = False
         self.logger = logging.getLogger("EquipSim")
 
+        # Shared environment for all simulators
+        global _shared_env
+        _shared_env = SolarEnvironment()
+        self.env = _shared_env
+
         # Dynamic device creation
         self.devices = []  # list of (slave_id, type, name, protocol, simulator)
         device_map = {}    # slave_id -> store
@@ -2589,12 +2706,12 @@ class EquipmentSimulator:
             proto = dc.get('protocol', '')
 
             if dtype == 'inverter':
-                sim = _create_inverter_by_protocol(proto, self.logger)
+                sim = _create_inverter_by_protocol(proto, self.logger, env=self.env)
             elif dtype == 'relay':
                 relay_configs.append(dc)
                 continue  # Create relay after all inverters
             elif dtype == 'weather':
-                sim = WeatherSimulator(self.logger)
+                sim = WeatherSimulator(self.logger, env=self.env)
             else:
                 continue
 
@@ -2613,7 +2730,7 @@ class EquipmentSimulator:
             sid = dc['slave_id']
             name = dc['name']
             proto = dc.get('protocol', '')
-            sim = RelaySimulator(self.logger, inverter_sims=inverter_sims)
+            sim = RelaySimulator(self.logger, inverter_sims=inverter_sims, env=self.env)
             self.devices.append({
                 'slave_id': sid,
                 'type': 'relay',
@@ -2634,14 +2751,16 @@ class EquipmentSimulator:
         """Background thread for updating all devices"""
         error_count = 0
         last_error_time = 0.0
-        ERROR_RESET_INTERVAL = 60  # 60초 경과 시 에러 카운터 리셋
+        ERROR_RESET_INTERVAL = 60
         while self.running:
             try:
+                # Update shared environment first (once per tick)
+                self.env.update()
                 for d in self.devices:
                     sim = d['sim']
                     sim._update_registers()
                     if hasattr(sim, '_check_control_changes'):
-                        sim._check_control_changes()  # _update_registers 이후 실행
+                        sim._check_control_changes()
                 error_count = 0
             except Exception as e:
                 now = time.time()
@@ -2961,22 +3080,21 @@ def _load_inverter_models():
     return _load_device_models_ini()['inverter']
 
 
-def _create_inverter_by_protocol(protocol, logger):
+def _create_inverter_by_protocol(protocol, logger, env=None):
     """Create inverter simulator by protocol name"""
     p = protocol.lower()
     if p.startswith('solarize') or p == 'verterking':
-        return InverterSimulator(logger)  # W×10, SCALE power=0.1
+        return InverterSimulator(logger, env=env)
     elif p.startswith('kstar'):
-        return KstarSimulator(logger)
+        return KstarSimulator(logger, env=env)
     elif p.startswith('huawei'):
-        return HuaweiSimulator(logger)
+        return HuaweiSimulator(logger, env=env)
     elif p.startswith('ekos'):
-        return EkosSimulator(logger)
+        return EkosSimulator(logger, env=env)
     elif p.startswith('sungrow'):
-        return SungrowSimulator(logger)
+        return SungrowSimulator(logger, env=env)
     else:
-        # Generic: dynamically load register module for any protocol
-        return GenericInverterSimulator(protocol, logger)
+        return GenericInverterSimulator(protocol, logger, env=env)
 
 
 def _load_config_from_ini():
