@@ -2507,14 +2507,26 @@ class ModbusHandlerSimulation:
         # P = √3 × V × I × PF, for single phase: I = P / V
         phase_current = int(ac_p / 3 / 380) if ac_p > 0 else 0
         
+        # MPPT: raw register 형식 (voltage=0.1V, current=0.01A)
+        mppt_count = getattr(self.reg_module, 'MPPT_CHANNELS', 4)
         mppt = []
-        for i in range(4):
+        pv_per_mppt = pv_p / max(mppt_count, 1) if pv_p > 0 else 0
+        for i in range(mppt_count):
+            mppt_v_phys = 380 + i * 5 + sun * 20  # V (물리값)
+            mppt_c_phys = pv_per_mppt / mppt_v_phys if mppt_v_phys > 0 else 0  # A
             mppt.append({
-                'voltage': 380 + i*5 + sun*20,
-                'current': 12*sun + i*0.5
+                'voltage': int(mppt_v_phys * 10),   # 0.1V raw
+                'current': int(mppt_c_phys * 100),   # 0.01A raw
             })
-        
-        strings = [8.5*sun + i*0.2 for i in range(8)]
+
+        # String: raw 0.01A 단위
+        str_count = getattr(self.reg_module, 'STRING_CHANNELS', 8)
+        strings_per_mppt = max(str_count // max(mppt_count, 1), 1)
+        strings = []
+        for i in range(str_count):
+            mppt_idx = min(i // strings_per_mppt, mppt_count - 1)
+            str_c = mppt[mppt_idx]['current'] / strings_per_mppt if mppt_count > 0 else 0
+            strings.append(int(str_c))
         
         return {
             'pv_voltage': pv_v,
