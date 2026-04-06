@@ -949,51 +949,74 @@ def _gen_read_blocks(all_regs: List[RegisterRow], fc_code: int = 3,
 
     모니터링/상태/알람 레지스터를 연속 블록으로 묶어 Modbus 트랜잭션 수를 최소화.
     FLOAT32/U32/S32는 2개 레지스터를 차지한다.
-    fc_code: 3=FC03 Holding Registers, 4=FC04 Input Registers
-    gap_tolerance: 이 간격(레지스터 수) 이하의 빈 공간은 같은 블록으로 병합 (기본 32)
+    fc_code: 기본 FC (3=Holding, 4=Input).
+    개별 레지스터의 reg.fc가 기본과 다르면 별도 블록으로 분리.
+    gap_tolerance: 이 간격 이하의 빈 공간은 같은 블록으로 병합 (기본 32)
     """
     read_cats = {'MONITORING', 'STATUS', 'ALARM'}
     two_reg_types = {'FLOAT32', 'U32', 'S32'}
-    addr_sizes = []
+
+    # (fc, address, size) 수집 — 개별 레지스터 FC 참조
+    entries = []
     for reg in all_regs:
         if reg.category not in read_cats:
             continue
         if not isinstance(reg.address, int):
             continue
         size = 2 if (reg.data_type or '').upper() in two_reg_types else 1
-        addr_sizes.append((reg.address, size))
+        # 개별 FC: reg.fc가 있으면 사용, 없으면 기본 fc_code
+        reg_fc_str = str(getattr(reg, 'fc', '') or '').strip()
+        if reg_fc_str in ('3', '03', 'FC03'):
+            reg_fc = 3
+        elif reg_fc_str in ('4', '04', 'FC04'):
+            reg_fc = 4
+        else:
+            reg_fc = fc_code  # 기본 FC
+        entries.append((reg_fc, reg.address, size))
 
-    if not addr_sizes:
+    if not entries:
         return "\nREAD_BLOCKS = []\n"
 
-    # 중복 제거 후 정렬
-    seen: set = set()
-    unique = []
-    for addr, size in sorted(addr_sizes):
-        if addr not in seen:
-            seen.add(addr)
-            unique.append((addr, size))
+    # FC별로 분리 후 각각 블록 그룹화
+    from collections import defaultdict
+    by_fc = defaultdict(list)
+    for fc, addr, size in entries:
+        by_fc[fc].append((addr, size))
 
-    # 연속 블록 그룹화
-    blocks = []
-    blk_start, blk_end = unique[0][0], unique[0][0] + unique[0][1]
-    for addr, size in unique[1:]:
-        if addr <= blk_end + gap_tolerance:
-            blk_end = max(blk_end, addr + size)
-        else:
-            blocks.append((blk_start, blk_end - blk_start))
-            blk_start, blk_end = addr, addr + size
-    blocks.append((blk_start, blk_end - blk_start))
+    all_blocks = []  # (start, count, fc)
+    for fc in sorted(by_fc.keys()):
+        addr_sizes = by_fc[fc]
+        # 중복 제거 후 정렬
+        seen: set = set()
+        unique = []
+        for addr, size in sorted(addr_sizes):
+            if addr not in seen:
+                seen.add(addr)
+                unique.append((addr, size))
+        if not unique:
+            continue
+
+        # 연속 블록 그룹화
+        blk_start, blk_end = unique[0][0], unique[0][0] + unique[0][1]
+        for addr, size in unique[1:]:
+            if addr <= blk_end + gap_tolerance:
+                blk_end = max(blk_end, addr + size)
+            else:
+                all_blocks.append((blk_start, blk_end - blk_start, fc))
+                blk_start, blk_end = addr, addr + size
+        all_blocks.append((blk_start, blk_end - blk_start, fc))
+
+    # 주소 순 정렬
+    all_blocks.sort(key=lambda x: (x[0], x[2]))
 
     lines = ['\n', '# RTU 배치 읽기 블록 — start/count/fc 지정으로 트랜잭션 최소화',
              'READ_BLOCKS = [']
-    for start, count in blocks:
-        # Modbus 최대 레지스터 수(125) 초과 시 분할
+    for start, count, fc in all_blocks:
         MAX_REG = 125
         off = 0
         while off < count:
             c = min(MAX_REG, count - off)
-            lines.append(f"    {{'start': 0x{start + off:04X}, 'count': {c:3d}, 'fc': {fc_code}}},")
+            lines.append(f"    {{'start': 0x{start + off:04X}, 'count': {c:3d}, 'fc': {fc}}},")
             off += c
     lines.append(']')
     lines.append('')
