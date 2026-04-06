@@ -117,7 +117,12 @@ class ProtocolHandler:
             strings = data.get('strings', [])[:255]  # Max 255 strings (1-byte count)
             str_body = struct.pack('>B', len(strings))
             for s in strings:
-                str_body += struct.pack('>H', int(s / 10))
+                # s가 dict이면 raw_current/current 키에서 값 추출
+                if isinstance(s, dict):
+                    s_val = s.get('raw_current', s.get('current', 0))
+                else:
+                    s_val = s
+                str_body += struct.pack('>H', _u16(int(s_val) // 10))
             body += str_body
 
         return header + body, sequence

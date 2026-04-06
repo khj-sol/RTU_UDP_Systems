@@ -1293,7 +1293,8 @@ class RTUClient:
         try:
             self._send_periodic_inner(sent_packets)
         except Exception as e:
-            self.logger.error(f"Send periodic error: {e}")
+            import traceback
+            self.logger.error(f"Send periodic error: {e}\n{traceback.format_exc()}")
         finally:
             # Ensure _batch_receiving is always cleared
             if sent_packets:
