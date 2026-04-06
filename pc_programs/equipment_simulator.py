@@ -390,9 +390,9 @@ class InverterSimulator:
         self.store.setValues(3, RegisterMap.FIRMWARE_VERSION, fw_regs)
         
         # Device info registers
-        self.store.setValues(3, RegisterMap.MPPT_COUNT, [self.mppt_count])
-        self.store.setValues(3, RegisterMap.NOMINAL_POWER_LOW, [self.NOMINAL_POWER & 0xFFFF])
-        self.store.setValues(3, RegisterMap.NOMINAL_POWER_HIGH, [(self.NOMINAL_POWER >> 16) & 0xFFFF])
+        self.store.setValues(3, RegisterMap.MPPT_NUMBER, [self.mppt_count])
+        self.store.setValues(3, RegisterMap.NOMINAL_ACTIVE_POWER_LOW_WORD, [self.NOMINAL_POWER & 0xFFFF])
+        self.store.setValues(3, RegisterMap.NOMINAL_ACTIVE_POWER_HIGH_WORD, [(self.NOMINAL_POWER >> 16) & 0xFFFF])
         self.store.setValues(3, RegisterMap.GRID_PHASE_NUMBER, [3])
         self.store.setValues(3, RegisterMap.NOMINAL_VOLTAGE, [3800])
         self.store.setValues(3, RegisterMap.NOMINAL_FREQUENCY, [6000])
