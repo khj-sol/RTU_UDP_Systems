@@ -484,17 +484,19 @@ def _add_h01_mapping_sheet(wb, s1: dict, openpyxl_module) -> None:
         cell.fill = hdr_fill
         cell.border = thin
 
-    # 자동 매칭 빌드: h01_field → (UPPER_SNAKE_CASE, address_hex)
-    h01_auto: dict = {}
+    # 자동 매칭 빌드: h01_field → [(name, addr_hex), ...] (복수 매칭 지원)
+    h01_auto: Dict[str, List[Tuple[str, str]]] = {}
     all_cats = (s1.get('monitoring', []) + s1.get('info', []) +
                 s1.get('status', []) + s1.get('alarm', []))
     for reg in all_cats:
         h01 = (getattr(reg, 'h01_field', '') or '').strip()
-        if h01 and h01 not in h01_auto:
+        if h01:
             name = to_upper_snake(reg.definition)
             addr = getattr(reg, 'address_hex', '') or ''
             if name:
-                h01_auto[h01] = (name, addr)
+                entries = h01_auto.setdefault(h01, [])
+                if not any(e[0] == name for e in entries):
+                    entries.append((name, addr))
 
     # 전체 레지스터 목록 (H열, 드롭다운용) — 이름만
     avail_entries: list = []
@@ -511,9 +513,14 @@ def _add_h01_mapping_sheet(wb, s1: dict, openpyxl_module) -> None:
     # 데이터 행
     for i, (field, desc) in enumerate(_H01_MAPPING_FIELDS):
         row = DATA_START + i
-        auto = h01_auto.get(field)
-        if auto:
-            matched_display = f'{auto[0]} ({auto[1]})' if auto[1] else auto[0]
+        matched_list = h01_auto.get(field, [])
+
+        # D열: 매칭된 레지스터 전부 표시 (세미콜론 구분)
+        if matched_list:
+            parts = []
+            for name, addr in matched_list:
+                parts.append(f'{name} ({addr})' if addr else name)
+            matched_display = '; '.join(parts)
         else:
             matched_display = ''
 
@@ -523,11 +530,13 @@ def _add_h01_mapping_sheet(wb, s1: dict, openpyxl_module) -> None:
 
         cell_d = ws.cell(row=row, column=4, value=matched_display)
         cell_d.border = thin
-        cell_d.fill = auto_fill if auto else empty_fill
+        cell_d.fill = auto_fill if matched_list else empty_fill
 
-        # 추천 후보 (E~G열)
+        # 추천 후보 (E~G열) — 이미 매칭된 레지스터는 제외
+        matched_names = {e[0] for e in matched_list}
         candidates = _suggest_candidates(field, all_cats)
-        for ci, cand in enumerate(candidates[:3]):
+        filtered = [c for c in candidates if c['name'] not in matched_names]
+        for ci, cand in enumerate(filtered[:3]):
             val = f'{cand["name"]} ({cand["addr_hex"]})' if cand['addr_hex'] else cand['name']
             cell = ws.cell(row=row, column=5 + ci, value=val)
             cell.border = thin
