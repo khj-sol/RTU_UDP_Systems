@@ -88,6 +88,15 @@ class RegisterMap:
     DER_ACTIVE_POWER_PCT                     = 0x07D3
     INVERTER_ON_OFF                          = 0x0834
 
+    # --- Simulator compatibility aliases (2-MPPT / 4-string 시뮬레이션용) ---
+    MPPT1_CURRENT                            = 0x7557  # FLOAT32, MPPT1 전류 (spec에 없지만 시뮬레이터용)
+    MPPT2_VOLTAGE                            = 0x75B0  # FLOAT32, MPPT2 전압 (시뮬레이터 전용 가상 주소)
+    MPPT2_CURRENT                            = 0x75B2  # FLOAT32, MPPT2 전류 (시뮬레이터 전용 가상 ���소)
+    R_PHASE_CURRENT                          = 0x75B4  # FLOAT32, R상 전류 (시뮬레이터 전용 가상 주소)
+    S_PHASE_CURRENT                          = 0x75B6  # FLOAT32, S상 전류 (시뮬레이터 ���용 가상 주소)
+    T_PHASE_CURRENT                          = 0x75B8  # FLOAT32, T상 전류 (시뮬레이터 전용 가상 주소)
+    STRING3_CURRENT                          = 0x75BA  # U16, 스트링3 전류 (시뮬레이터 전용 가상 주소)
+    STRING4_CURRENT                          = 0x75BB  # U16, ��트링4 전류 (시뮬레이터 전용 가상 주소)
 
 
 class InverterMode:

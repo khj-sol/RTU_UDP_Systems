@@ -246,6 +246,10 @@ class RegisterMap:
     DER_ACTIVE_POWER_PCT                     = 0x07D3
     INVERTER_ON_OFF                          = 0x0834
 
+    # --- Simulator compatibility aliases (removed during regeneration) ---
+    AC_POWER                                 = 0x13A9  # U32, Total Active Power
+    AC_POWER_HIGH                            = 0x13AA
+    MPPT1_VOLTAGE                            = PV_VOLTAGE  # 0x1393
 
 
 class InverterMode:

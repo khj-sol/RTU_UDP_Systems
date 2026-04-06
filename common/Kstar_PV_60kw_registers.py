@@ -233,6 +233,39 @@ class RegisterMap:
     DER_ACTIVE_POWER_PCT                     = 0x07D3
     INVERTER_ON_OFF                          = 0x0834
 
+    # --- Simulator compatibility aliases (removed during regeneration) ---
+    MODEL_NAME_BASE                          = MACHINE_MODEL         # 0x0C80
+    ARM_VERSION                              = 0x0C90
+    DSP_VERSION                              = 0x0C91
+    SERIAL_NUMBER_BASE                       = 0x0C9C
+    PV1_VOLTAGE                              = PV_VOLTAGE            # 0x0BB8
+    PV1_CURRENT                              = PV1_INPUT_CURRENT     # 0x0BBB
+    PV1_POWER                                = 0x0BD0
+    DAILY_PRODUCTION                         = DAILY_ENERGY           # 0x001F
+    CUMULATIVE_PRODUCTION_L                  = CUMULATIVE_ENERGY      # 0x0BDE
+    SYSTEM_STATUS                            = OPERATING_MODE_OF_THEINVERTER  # 0x0BD6
+    INVERTER_STATUS                          = OPERATING_MODE_OF_THEINVERTER
+    INVERTER_MODE                            = OPERATING_MODE_OF_THEINVERTER
+    RADIATOR_TEMP                            = 0x0BD1
+    CHASSIS_TEMP                             = TEMPERATURE            # 0x0013
+    GRID_R_VOLTAGE                           = L1_VOLTAGE             # 0x0BC7
+    GRID_FREQUENCY                           = FREQUENCY              # 0x0BDA
+    INV_R_VOLTAGE                            = L1_VOLTAGE
+    INV_R_CURRENT                            = L1_CURRENT             # 0x0C34
+    INV_R_POWER                              = I_V_SCAN_STATUS        # 0x0C36 (shared)
+    INV_S_VOLTAGE                            = L2_VOLTAGE             # 0x0014
+    INV_S_CURRENT                            = S_PHASE_GRID_TIED_CURRENT  # 0x0BCD
+    INV_S_FREQUENCY                          = FREQUENCY
+    INV_S_POWER                              = 0x0C3D
+    INV_T_VOLTAGE                            = L3_VOLTAGE             # 0x001E
+    INV_T_CURRENT                            = L3_CURRENT             # 0x0C43
+    INV_T_POWER                              = 0x0C44
+    IV_SCAN_COMMAND                          = 0x0FC3
+    IV_SCAN_STATUS                           = I_V_SCAN_STATUS        # 0x0C36
+    IV_DATA_BASE                             = 0x1388
+    IV_POINTS_PER_STRING                     = 100
+    IV_REGS_PER_STRING                       = 200
+
     # =========================================================================
     # IV Scan Data Registers
     # 3 trackers x 0 strings x 64 data points
