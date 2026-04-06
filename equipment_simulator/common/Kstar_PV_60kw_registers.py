@@ -292,6 +292,10 @@ class IVScanStatus:
 
 
 
+    # RTU KstarModbusHandler 호환 alias
+    BLOCK1_COUNT = 125  # FC04 Block 1
+    BLOCK2_COUNT = 125  # FC04 Block 2
+
 class InverterMode:
     """Inverter Mode Table (0x101D)"""
     INITIAL      = 0x00

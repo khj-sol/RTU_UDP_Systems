@@ -345,6 +345,18 @@ class RegisterMap:
 
 
 
+    # RTU HuaweiModbusHandler 호환 alias
+    PV_STRING_BASE = PV_VOLTAGE  # 0x7D10
+    INPUT_POWER = 0x7D40
+    PHASE_A_VOLTAGE = 0x7D45
+    PHASE_A_CURRENT = 0x7D48
+    PHASE_B_VOLTAGE = 0x7D46
+    PHASE_B_CURRENT = 0x7D4A
+    PHASE_C_VOLTAGE = 0x7D47
+    PHASE_C_CURRENT = 0x7D4C
+    ACTIVE_POWER = 0x7D50
+    ACCUMULATED_ENERGY = 0x7D6A
+
 class InverterMode:
     """Inverter Mode Table (0x101D)"""
     INITIAL      = 0x00
