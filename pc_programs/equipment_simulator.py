@@ -756,9 +756,10 @@ class InverterSimulator:
             voltages = generate_iv_voltage_data(voc, 200.0, self.iv_scan_data_points)
             self.store.setValues(3, v_regs['base'], voltages)
 
+            isc_cap = _calc_isc_cap(voc, self.NOMINAL_POWER, self.string_count)
             for string in range(1, self.strings_per_mppt + 1):
                 string_idx = (mppt - 1) * self.strings_per_mppt + (string - 1)
-                isc = self.string_isc[string_idx] * sun_frac + random.uniform(-0.2, 0.2)
+                isc = min(self.string_isc[string_idx], isc_cap) * sun_frac + random.uniform(-0.2, 0.2)
                 isc = max(0.5, isc)
 
                 currents = generate_iv_current_data(isc, voc, 200.0, self.iv_scan_data_points)
@@ -1501,9 +1502,11 @@ class KstarSimulator:
         data_points = KstarRegisters.IV_POINTS_PER_STRING  # 100
         sun_frac = max(0.1, self.env.get_sun_fraction())
 
+        total_strings = mppt_count * strings_per_mppt
         for mppt in range(mppt_count):
             voc = 750.0 + mppt * 10.0 + random.uniform(-5, 5)
-            isc_base = 12.0 * sun_frac
+            # Isc 상한: 정규화 Pmpp(Isc=1)로 역산 → 합산 ≤ 인버터 용량
+            isc_base = _calc_isc_cap(voc, self.NOMINAL_POWER, total_strings) * sun_frac
 
             voltages = generate_iv_voltage_data(voc, 200.0, data_points)
 
@@ -3047,6 +3050,27 @@ def _load_device_models_ini():
 def _load_inverter_models():
     """Load inverter models (backward compatible)"""
     return _load_device_models_ini()['inverter']
+
+
+def _calc_isc_cap(voc, nominal_power_w, total_strings):
+    """Isc 상한 계산: 전 스트링 Pmpp 합산 ≤ 인버터 용량.
+
+    정규화 Pmpp(Isc=1)를 단일 다이오드 모델로 계산하여 역산.
+    """
+    ns = max(1, voc / 50.0)
+    n_vt_ns = 1.3 * 0.026 * ns
+    # 정규화 Pmpp (Isc=1일 때 최대 파워)
+    pmpp_norm = 0
+    for i in range(200):
+        v = 200 + (voc - 200) * i / 199
+        cur = 1.0 - math.exp((v - voc) / n_vt_ns)
+        cur = max(0.0, min(1.0, cur))
+        p = v * cur
+        if p > pmpp_norm:
+            pmpp_norm = p
+    if pmpp_norm <= 0:
+        return 10.0  # fallback
+    return nominal_power_w / (total_strings * pmpp_norm)
 
 
 def _create_inverter_by_protocol(protocol, logger, env=None):
