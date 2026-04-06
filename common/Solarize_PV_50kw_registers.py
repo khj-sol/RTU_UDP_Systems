@@ -135,6 +135,7 @@ class RegisterMap:
     INVERTER_ON_OFF                          = 0x0834
     MPPT1_VOLTAGE                            = PV_VOLTAGE
     DER_AVM_DIGITAL_METERCONNECT_STATUS      = 0x1210
+    POWER_FACTOR_SET                          = DER_POWER_FACTOR_SET  # RTU alias
 
     # =========================================================================
     # IV Scan Data Registers

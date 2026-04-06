@@ -275,6 +275,7 @@ class RegisterMap:
     # RTU KstarModbusHandler 호환 alias
     BLOCK1_COUNT                             = 125     # FC04 Block 1
     BLOCK2_COUNT                             = 125     # FC04 Block 2
+    DSP_ALARM_CODE_L                         = 0x0BD3  # DSP alarm low word
 
 class IVScanCommand:
     """IV Scan Command values for writing to 0x600D"""
