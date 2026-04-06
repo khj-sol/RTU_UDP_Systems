@@ -194,6 +194,20 @@ class RegisterMap:
 
 
 
+
+    # --- DER-AVM Real-time Monitoring Registers (0x03E8~0x03FD, S32) ---
+    DEA_L1_CURRENT                           = 0x03E8  # S32, 0.1A
+    DEA_L2_CURRENT                           = 0x03EA  # S32, 0.1A
+    DEA_L3_CURRENT                           = 0x03EC  # S32, 0.1A
+    DEA_L1_VOLTAGE                           = 0x03EE  # S32, 0.1V
+    DEA_L2_VOLTAGE                           = 0x03F0  # S32, 0.1V
+    DEA_L3_VOLTAGE                           = 0x03F2  # S32, 0.1V
+    DEA_TOTAL_ACTIVE_POWER                   = 0x03F4  # S32, 0.1kW
+    DEA_REACTIVE_POWER                       = 0x03F6  # S32, Var
+    DEA_POWER_FACTOR                         = 0x03F8  # S32, 0.001
+    DEA_FREQUENCY                            = 0x03FA  # S32, 0.1Hz
+    DEA_STATUS_FLAG                          = 0x03FC  # S32, bitmap
+
 class InverterMode:
     """Inverter Mode Table (0x101D)"""
     INITIAL      = 0x00
@@ -1256,6 +1270,7 @@ READ_BLOCKS = [
     {'start': 0x838F, 'count':  27, 'fc': 3},
     {'start': 0x8EA0, 'count':   1, 'fc': 3},
     {'start': 0xA9F2, 'count':   2, 'fc': 3},
+    {'start': 0x03E8, 'count':  22, 'fc': 3},
 ]
 
 
