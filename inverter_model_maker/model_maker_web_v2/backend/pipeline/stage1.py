@@ -1619,8 +1619,36 @@ def build_h01_match_table(categorized: dict, meta: dict) -> List[dict]:
     # MONITORING 레지스터 주소와 겹치는 alarm 제거 (PDF 파싱 오류 방지)
     mon_addrs = {r.address for r in categorized.get('MONITORING', [])
                  if isinstance(r.address, int)}
-    alarm_regs = [r for r in alarm_regs
-                  if not isinstance(r.address, int) or r.address not in mon_addrs]
+    # ALARM 중 MPPT/DC 레지스터 주소 범위에 있는 것을 MONITORING으로 재분류
+    # (PDF 파싱에서 DC voltage/current가 ERROR_CODE로 오인된 경우)
+    reclassified = []
+    clean_alarms = []
+    for r in alarm_regs:
+        if isinstance(r.address, int) and r.address in mon_addrs:
+            continue  # MONITORING과 주소 겹침 → 제거
+        # 주변 주소에 DC/PV voltage/current가 있으면 MONITORING으로 재분류
+        if isinstance(r.address, int):
+            neighbors = [reg for reg in categorized.get('MONITORING', [])
+                         if isinstance(reg.address, int) and abs(reg.address - r.address) <= 4]
+            dc_neighbors = [n for n in neighbors
+                           if any(k in n.definition.lower() for k in ['dc voltage', 'dc current',
+                                  'dc_voltage', 'dc_current', 'pv voltage', 'pv current'])]
+            if dc_neighbors:
+                # DC 영역에 있는 alarm → MONITORING으로 이동
+                r.category = 'MONITORING'
+                # 주소 패턴으로 MPPT 번호 추정 (DC voltage 1=base, 2=base+2, ...)
+                base_addr = min(n.address for n in dc_neighbors)
+                offset = r.address - base_addr
+                mppt_n = (offset // 2) + 1  # 2개씩 (voltage+current)
+                if offset % 2 == 0:  # 짝수 offset = voltage
+                    r.h01_field = f'mppt{mppt_n}_voltage'
+                else:  # 홀수 offset = current
+                    r.h01_field = f'mppt{mppt_n}_current'
+                categorized['MONITORING'].append(r)
+                reclassified.append(r)
+                continue
+        clean_alarms.append(r)
+    alarm_regs = clean_alarms
     alarm_dist = distribute_alarms(alarm_regs)
     # alarm1이 없으면 MONITORING 범주에서 fault/alarm code 레지스터 검색
     if not alarm_dist.get('alarm1'):
