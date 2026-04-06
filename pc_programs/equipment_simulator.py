@@ -842,6 +842,10 @@ class GenericInverterSimulator:
         self.control_mode = 'PF'
         self.operation_mode = 0
 
+        # IV Scan state
+        self.iv_scan_status = IVScanStatus.IDLE
+        self._iv_strings_read = set()
+
         # Resolve scale factors
         self._s_voltage = self.scale.get('voltage', 0.1)
         self._s_current = self.scale.get('current', 0.01)
@@ -852,6 +856,7 @@ class GenericInverterSimulator:
         self._pv_v_nom = [3900 + i * 50 for i in range(self.mppt_channels)]
 
         self.store = self._create_datastore()
+        self._init_iv_scan_data()
         self._current = {}
         self._current_lock = threading.Lock()
 
@@ -942,6 +947,37 @@ class GenericInverterSimulator:
         addr = self._find_addr('INVERTER_ON_OFF')
         if addr is not None:
             self.store.setValues(fc, addr, [self.on_off])
+
+    def _init_iv_scan_data(self):
+        """Pre-generate IV scan curve data into registers (0x8000+)."""
+        get_iv_v = getattr(self._module, 'generate_iv_voltage_data', None)
+        get_iv_i = getattr(self._module, 'generate_iv_current_data', None)
+        get_iv_v_regs = getattr(self._module, 'get_iv_tracker_voltage_registers', None)
+        get_iv_i_regs = getattr(self._module, 'get_iv_string_current_registers', None)
+        if not all([get_iv_v, get_iv_i, get_iv_v_regs, get_iv_i_regs]):
+            return
+        fc = self.fc_code + 1 if self.fc_code == 4 else 3
+        strings_per_mppt = max(self.string_channels // max(self.mppt_channels, 1), 1)
+        for mppt_idx in range(1, self.mppt_channels + 1):
+            voc = 42.0 + mppt_idx * 0.5
+            isc = 10.5 - mppt_idx * 0.3
+            v_min = voc * 0.3
+            try:
+                v_info = get_iv_v_regs(mppt_idx)
+                v_data = get_iv_v(voc, v_min, v_info['count'])
+                self.store.setValues(fc, v_info['base'], v_data)
+            except (ValueError, KeyError):
+                continue
+            for s in range(1, strings_per_mppt + 1):
+                try:
+                    i_info = get_iv_i_regs(mppt_idx, s)
+                    i_data = get_iv_i(isc * (1.0 - 0.05 * s), voc, v_min, i_info['count'])
+                    self.store.setValues(fc, i_info['base'], i_data)
+                except (ValueError, KeyError):
+                    pass
+        # IV Scan Status register (0x600D)
+        iv_status_addr = getattr(self.reg_map, 'IV_SCAN_STATUS', 0x600D)
+        self.store.setValues(fc, iv_status_addr, [IVScanStatus.IDLE])
 
     def _get_sun_factor(self):
         """Get sun factor from shared environment."""
@@ -1200,6 +1236,16 @@ class GenericInverterSimulator:
             val = self._get_reg(addr)[0]
             if val != self.operation_mode:
                 self.operation_mode = val
+
+        # IV Scan command (0x600D): 1=Start → set FINISHED after delay
+        iv_cmd_addr = getattr(self.reg_map, 'IV_SCAN_COMMAND', 0x600D)
+        iv_status_addr = getattr(self.reg_map, 'IV_SCAN_STATUS', 0x600D)
+        val = self._get_reg(iv_cmd_addr)
+        if val and val[0] == IVScanCommand.ACTIVE and self.iv_scan_status == IVScanStatus.IDLE:
+            self.iv_scan_status = IVScanStatus.FINISHED
+            fc = self.fc_code + 1 if self.fc_code == 4 else 3
+            self.store.setValues(fc, iv_status_addr, [IVScanStatus.FINISHED])
+            self.logger.info(f"[{self.protocol_name}] IV Scan -> FINISHED")
 
 
 # =============================================================================
