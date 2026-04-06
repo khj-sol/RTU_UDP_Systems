@@ -377,12 +377,12 @@ class InverterSimulator:
         # Model name (16 registers = 32 bytes, matching RTU read_model_info)
         model_bytes = self.MODEL_NAME.encode('utf-8').ljust(32, b'\x00')
         model_regs = [(model_bytes[i*2] << 8) | model_bytes[i*2+1] for i in range(16)]
-        self.store.setValues(3, RegisterMap.DEVICE_MODEL, model_regs)
+        self.store.setValues(3, RegisterMap.DEVICE_MODEL_NAME, model_regs)
 
         # Serial number (8 registers = 16 bytes)
         serial_bytes = self.SERIAL_NUMBER.encode('utf-8').ljust(16, b'\x00')
         serial_regs = [(serial_bytes[i*2] << 8) | serial_bytes[i*2+1] for i in range(8)]
-        self.store.setValues(3, RegisterMap.SERIAL_NUMBER, serial_regs)
+        self.store.setValues(3, RegisterMap.DEVICE_SERIAL_NUMBER, serial_regs)
         
         # Firmware version (3 registers)
         fw_bytes = self.FIRMWARE_VERSION.encode('utf-8').ljust(6, b'\x00')
