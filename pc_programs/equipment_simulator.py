@@ -855,10 +855,10 @@ class GenericInverterSimulator:
         # PV nominal voltages per MPPT (0.1V units → ~390V)
         self._pv_v_nom = [3900 + i * 50 for i in range(self.mppt_channels)]
 
-        self.store = self._create_datastore()
-        self._init_iv_scan_data()
         self._current = {}
         self._current_lock = threading.Lock()
+        self.store = self._create_datastore()
+        self._init_iv_scan_data()
 
         self.logger.info(f"[GENERIC] Loaded protocol '{protocol_name}' | "
                          f"MPPT={self.mppt_channels} STR={self.string_channels} FC={self.fc_code:02d}")
