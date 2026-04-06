@@ -216,6 +216,18 @@ class RegisterMap:
     MPPT1_CURRENT                            = PV1_INPUT_CURRENT
     PV_STRING_COUNT                          = 3
 
+    # --- STRING alias (modbus_handler: STRING{N}_CURRENT 형식) ---
+    # Kstar: 3 MPPT × 3 strings = 9 strings
+    STRING1_CURRENT                          = PV1_STRING_CURRENT_1
+    STRING2_CURRENT                          = PV1_STRING_CURRENT_2
+    STRING3_CURRENT                          = PV1_STRING_CURRENT_3
+    STRING4_CURRENT                          = PV2_STRING_CURRENT_1
+    STRING5_CURRENT                          = PV2_STRING_CURRENT_2
+    STRING6_CURRENT                          = PV2_STRING_CURRENT_3
+    STRING7_CURRENT                          = PV3_STRING_CURRENT_1
+    STRING8_CURRENT                          = 0x0C01  # PV3_STRING_CURRENT_2
+    STRING9_CURRENT                          = 0x0C02  # PV3_STRING_CURRENT_3
+
     # --- RTU modbus_handler / simulator 필수 alias ---
     INNER_TEMP                               = TEMPERATURE
     INVERTER_MODE                            = INVERTER_STATUS
@@ -545,7 +557,7 @@ SCALE = {
 
 # Channel configuration (used by modbus_handler for dynamic array sizing)
 MPPT_CHANNELS = 3
-STRING_CHANNELS = 0
+STRING_CHANNELS = 9
 
 
 def registers_to_u32(low, high):
@@ -755,6 +767,16 @@ DATA_TYPES = {
     'PV2_STRING_CURRENT_3': 'S16',
     'PV2_STRING_CURRENT_4': 'S16',
     'PV3_STRING_CURRENT_1': 'S16',
+    # STRING alias data types
+    'STRING1_CURRENT': 'S16',
+    'STRING2_CURRENT': 'S16',
+    'STRING3_CURRENT': 'S16',
+    'STRING4_CURRENT': 'S16',
+    'STRING5_CURRENT': 'S16',
+    'STRING6_CURRENT': 'S16',
+    'STRING7_CURRENT': 'S16',
+    'STRING8_CURRENT': 'S16',
+    'STRING9_CURRENT': 'S16',
     'RUNNING_TIME': 'U32',
     'SECOND': 'U16',
     'REG_485ADDRESS2': 'U16',
@@ -815,7 +837,7 @@ FLOAT32_FIELDS: set = set()
 # String 전류 모니터링 지원 여부
 # True: String별 전류 레지스터 있음 (Solarize, Senergy, Kstar 등)
 # False: String 전류 레지스터 없음 (Huawei 등 — PV 전류만 제공)
-STRING_CURRENT_MONITOR = False
+STRING_CURRENT_MONITOR = True
 
 
 
