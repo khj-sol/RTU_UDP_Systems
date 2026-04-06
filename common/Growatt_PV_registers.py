@@ -204,6 +204,10 @@ class RegisterMap:
     CUMULATIVE_ENERGY_LOW                    = CUMULATIVE_ENERGY
     DER_AVM_DIGITAL_METERCONNECT_STATUS      = 0x1210
 
+    # --- STRING alias (2 strings: MPPT당 1 string) ---
+    STRING1_CURRENT                          = CURR_STRING1
+    STRING2_CURRENT                          = CURR_STRING2
+
 
 
 class InverterMode:
@@ -982,7 +986,7 @@ SCALE = {
 
 # Channel configuration (used by modbus_handler for dynamic array sizing)
 MPPT_CHANNELS = 2
-STRING_CHANNELS = 0
+STRING_CHANNELS = 2
 
 
 def registers_to_u32(low, high):
