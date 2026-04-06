@@ -1151,7 +1151,9 @@ class ModbusHandlerHAT:
             status['on_off'] = result[0] if result else 0  # 0=ON, 1=OFF (no conversion needed)
 
             # Power Factor (signed, raw value -1000~1000)
-            result = self.master.read_holding_registers(self.RegMap.POWER_FACTOR_SET, 1, self.slave_id)
+            pf_reg = getattr(self.RegMap, 'POWER_FACTOR_SET',
+                             getattr(self.RegMap, 'DER_POWER_FACTOR_SET', 0x07D0))
+            result = self.master.read_holding_registers(pf_reg, 1, self.slave_id)
             if result:
                 pf = result[0]
                 if pf > 32767:
@@ -1161,11 +1163,15 @@ class ModbusHandlerHAT:
                 status['power_factor'] = 1000
 
             # Operation Mode
-            result = self.master.read_holding_registers(self.RegMap.OPERATION_MODE, 1, self.slave_id)
+            mode_reg = getattr(self.RegMap, 'OPERATION_MODE',
+                               getattr(self.RegMap, 'DER_ACTION_MODE', 0x07D1))
+            result = self.master.read_holding_registers(mode_reg, 1, self.slave_id)
             status['operation_mode'] = result[0] if result else 0
 
             # Reactive Power % (signed, raw value -1000~1000)
-            result = self.master.read_holding_registers(self.RegMap.REACTIVE_POWER_SET, 1, self.slave_id)
+            rp_reg = getattr(self.RegMap, 'REACTIVE_POWER_SET',
+                             getattr(self.RegMap, 'DER_REACTIVE_POWER_PCT', 0x07D2))
+            result = self.master.read_holding_registers(rp_reg, 1, self.slave_id)
             if result:
                 rp = result[0]
                 if rp > 32767:
@@ -1175,7 +1181,9 @@ class ModbusHandlerHAT:
                 status['reactive_power_pct'] = 0
 
             # Active Power % (raw value 0~1000)
-            result = self.master.read_holding_registers(self.RegMap.ACTIVE_POWER_PCT, 1, self.slave_id)
+            ap_reg = getattr(self.RegMap, 'ACTIVE_POWER_PCT',
+                             getattr(self.RegMap, 'DER_ACTIVE_POWER_PCT', 0x07D3))
+            result = self.master.read_holding_registers(ap_reg, 1, self.slave_id)
             status['active_power_pct'] = result[0] if result else 1000
 
             # IV Scan Status (0x600D): 0=Idle, 1=Running, 2=Finished
