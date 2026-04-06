@@ -47,7 +47,7 @@ DEFAULT_UDP_PORT    = 9100
 DEFAULT_SERVER_PORT = 9100
 DEVICE_SEND_INTERVAL = 0.1   # seconds between H01 sends (batch)
 BATCH_ACK_TIMEOUT   = 30     # seconds to wait for batch ACKs
-FIRST_CONN_WAIT     = 60     # seconds to wait after first connection / recovery
+FIRST_CONN_WAIT     = 10     # seconds to wait after first connection / recovery
 MODBUS_POLL_INTERVAL = 10    # seconds between Modbus polling cycles
 
 # ─── Platform Detection ───────────────────────────────────────────────────────
@@ -115,7 +115,7 @@ class SimpleConfig:
             if self.cfg.has_section('RTU'):
                 self.rtu_id     = self.cfg.getint('RTU', 'rtu_id', fallback=10000001)
                 self.local_port = self.cfg.getint('RTU', 'local_port', fallback=DEFAULT_UDP_PORT)
-                self.comm_period = self.cfg.getint('RTU', 'communication_period', fallback=60)
+                self.comm_period = self.cfg.getint('RTU', 'communication_period', fallback=10)
 
             if self.cfg.has_section('SERVER'):
                 self.server_host = self.cfg.get('SERVER', 'primary_host', fallback='solarize.ddns.net')
