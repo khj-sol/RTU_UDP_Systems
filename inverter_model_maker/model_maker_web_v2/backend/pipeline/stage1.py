@@ -1588,23 +1588,23 @@ def build_h01_match_table(categorized: dict, meta: dict) -> List[dict]:
         for sr in categorized['STATUS']:
             dl = sr.definition.lower().replace('_', ' ')
             if any(k in dl for k in ['inverter mode', 'work mode', 'work state',
-                                      'operating mode', 'operation state',
-                                      'running status', 'inverter state',
-                                      'global state',
+                                      'working state', 'operating mode', 'operation state',
+                                      'running status', 'inverter state', 'inverter status',
+                                      'input mode', 'output mode', 'global state',
                                       '시스템동작상태', '동작상태']) or \
-               dl.strip() == 'state':
+               dl.strip() in ('state', 'mode', 'status'):
                 status_reg = sr
                 break
     if not status_reg:
         # MONITORING 범주에서도 status 키워드 검색 (MUST-PV 등 상태 레지스터가 모니터링 섹션에 있는 경우)
         _status_kws = ['inverter status', 'inverter mode', 'work mode', 'work state',
-                       'operating mode', 'operation state', 'running status',
+                       'working state', 'operating mode', 'operation state', 'running status',
                        'inverter state', 'operating status', 'global state',
-                       'device status', 'system status']
+                       'device status', 'system status', 'input mode', 'output mode']
         for cat_name in ('MONITORING', 'REVIEW'):
             for sr in categorized.get(cat_name, []):
                 dl = sr.definition.lower().replace('_', ' ')
-                if any(k in dl for k in _status_kws) or dl.strip() in ('state', 'running', 'st'):
+                if any(k in dl for k in _status_kws) or dl.strip() in ('state', 'mode', 'status', 'running', 'st'):
                     status_reg = sr
                     break
             if status_reg:
