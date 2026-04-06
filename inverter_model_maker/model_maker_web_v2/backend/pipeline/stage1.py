@@ -1697,17 +1697,46 @@ def build_h01_match_table(categorized: dict, meta: dict) -> List[dict]:
                 'note': '보조 알람 없음' if slot != 'alarm1' else '알람 미발견',
             })
 
-    # MPPT voltage를 먼저 모두 수집 → current 매칭 시 주소 근접성 활용
+    # MPPT voltage를 먼저 모두 수집 → 주소 근접성 검증
     mppt_v_addrs = {}  # {n: address}
     for n in range(1, max_mppt + 1):
         v_reg = _find_matched_reg(categorized, f'mppt{n}_voltage')
         if v_reg and isinstance(v_reg.address, int):
             mppt_v_addrs[n] = v_reg.address
 
+    # voltage 주소 연속성 검증: mppt1 기준으로 +2씩 패턴이면 벗어난 것 수정
+    if 1 in mppt_v_addrs and len(mppt_v_addrs) >= 2:
+        base = mppt_v_addrs[1]
+        # 연속 패턴(+2씩) 확인: mppt1=base, mppt2=base+2, mppt3=base+4, ...
+        consistent = sum(1 for n in range(1, max_mppt + 1)
+                         if n in mppt_v_addrs and mppt_v_addrs[n] == base + (n - 1) * 2)
+        if consistent >= 2:  # 2개 이상 연속 패턴이면
+            for n in range(1, max_mppt + 1):
+                expected = base + (n - 1) * 2
+                if n in mppt_v_addrs and mppt_v_addrs[n] != expected:
+                    # 주소가 패턴에서 벗어남 → expected 주소로 보정
+                    mppt_v_addrs[n] = expected
+
     for n in range(1, max_mppt + 1):
         for mtype in ['voltage', 'current']:
             field = f'mppt{n}_{mtype}'
             reg = _find_matched_reg(categorized, field)
+
+            # voltage인 경우 보정된 주소와 비교
+            if reg and mtype == 'voltage' and n in mppt_v_addrs and isinstance(reg.address, int):
+                if reg.address != mppt_v_addrs[n]:
+                    # 보정된 주소에 해당하는 레지스터 찾기
+                    target = mppt_v_addrs[n]
+                    for cat in ['MONITORING', 'ALARM', 'INFO']:
+                        for r in categorized.get(cat, []):
+                            if isinstance(r.address, int) and r.address == target:
+                                reg = r
+                                break
+                        if reg and isinstance(reg.address, int) and reg.address == target:
+                            break
+                    else:
+                        # 레지스터 없으면 주소 추정으로 생성
+                        reg = None
 
             # current인 경우 주소 근접성 검증 (voltage ±10 범위)
             if mtype == 'current' and n in mppt_v_addrs:
