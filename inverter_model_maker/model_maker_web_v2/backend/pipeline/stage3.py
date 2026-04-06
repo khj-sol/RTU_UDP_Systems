@@ -1037,7 +1037,6 @@ def _gen_data_parser(all_regs: List[RegisterRow], mppt_count: int, total_strings
         ('t_current',         'T_PHASE_CURRENT'),
         ('frequency',         'FREQUENCY'),
         ('ac_power',          'AC_POWER'),
-        ('temperature',       'INNER_TEMP'),
         ('cumulative_energy', 'TOTAL_ENERGY'),
         ('alarm1',            'ERROR_CODE1'),
     ]
