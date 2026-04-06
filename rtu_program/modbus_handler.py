@@ -1289,15 +1289,15 @@ class ModbusHandlerHAT:
             return None
         
         try:
-            # Guard: DEA registers may not exist in non-Solarize register modules
-            if not hasattr(self.RegMap, 'DEA_L1_CURRENT_LOW'):
-                self.logger.debug("read_monitor_data: DEA registers not available in this register module")
+            # Guard: DEA registers may not exist in register module
+            dea_start = getattr(self.RegMap, 'DEA_L1_CURRENT',
+                                getattr(self.RegMap, 'DEA_L1_CURRENT_LOW', None))
+            if dea_start is None:
+                self.logger.debug("read_monitor_data: DEA registers not available")
                 return None
 
             # Read entire DEA block at once (0x03E8 ~ 0x03FD = 22 registers)
-            result = self.master.read_holding_registers(
-                self.RegMap.DEA_L1_CURRENT_LOW, 22, self.slave_id
-            )
+            result = self.master.read_holding_registers(dea_start, 22, self.slave_id)
             
             if not result or len(result) < 22:
                 self.logger.error(f"Failed to read DEA block: result={result}, len={len(result) if result else 0}")
