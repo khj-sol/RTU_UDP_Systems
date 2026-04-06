@@ -633,6 +633,39 @@ def _gen_register_map(regs_by_cat: dict, mppt: int, total_strings: int,
         if _name not in all_defined:
             lines.append(f'    {_name:40s} = {_addr}')
             all_defined.add(_name)
+
+    # MPPT_NUMBER — MPPT 수 상수 (시뮬레이터 device info 등록용)
+    if 'MPPT_NUMBER' not in all_defined:
+        # INFO 카테고리에서 MPPT_NUMBER/MPPT_COUNT 주소 찾기, 없으면 고정 주소
+        _mppt_num_addr = None
+        for _mn in ['MPPT_NUMBER', 'MPPT_COUNT', 'NUMBER_OF_MPPT']:
+            if _mn in all_defined:
+                _mppt_num_addr = _mn
+                break
+        if _mppt_num_addr:
+            lines.append(f'    {"MPPT_NUMBER":40s} = {_mppt_num_addr}')
+        else:
+            lines.append(f'    {"MPPT_NUMBER":40s} = 0x1A4A  # default MPPT count register')
+        all_defined.add('MPPT_NUMBER')
+
+    # MPPT1_VOLTAGE — PV_VOLTAGE 또는 첫 MPPT 전압 alias
+    if 'MPPT1_VOLTAGE' not in all_defined:
+        if 'PV_VOLTAGE' in all_defined:
+            lines.append(f'    {"MPPT1_VOLTAGE":40s} = PV_VOLTAGE')
+        elif 'MPPT_1_VOLTAGE' in all_defined:
+            lines.append(f'    {"MPPT1_VOLTAGE":40s} = MPPT_1_VOLTAGE')
+        all_defined.add('MPPT1_VOLTAGE')
+
+    # CUMULATIVE_ENERGY_LOW — 누적 발전량 하위 워드 (없으면 CUMULATIVE_ENERGY 재사용)
+    if 'CUMULATIVE_ENERGY_LOW' not in all_defined:
+        if 'CUMULATIVE_ENERGY' in all_defined:
+            lines.append(f'    {"CUMULATIVE_ENERGY_LOW":40s} = CUMULATIVE_ENERGY')
+            all_defined.add('CUMULATIVE_ENERGY_LOW')
+
+    # DER_AVM_DIGITAL_METERCONNECT_STATUS — DER-AVM 연결 상태
+    if 'DER_AVM_DIGITAL_METERCONNECT_STATUS' not in all_defined:
+        lines.append(f'    {"DER_AVM_DIGITAL_METERCONNECT_STATUS":40s} = 0x1210')
+        all_defined.add('DER_AVM_DIGITAL_METERCONNECT_STATUS')
     lines.append('')
 
     # IV Scan Control aliases + registers
