@@ -3233,14 +3233,16 @@ def _suggest_candidates(x_field: str, all_regs: list, categorized: dict) -> list
                 if any(k in dl for k in ['volt', 'vpv', 'v pv', 'dc volt']):
                     if (f'pv{n}' in dl or f'mppt{n}' in dl or
                             f'input {n}' in dl or f'input{n}' in dl or
-                            f'dc{n}' in dl or f'pp{n}' in dl):
+                            f'dc{n}' in dl or f'pp{n}' in dl or
+                            f'dc_voltage_{n}' in dl or f'dc voltage {n}' in dl):
                         score = 80
                         reason = f'PV{n} voltage 후보'
             elif is_current:
                 if any(k in dl for k in ['curr', 'ipv', 'i pv', 'dc curr']):
                     if (f'pv{n}' in dl or f'mppt{n}' in dl or
                             f'input {n}' in dl or f'input{n}' in dl or
-                            f'dc{n}' in dl or f'pp{n}' in dl):
+                            f'dc{n}' in dl or f'pp{n}' in dl or
+                            f'dc_current_{n}' in dl or f'dc current {n}' in dl):
                         score = 80
                         reason = f'PV{n} current 후보'
 
