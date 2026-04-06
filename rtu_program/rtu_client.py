@@ -1382,6 +1382,14 @@ class RTUClient:
                     sent_packets.append((seq, packet))
             time.sleep(DEVICE_SEND_INTERVAL)
 
+        # ── Phase 1.5: H05 Control/Monitor for all inverters ─────────────
+        for inv in self.inverters:
+            dev_num = inv['device_number']
+            handler = inv.get('handler')
+            if handler:
+                self._send_h05_control_sequence(handler, dev_num, inv['model'])
+            time.sleep(DEVICE_SEND_INTERVAL)
+
         # ── Phase 2: Backup packets (recovery mode only) ────────────────────
         if self.recovery_mode:
             for dev_type, dev_num in self._get_all_device_keys():
