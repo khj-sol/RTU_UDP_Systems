@@ -403,12 +403,12 @@ class InverterSimulator:
         self.store.setValues(3, RegisterMap.DER_POWER_FACTOR_SET, [self.power_factor_set])
         self.store.setValues(3, RegisterMap.DER_REACTIVE_POWER_PCT, [self.reactive_power_set])
         self.store.setValues(3, RegisterMap.DER_ACTION_MODE, [self.operation_mode])
-        self.store.setValues(3, RegisterMap.IV_CURVE_SCAN, [IVScanStatus.IDLE])
+        self.store.setValues(3, 0x600D, [IVScanStatus.IDLE])
         
         # DEA registers
-        self.store.setValues(3, RegisterMap.DEA_POWER_FACTOR_LOW, [1000])
-        self.store.setValues(3, RegisterMap.DEA_FREQUENCY_LOW, [600])
-        self.store.setValues(3, RegisterMap.DEA_STATUS_FLAG_LOW, [0x0001])
+        self.store.setValues(3, 0x03F9  # DEA_POWER_FACTOR low word, [1000])
+        self.store.setValues(3, 0x03FB  # DEA_FREQUENCY low word, [600])
+        self.store.setValues(3, RegisterMap.DER_AVM_DIGITAL_METERCONNECT_STATUS + 1, [0x0001])
     
     def _init_iv_scan_registers(self):
         """Initialize IV Scan data registers using store.setValues()"""
@@ -507,10 +507,10 @@ class InverterSimulator:
         
         # MPPT data
         mppt_addresses = [
-            (RegisterMap.MPPT1_VOLTAGE, RegisterMap.MPPT1_CURRENT, RegisterMap.MPPT1_POWER_LOW),
-            (RegisterMap.MPPT2_VOLTAGE, RegisterMap.MPPT2_CURRENT, RegisterMap.MPPT2_POWER_LOW),
-            (RegisterMap.MPPT3_VOLTAGE, RegisterMap.MPPT3_CURRENT, RegisterMap.MPPT3_POWER_LOW),
-            (RegisterMap.MPPT4_VOLTAGE, RegisterMap.MPPT4_CURRENT, RegisterMap.MPPT4_POWER_LOW),
+            (RegisterMap.MPPT1_VOLTAGE, RegisterMap.MPPT1_CURRENT, RegisterMap.MPPT1_POWER + 1),
+            (RegisterMap.MPPT2_VOLTAGE, RegisterMap.MPPT2_CURRENT, RegisterMap.MPPT2_POWER + 1),
+            (RegisterMap.MPPT3_VOLTAGE, RegisterMap.MPPT3_CURRENT, RegisterMap.MPPT3_POWER + 1),
+            (RegisterMap.MPPT4_VOLTAGE, RegisterMap.MPPT4_CURRENT, RegisterMap.MPPT4_POWER + 1),
         ]
         
         for i, (v_addr, c_addr, p_addr) in enumerate(mppt_addresses):
@@ -542,8 +542,8 @@ class InverterSimulator:
             self.store.setValues(3, base_addr, [str_voltage, str_current])
         
         # Power registers
-        self.store.setValues(3, RegisterMap.PV_POWER_LOW, [pv_power & 0xFFFF, (pv_power >> 16) & 0xFFFF])
-        self.store.setValues(3, RegisterMap.GRID_POWER_LOW, [ac_power & 0xFFFF, (ac_power >> 16) & 0xFFFF])
+        self.store.setValues(3, RegisterMap.PV_POWER + 1, [pv_power & 0xFFFF, (pv_power >> 16) & 0xFFFF])
+        self.store.setValues(3, RegisterMap.AC_POWER + 1, [ac_power & 0xFFFF, (ac_power >> 16) & 0xFFFF])
         
         # Mode and status
         mode_val = InverterMode.STANDBY if self.on_off == 1 else self.mode
@@ -553,7 +553,7 @@ class InverterSimulator:
         
         # Energy registers
         total_kwh = int(self.total_energy)
-        self.store.setValues(3, RegisterMap.TOTAL_ENERGY_LOW, [total_kwh & 0xFFFF, (total_kwh >> 16) & 0xFFFF])
+        self.store.setValues(3, RegisterMap.CUMULATIVE_ENERGY_LOW, [total_kwh & 0xFFFF, (total_kwh >> 16) & 0xFFFF])
         
         # Power factor
         pf_reg = int(pf * 1000)
@@ -588,7 +588,7 @@ class InverterSimulator:
             frequency_dea & 0xFFFF, (frequency_dea >> 16) & 0xFFFF,
             status_flags, 0,
         ]
-        self.store.setValues(3, RegisterMap.DEA_L1_CURRENT_LOW, dea_values)
+        self.store.setValues(3, 0x03E9  # DEA_L1_CURRENT low word, dea_values)
         
         # IV Scan status
         if self.iv_scan_status == IVScanStatus.RUNNING:
@@ -602,7 +602,7 @@ class InverterSimulator:
                 self.iv_scan_status = IVScanStatus.IDLE
                 self._iv_strings_read.clear()
         
-        self.store.setValues(3, RegisterMap.IV_CURVE_SCAN, [self.iv_scan_status])
+        self.store.setValues(3, 0x600D, [self.iv_scan_status])
         
         # Store for display
         self._current = {
@@ -661,12 +661,12 @@ class InverterSimulator:
         if new_mode != self.operation_mode:
             self.operation_mode = new_mode
         
-        iv_cmd = self.store.getValues(3, RegisterMap.IV_CURVE_SCAN, count=1)[0]
+        iv_cmd = self.store.getValues(3, 0x600D, count=1)[0]
         if iv_cmd == IVScanCommand.ACTIVE and self.iv_scan_status in [IVScanStatus.IDLE, IVScanStatus.FINISHED]:
             self.iv_scan_status = IVScanStatus.RUNNING
             self.iv_scan_start_time = time.time()
             self._iv_strings_read.clear()
-            self.store.setValues(3, RegisterMap.IV_CURVE_SCAN, [IVScanStatus.RUNNING])
+            self.store.setValues(3, 0x600D, [IVScanStatus.RUNNING])
 
 
 # =============================================================================
