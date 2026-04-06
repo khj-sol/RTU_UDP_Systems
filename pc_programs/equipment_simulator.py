@@ -3254,6 +3254,12 @@ def main():
     if 'baudrate' not in config:
         config['baudrate'] = 9600
 
+    # COM 포트 확인/변경 (CLI --port 미지정 시)
+    if not args.port:
+        port_input = input(f"  COM Port [{config['port']}]: ").strip()
+        if port_input:
+            config['port'] = port_input
+
     simulator = EquipmentSimulator(config)
     simulator.start()
 
