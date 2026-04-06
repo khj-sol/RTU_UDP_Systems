@@ -276,6 +276,9 @@ class RegisterMap:
     BLOCK1_COUNT                             = 125     # FC04 Block 1
     BLOCK2_COUNT                             = 125     # FC04 Block 2
     DSP_ALARM_CODE_L                         = 0x0BD3  # DSP alarm low word
+    BLOCK3_COUNT                             = 50      # FC04 Block 3
+    GRID_S_VOLTAGE                           = 0x0BC7  # ST phase grid voltage
+    GRID_T_VOLTAGE                           = 0x0BC8  # TR phase grid voltage
 
 class IVScanCommand:
     """IV Scan Command values for writing to 0x600D"""
