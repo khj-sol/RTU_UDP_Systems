@@ -1876,6 +1876,18 @@ class ModbusHandlerSerial:
         """물리값 → H01 형식 변환 (Serial 버전 — HAT 로직 위임)."""
         return ModbusHandlerHAT._format_h01_from_raw(self, physical)
 
+    def read_control_status(self):
+        """DER-AVM 제어 상태 읽기 — HAT 로직 위임."""
+        return ModbusHandlerHAT.read_control_status(self)
+
+    def read_monitor_data(self):
+        """DER-AVM 모니터링 데이터 읽기 — HAT 로직 위임."""
+        return ModbusHandlerHAT.read_monitor_data(self)
+
+    def write_control(self, control_type: int, value: int):
+        """제어 명령 쓰기 — HAT 로직 위임."""
+        return ModbusHandlerHAT.write_control(self, control_type, value)
+
     def read_inverter_data(self):
         """Read inverter data via pymodbus (same logic as HAT version)"""
         # 1순위: Block read
