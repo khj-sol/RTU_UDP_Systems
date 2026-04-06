@@ -672,8 +672,14 @@ class RTUClient:
                         dev_num, model, mon_data)
                     self._send_udp_no_ack(pkt)
                     self.logger.info(f"H05(14) INV{dev_num} Control Result sent (seq={s})")
+                else:
+                    self.logger.warning(f"H05(14) INV{dev_num}: read_monitor_data returned None")
             except Exception as e:
-                self.logger.error(f"H05(14) error: {e}")
+                self.logger.error(f"H05(14) INV{dev_num} error: {e}")
+                import traceback
+                self.logger.error(traceback.format_exc())
+        else:
+            self.logger.warning(f"H05(14) INV{dev_num}: no read_monitor_data method")
 
     # =========================================================================
     # IV Scan Execution (runs in separate thread)
