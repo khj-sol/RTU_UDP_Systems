@@ -5,16 +5,16 @@
     {
       "slave_id": 1,
       "type": "inverter",
-      "name": "Solarize Verterking",
+      "name": "Solarize 50K",
       "protocol": "solarize",
       "model_id": 1
     },
     {
       "slave_id": 2,
       "type": "inverter",
-      "name": "Huawei SUN2000",
-      "protocol": "huawei",
-      "model_id": 2
+      "name": "Sungrow 50K",
+      "protocol": "sungrow",
+      "model_id": 4
     },
     {
       "slave_id": 3,
@@ -25,13 +25,69 @@
     },
     {
       "slave_id": 4,
+      "type": "inverter",
+      "name": "Huawei SUN2000-50K",
+      "protocol": "huawei",
+      "model_id": 2
+    },
+    {
+      "slave_id": 5,
+      "type": "inverter",
+      "name": "Ekos 10K",
+      "protocol": "ekos",
+      "model_id": 5
+    },
+    {
+      "slave_id": 6,
+      "type": "inverter",
+      "name": "Senergy 50K",
+      "protocol": "senergy",
+      "model_id": 6
+    },
+    {
+      "slave_id": 7,
+      "type": "inverter",
+      "name": "Sofar 70KTL",
+      "protocol": "sofar",
+      "model_id": 7
+    },
+    {
+      "slave_id": 8,
+      "type": "inverter",
+      "name": "Solis 50K",
+      "protocol": "solis",
+      "model_id": 8
+    },
+    {
+      "slave_id": 9,
+      "type": "inverter",
+      "name": "Growatt 30K",
+      "protocol": "growatt",
+      "model_id": 9
+    },
+    {
+      "slave_id": 10,
+      "type": "inverter",
+      "name": "CPS SCA-M",
+      "protocol": "cps",
+      "model_id": 10
+    },
+    {
+      "slave_id": 11,
+      "type": "inverter",
+      "name": "Sunways 30K",
+      "protocol": "sunways",
+      "model_id": 11
+    },
+    {
+      "slave_id": 12,
       "type": "relay",
-      "name": "광성계측기 KDU",
+      "name": "KDU-300",
       "protocol": "relay",
       "model_id": 1
     },
     {
-      "slave_id": 5,
+      "slave_id": 13,
       "type": "weather",
       "name": "SEM5046",
       "protocol": "weather",
