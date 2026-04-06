@@ -1594,7 +1594,7 @@ class HuaweiSimulator:
         self.store.setValues(3, HuaweiRegisters.PV_POWER, [0, 0])
         # 누적발전량 초기화 (0x7D6A, U32 1kWh) — RTU 주소
         init_kwh = int(self.total_energy_kwh)
-        self.store.setValues(3, 0x7D6A, [(init_kwh >> 16) & 0xFFFF, init_kwh & 0xFFFF])
+        self.store.setValues(3, 0x7D6A, [init_kwh & 0xFFFF, (init_kwh >> 16) & 0xFFFF])
         # Running Status 초기화 (0x7D00, 6 regs)
         self.store.setValues(3, 0x7D00, [1, 0, 0, 0, 0, 0])  # STANDBY=1
         # Block E 초기화 (0x7D50, 6 regs: power, reactive, pf, freq)
@@ -1666,7 +1666,7 @@ class HuaweiSimulator:
         # Cumulative energy — RTU Block G: ACCUMULATED_ENERGY(0x7D6A), U32 1kWh
         self.total_energy_kwh += ac_power_w / 3600000.0
         energy_kwh = int(self.total_energy_kwh)
-        self.store.setValues(3, 0x7D6A, [(energy_kwh >> 16) & 0xFFFF, energy_kwh & 0xFFFF])
+        self.store.setValues(3, 0x7D6A, [energy_kwh & 0xFFFF, (energy_kwh >> 16) & 0xFFFF])
 
         # DEA-AVM registers
         def _to_s32_regs(v):
