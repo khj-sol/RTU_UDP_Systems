@@ -793,8 +793,15 @@ def _gen_error_classes(alarm_regs: list, error_bits: dict) -> str:
     return '\n'.join(lines)
 
 
+def _to_class_prefix(name: str) -> str:
+    """제조사명 → Python 클래스명 접두사 (하이픈/공백 제거, CamelCase)"""
+    import re
+    parts = re.split(r'[\s\-_]+', name)
+    return ''.join(p.capitalize() for p in parts if p)
+
+
 def _gen_status_converter(manufacturer: str) -> str:
-    cls_name = f'{manufacturer.title()}StatusConverter'
+    cls_name = f'{_to_class_prefix(manufacturer)}StatusConverter'
     return f'''
 
 
