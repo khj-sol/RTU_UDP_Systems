@@ -3034,17 +3034,17 @@ def _load_config_from_ini():
             'model_id': model_id,
         })
 
-    # Read port settings from rtu_config.ini
-    rtu_ini = os.path.join(config_dir, 'rtu_config.ini')
+    # COM 포트: PC에서 USB-RS485 자동 감지 (rtu_config.ini는 CM4용이라 무시)
     port = 'COM10'
     baudrate = 9600
-    if os.path.isfile(rtu_ini):
-        rtu_cfg = configparser.ConfigParser()
-        rtu_cfg.read(rtu_ini, encoding='utf-8')
-        if rtu_cfg.has_option('RS485', 'serial_port'):
-            port = rtu_cfg.get('RS485', 'serial_port').strip()
-        if rtu_cfg.has_option('RS485', 'baudrate'):
-            baudrate = rtu_cfg.getint('RS485', 'baudrate')
+    try:
+        import serial.tools.list_ports
+        usb_ports = [p.device for p in serial.tools.list_ports.comports()
+                     if 'USB' in (p.description or '').upper()]
+        if usb_ports:
+            port = usb_ports[0]
+    except Exception:
+        pass
 
     return {'port': port, 'baudrate': baudrate, 'devices': devices}
 
