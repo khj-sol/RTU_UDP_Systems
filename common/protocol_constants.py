@@ -111,6 +111,13 @@ INV_MODEL_SOLARIZE_50K = 1      # Solarize 50K (solarize)
 INV_MODEL_HUAWEI_50K = 2        # Huawei 50K (huawei)
 INV_MODEL_KSTAR_60K = 3         # Kstar 60K (kstar)
 INV_MODEL_SUNGROW = 4           # Sungrow (sungrow)
+INV_MODEL_EKOS_10K = 5          # Ekos 10K (ekos)
+INV_MODEL_SENERGY_50K = 6       # Senergy 50K (senergy)
+INV_MODEL_SOFAR_70K = 7         # Sofar 70KTL (sofar)
+INV_MODEL_SOLIS_50K = 8         # Solis 50K (solis)
+INV_MODEL_GROWATT_30K = 9       # Growatt 30K (growatt)
+INV_MODEL_CPS = 10              # CPS SCA-M (cps)
+INV_MODEL_SUNWAYS_30K = 11      # Sunways 30K (sunways)
 
 # Legacy aliases (backward compat)
 INV_MODEL_SOLARIZE = INV_MODEL_SOLARIZE_50K
@@ -127,6 +134,13 @@ INV_MODEL_NAMES = {
     INV_MODEL_HUAWEI_50K: "Huawei 50K",
     INV_MODEL_KSTAR_60K: "Kstar 60K",
     INV_MODEL_SUNGROW: "Sungrow",
+    INV_MODEL_EKOS_10K: "Ekos 10K",
+    INV_MODEL_SENERGY_50K: "Senergy 50K",
+    INV_MODEL_SOFAR_70K: "Sofar 70KTL",
+    INV_MODEL_SOLIS_50K: "Solis 50K",
+    INV_MODEL_GROWATT_30K: "Growatt 30K",
+    INV_MODEL_CPS: "CPS SCA-M",
+    INV_MODEL_SUNWAYS_30K: "Sunways 30K",
 }
 
 # =============================================================================

@@ -36,12 +36,26 @@ const MODEL_NAMES = {
   2: 'Huawei 50K',
   3: 'Kstar 60K',
   4: 'Sungrow',
+  5: 'Ekos 10K',
+  6: 'Senergy 50K',
+  7: 'Sofar 70KTL',
+  8: 'Solis 50K',
+  9: 'Growatt 30K',
+  10: 'CPS SCA-M',
+  11: 'Sunways 30K',
 };
 const MODEL_COLORS = {
   1: 'bg-blue-500',
   2: 'bg-orange-500',
   3: 'bg-purple-500',
   4: 'bg-teal-600',
+  5: 'bg-green-500',
+  6: 'bg-cyan-500',
+  7: 'bg-yellow-500',
+  8: 'bg-red-500',
+  9: 'bg-lime-500',
+  10: 'bg-indigo-500',
+  11: 'bg-pink-500',
 };
 const INVERTER_STATUS = {
   0x00: 'Initial',
