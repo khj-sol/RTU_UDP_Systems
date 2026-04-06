@@ -30,7 +30,7 @@ class RegisterMap:
     # =========================================================================
     # Monitoring Data
     # =========================================================================
-    POWER_FACTOR                             = 0x0000  # U16
+    POWER_FACTOR                             = 0x03F8  # DEA_POWER_FACTOR (S32, 0.001)
     TEMPERATURE                              = 0x0001  # U16
     REACTIVE_POWER                           = 0x0003  # U16
     L1_VOLTAGE                               = 0x0004  # U16
@@ -109,6 +109,20 @@ class RegisterMap:
     T_PHASE_CURRENT                          = 0x0075  # U16, T phase current
     STRING3_CURRENT                          = 0x0062  # S16, string 3 current
     STRING4_CURRENT                          = 0x0063  # S16, string 4 current
+
+
+    # --- DER-AVM Real-time Monitoring Registers (0x03E8~0x03FD, S32) ---
+    DEA_L1_CURRENT                           = 0x03E8  # S32, 0.1A
+    DEA_L2_CURRENT                           = 0x03EA  # S32, 0.1A
+    DEA_L3_CURRENT                           = 0x03EC  # S32, 0.1A
+    DEA_L1_VOLTAGE                           = 0x03EE  # S32, 0.1V
+    DEA_L2_VOLTAGE                           = 0x03F0  # S32, 0.1V
+    DEA_L3_VOLTAGE                           = 0x03F2  # S32, 0.1V
+    DEA_TOTAL_ACTIVE_POWER                   = 0x03F4  # S32, 0.1kW
+    DEA_REACTIVE_POWER                       = 0x03F6  # S32, Var
+    DEA_POWER_FACTOR                         = 0x03F8  # S32, 0.001
+    DEA_FREQUENCY                            = 0x03FA  # S32, 0.1Hz
+    DEA_STATUS_FLAG                          = 0x03FC  # S32, bitmap
 
 class InverterMode:
     """Inverter Mode Table (0x101D)"""
@@ -392,7 +406,7 @@ def generate_iv_current_data(isc, voc, v_min, data_points=64):
 
 DATA_TYPES = {
     'DEVICE_MODEL_PDF': 'TEXT',
-    'POWER_FACTOR': 'U16',
+    'POWER_FACTOR': 'S32',
     'TEMPERATURE': 'U16',
     'FREQUENCY': 'U16',
     'REACTIVE_POWER': 'U16',
@@ -443,6 +457,7 @@ READ_BLOCKS = [
     {'start': 0x0041, 'count':   2, 'fc': 3},
     {'start': 0x0073, 'count':   3, 'fc': 3},
     {'start': 0x754B, 'count':  87, 'fc': 3},
+    {'start': 0x03E8, 'count':  22, 'fc': 3},
 ]
 
 

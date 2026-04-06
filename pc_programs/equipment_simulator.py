@@ -1095,7 +1095,29 @@ class GenericInverterSimulator:
         pf = max(0.85, min(1.0, abs(pf)))
         pf_raw = int(pf * 1000)
         addr = self._find_addr('POWER_FACTOR')
-        self._set_reg(addr, [pf_raw & 0xFFFF])
+        if addr is not None:
+            self._write_u32(addr, pf_raw)  # S32 at DEA_POWER_FACTOR or native PF
+
+        # --- DER-AVM Real-time Monitoring (0x03E8~0x03FD, S32) ---
+        dea_pf = pf_raw
+        dea_freq = int(env.frequency * 10)  # 0.1Hz
+        dea_power = int(ac_power_w / 100)   # 0.1kW
+        dea_voltage = int(380 * 10) if ac_power_w > 0 else 0  # 0.1V
+        dea_current = int(ac_power_w / 3 / 380 * 10) if ac_power_w > 0 else 0  # 0.1A
+        for dea_name, dea_val in [
+            ('DEA_L1_CURRENT', dea_current), ('DEA_L2_CURRENT', dea_current),
+            ('DEA_L3_CURRENT', dea_current),
+            ('DEA_L1_VOLTAGE', dea_voltage), ('DEA_L2_VOLTAGE', dea_voltage),
+            ('DEA_L3_VOLTAGE', dea_voltage),
+            ('DEA_TOTAL_ACTIVE_POWER', dea_power),
+            ('DEA_REACTIVE_POWER', 0),
+            ('DEA_POWER_FACTOR', dea_pf),
+            ('DEA_FREQUENCY', dea_freq),
+            ('DEA_STATUS_FLAG', 1 if ac_power_w > 0 else 0),
+        ]:
+            dea_addr = self._find_addr(dea_name)
+            if dea_addr is not None:
+                self._write_u32(dea_addr, dea_val)
 
         # Cumulative energy
         total_kwh = int(self.total_energy)
