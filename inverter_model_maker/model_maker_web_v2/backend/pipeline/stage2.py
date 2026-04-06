@@ -400,7 +400,6 @@ _H01_MAPPING_FIELDS = [
     ('alarm1',            '경보 코드 1'),
     ('alarm2',            '경보 코드 2'),
     ('alarm3',            '경보 코드 3'),
-    ('temperature',       '인버터 온도'),
 ]
 
 

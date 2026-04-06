@@ -568,7 +568,6 @@ def get_h01_mapping(session_id: str):
 
         ws = wb['H01_MAPPING']
         DATA_START = 4
-        N_FIELDS = 18
 
         # E열 전체에서 사용 가능한 레지스터 목록 수집
         available_registers = []
@@ -581,20 +580,20 @@ def get_h01_mapping(session_id: str):
                     available_registers.append(v)
                     seen.add(v)
 
-        # H01 필드 데이터 (행 4~21)
+        # H01 필드 데이터 (B열에 값이 있는 행만 동적으로 읽기)
         fields = []
-        for i in range(N_FIELDS):
-            row = DATA_START + i
+        for row in range(DATA_START, ws.max_row + 1):
             h01_field = str(ws.cell(row=row, column=2).value or '').strip()
+            if not h01_field:
+                break
             description = str(ws.cell(row=row, column=3).value or '').strip()
             current_register = str(ws.cell(row=row, column=4).value or '').strip()
-            if h01_field:
-                fields.append({
-                    'h01_field': h01_field,
-                    'description': description,
-                    'current_register': current_register,
-                    'is_matched': bool(current_register),
-                })
+            fields.append({
+                'h01_field': h01_field,
+                'description': description,
+                'current_register': current_register,
+                'is_matched': bool(current_register),
+            })
 
         wb.close()
         return {'fields': fields, 'available_registers': available_registers}
@@ -626,13 +625,13 @@ def save_h01_mapping(session_id: str, body: dict):
 
         ws = wb['H01_MAPPING']
         DATA_START = 4
-        N_FIELDS = 18
 
         updated = 0
-        for i in range(N_FIELDS):
-            row = DATA_START + i
+        for row in range(DATA_START, ws.max_row + 1):
             h01_field = str(ws.cell(row=row, column=2).value or '').strip()
-            if h01_field and h01_field in mappings:
+            if not h01_field:
+                break
+            if h01_field in mappings:
                 ws.cell(row=row, column=4, value=mappings[h01_field] or None)
                 updated += 1
 
