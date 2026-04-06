@@ -1198,7 +1198,7 @@ class KstarSimulator:
         self.env = env or _get_shared_env()
 
         self.start_time = time.time()
-        self.total_energy_wh = 2000000.0   # 초기 누적 발전량 2000kWh (단위: Wh)
+        self.total_energy_wh = 1000000.0   # 초기 누적 발전량 1000kWh (단위: Wh)
         self.today_energy_wh = 0.0
 
         # DER-AVM Control states
@@ -1552,7 +1552,7 @@ class HuaweiSimulator:
         self.env = env or _get_shared_env()
 
         self.start_time = time.time()
-        self.total_energy_kwh = 3000.0  # 초기 누적 발전량 3000kWh
+        self.total_energy_kwh = 1000.0  # 초기 누적 발전량 1000kWh
 
         self.store = self._create_datastore()
         self._current = {}
@@ -1729,7 +1729,7 @@ class EkosSimulator:
         self.env = env or _get_shared_env()
 
         self.start_time = time.time()
-        self.total_energy_wh = 2000000.0   # Initial cumulative: 2000kWh in Wh
+        self.total_energy_wh = 1000000.0   # Initial cumulative: 1000kWh in Wh
 
         # DER-AVM Control states
         self.on_off = 0                # 0=ON, 1=OFF
@@ -2003,7 +2003,7 @@ class SungrowSimulator:
         self.env = env or _get_shared_env()
 
         self.start_time = time.time()
-        self.total_energy_01kwh = 20000  # Initial: 2000.0 kWh in 0.1kWh units
+        self.total_energy_01kwh = 10000  # Initial: 1000.0 kWh in 0.1kWh units
         self.today_energy_wh = 0.0
 
         # DER-AVM Control states
