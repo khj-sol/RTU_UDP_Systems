@@ -966,14 +966,14 @@ class GenericInverterSimulator:
                 v_info = get_iv_v_regs(mppt_idx)
                 v_data = get_iv_v(voc, v_min, v_info['count'])
                 self.store.setValues(fc, v_info['base'], v_data)
-            except (ValueError, KeyError):
+            except (ValueError, KeyError, AttributeError, TypeError):
                 continue
             for s in range(1, strings_per_mppt + 1):
                 try:
                     i_info = get_iv_i_regs(mppt_idx, s)
                     i_data = get_iv_i(isc * (1.0 - 0.05 * s), voc, v_min, i_info['count'])
                     self.store.setValues(fc, i_info['base'], i_data)
-                except (ValueError, KeyError):
+                except (ValueError, KeyError, AttributeError, TypeError):
                     pass
         # IV Scan Status register (0x600D)
         iv_status_addr = getattr(self.reg_map, 'IV_SCAN_STATUS', 0x600D)
