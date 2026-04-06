@@ -473,7 +473,8 @@ def _gen_register_map(regs_by_cat: dict, mppt: int, total_strings: int,
     if 'INNER_TEMP' not in all_defined:
         for _tc in ['TEMPERATURE', 'INNER_TEMPERATURE', 'HEAT_SINK_TEMPERATURE',
                     'CABINET_TEMPERATURE', 'INVERTER_TEMPERATURE', 'MODULE_TEMPERATURE',
-                    'INTERNAL_TEMP', 'INTERNAL_TEMPERATURE']:
+                    'INTERNAL_TEMP', 'INTERNAL_TEMPERATURE', 'INTERNALTEMPERATURE',
+                    'INVERTER_INNERTEMPERATURE', 'INVERTER_MODULETEMPERATURE']:
             if _tc in all_defined:
                 lines.append(f'    INNER_TEMP                               = {_tc}')
                 all_defined.add('INNER_TEMP')
@@ -502,7 +503,8 @@ def _gen_register_map(regs_by_cat: dict, mppt: int, total_strings: int,
         for _ap in ['유효전력종합_ACTIVE_POWER', 'ACTIVE_POWER', 'TOTAL_ACTIVE_POWER',
                     'GRID_TOTAL_ACTIVE_POWER_LOW', 'ACTIVE_POWER_LOW', 'AC_ACTIVE_POWER',
                     'OUTPUT_POWER', 'GRID_ACTIVE_POWER', 'TOTAL_OUTPUT_POWER',
-                    'ACTIVE_OUTPUT_POWER', 'ACTIVE_OUTPUT_POWER_LOW']:
+                    'ACTIVE_OUTPUT_POWER', 'ACTIVE_OUTPUT_POWER_LOW',
+                    'PV_POWER']:
             if _ap in all_defined:
                 lines.append(f'    {"AC_POWER":40s} = {_ap}')
                 all_defined.add('AC_POWER')

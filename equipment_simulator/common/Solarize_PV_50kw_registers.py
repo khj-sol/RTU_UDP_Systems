@@ -158,6 +158,11 @@ class RegisterMap:
 
 
 
+
+    # --- Simulator compatibility aliases ---
+    NOMINAL_VOLTAGE                          = 0x1A44  # INFO: 정격 전압
+    NOMINAL_FREQUENCY                        = 0x1A45  # INFO: 정격 주파수
+
 class IVScanCommand:
     """IV Scan Command values for writing to 0x600D"""
     NON_ACTIVE = 0x0000
@@ -340,6 +345,16 @@ class SolarizeStatusConverter:
     @classmethod
     def to_inverter_mode(cls, raw):
         return raw
+
+    @classmethod
+    def to_solarize(cls, raw):
+        """RTU 호환 alias"""
+        return cls.to_inverter_mode(raw)
+
+    @classmethod
+    def to_h01(cls, raw):
+        """RTU 호환 alias"""
+        return cls.to_inverter_mode(raw)
 
 
 # Dynamic-loader alias required by modbus_handler.load_register_module
@@ -585,11 +600,3 @@ DATA_PARSER = {
     'string7_current'      : 'STRING7_CURRENT',
     'string8_current'      : 'STRING8_CURRENT',
 }
-
-
-# =========================================================================
-# Simulator / RTU compatibility aliases (auto-appended)
-# =========================================================================
-# NOMINAL_VOLTAGE / NOMINAL_FREQUENCY: simulator writes these during init
-RegisterMap.NOMINAL_VOLTAGE   = 0x1A44  # U16, rated voltage 0.1V
-RegisterMap.NOMINAL_FREQUENCY = 0x1A45  # U16, rated frequency 0.01Hz

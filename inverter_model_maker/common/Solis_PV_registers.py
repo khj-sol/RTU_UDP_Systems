@@ -967,6 +967,16 @@ class SolisStatusConverter:
     def to_inverter_mode(cls, raw):
         return raw
 
+    @classmethod
+    def to_solarize(cls, raw):
+        """RTU 호환 alias"""
+        return cls.to_inverter_mode(raw)
+
+    @classmethod
+    def to_h01(cls, raw):
+        """RTU 호환 alias"""
+        return cls.to_inverter_mode(raw)
+
 
 # Dynamic-loader alias required by modbus_handler.load_register_module
 StatusConverter = SolisStatusConverter

@@ -82,6 +82,7 @@ class RegisterMap:
     # --- RTU modbus_handler / simulator 필수 alias ---
     INNER_TEMP                               = TEMPERATURE
     INVERTER_MODE                            = INVERTER_STATUS
+    AC_POWER                                 = PV_POWER
     TOTAL_ENERGY                             = CUMULATIVE_ENERGY
     STRING1_CURRENT                          = 태양전지1_전류_STRING_1_CURRENT
     STRING2_CURRENT                          = 태양전지2_전류_STRING_2_CURRENT
@@ -97,6 +98,17 @@ class RegisterMap:
     DER_AVM_DIGITAL_METERCONNECT_STATUS      = 0x1210
 
 
+
+
+    # --- Simulator compatibility aliases ---
+    MPPT1_CURRENT                            = 0x0041  # U16, MPPT1 current
+    MPPT2_VOLTAGE                            = 0x0042  # U16, MPPT2 voltage
+    MPPT2_CURRENT                            = 0x0043  # U16, MPPT2 current
+    R_PHASE_CURRENT                          = 0x0073  # U16, R phase current
+    S_PHASE_CURRENT                          = 0x0074  # U16, S phase current
+    T_PHASE_CURRENT                          = 0x0075  # U16, T phase current
+    STRING3_CURRENT                          = 0x0062  # S16, string 3 current
+    STRING4_CURRENT                          = 0x0063  # S16, string 4 current
 
 class InverterMode:
     """Inverter Mode Table (0x101D)"""
@@ -243,6 +255,16 @@ class EkosStatusConverter:
     @classmethod
     def to_inverter_mode(cls, raw):
         return raw
+
+    @classmethod
+    def to_solarize(cls, raw):
+        """RTU 호환 alias"""
+        return cls.to_inverter_mode(raw)
+
+    @classmethod
+    def to_h01(cls, raw):
+        """RTU 호환 alias"""
+        return cls.to_inverter_mode(raw)
 
 
 # Dynamic-loader alias required by modbus_handler.load_register_module
@@ -442,24 +464,3 @@ DATA_PARSER = {
     'string1_current'      : '태양전지1_전류_STRING_1_CURRENT',
     'string2_current'      : '태양전지2_전류_STRING_2_CURRENT',
 }
-
-
-# =========================================================================
-# Simulator / RTU compatibility aliases (auto-appended)
-# =========================================================================
-# AC_POWER: Ekos active power register (FLOAT32 at 0x755F, filtered out by Stage3)
-RegisterMap.AC_POWER             = 0x755F  # FLOAT32, total active power W
-
-# Ekos has 1 MPPT, so MPPT1_CURRENT = PV input current (virtual, same MPPT area)
-RegisterMap.MPPT1_CURRENT        = 0xE001  # virtual: MPPT1 current for simulator
-RegisterMap.MPPT2_VOLTAGE        = 0xE002  # virtual: MPPT2 voltage (Ekos has only 1 MPPT)
-RegisterMap.MPPT2_CURRENT        = 0xE003  # virtual: MPPT2 current
-
-# Phase current aliases (Ekos is single-phase; simulator writes all 3)
-RegisterMap.R_PHASE_CURRENT      = 0xE010  # virtual: R phase current
-RegisterMap.S_PHASE_CURRENT      = 0xE011  # virtual: S phase current
-RegisterMap.T_PHASE_CURRENT      = 0xE012  # virtual: T phase current
-
-# Extra string current aliases (Ekos has 2 strings; simulator may write 4)
-RegisterMap.STRING3_CURRENT      = 0xE020  # virtual: string 3 current
-RegisterMap.STRING4_CURRENT      = 0xE021  # virtual: string 4 current

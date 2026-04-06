@@ -75,6 +75,7 @@ class RegisterMap:
 
     # --- RTU modbus_handler / simulator 필수 alias ---
     INNER_TEMP                               = TEMPERATURE
+    AC_POWER                                 = PV_POWER
     T_PHASE_VOLTAGE                          = S_PHASE_VOLTAGE  # L3 없음 → 단상 대체
     TOTAL_ENERGY                             = CUMULATIVE_ENERGY
     STRING1_CURRENT                          = STRING_1_CURRENT
@@ -243,6 +244,16 @@ class SunwaysStatusConverter:
     @classmethod
     def to_inverter_mode(cls, raw):
         return raw
+
+    @classmethod
+    def to_solarize(cls, raw):
+        """RTU 호환 alias"""
+        return cls.to_inverter_mode(raw)
+
+    @classmethod
+    def to_h01(cls, raw):
+        """RTU 호환 alias"""
+        return cls.to_inverter_mode(raw)
 
 
 # Dynamic-loader alias required by modbus_handler.load_register_module

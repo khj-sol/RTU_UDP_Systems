@@ -330,6 +330,7 @@ class RegisterMap:
 
     # --- RTU modbus_handler / simulator 필수 alias ---
     INNER_TEMP                               = TEMPERATURE
+    AC_POWER                                 = PV_POWER
     TOTAL_ENERGY                             = CUMULATIVE_ENERGY
     ERROR_CODE1                              = L2_VOLTAGE
     DER_POWER_FACTOR_SET                     = 0x07D0
@@ -1890,6 +1891,16 @@ class HuaweiStatusConverter:
     def to_inverter_mode(cls, raw):
         return raw
 
+    @classmethod
+    def to_solarize(cls, raw):
+        """RTU 호환 alias"""
+        return cls.to_inverter_mode(raw)
+
+    @classmethod
+    def to_h01(cls, raw):
+        """RTU 호환 alias"""
+        return cls.to_inverter_mode(raw)
+
 
 # Dynamic-loader alias required by modbus_handler.load_register_module
 StatusConverter = HuaweiStatusConverter
@@ -2356,20 +2367,8 @@ DATA_PARSER = {
 
 
 # =========================================================================
-# RTU / Simulator compatibility aliases and helper functions (auto-appended)
+# RTU modbus_handler custom helpers (Huawei-specific)
 # =========================================================================
-
-# --- RegisterMap aliases for RTU modbus_handler ---
-RegisterMap.PV_STRING_BASE       = RegisterMap.PV_VOLTAGE          # 0x7D10 (32016)
-RegisterMap.PV_STRING_COUNT      = 16  # override: 8 strings x 2 regs (voltage + current) = 16 regs
-RegisterMap.INPUT_POWER          = 0x7D40  # (32064) DC input power S32, 1W
-RegisterMap.PHASE_A_VOLTAGE      = RegisterMap.POWERGRIDPHASE_AVOLTAGE   # 0x7D45 (32069)
-RegisterMap.PHASE_A_CURRENT      = RegisterMap.POWERGRIDPHASE_ACURRENT   # 0x7D48 (32072) S32
-RegisterMap.PHASE_B_CURRENT      = RegisterMap.POWERGRIDPHASE_BCURRENT   # 0x7D4A (32074) S32
-RegisterMap.PHASE_C_CURRENT      = RegisterMap.POWERGRIDPHASE_CCURRENT   # 0x7D4C (32076) S32
-RegisterMap.ACTIVE_POWER         = RegisterMap.PHASE_AACTIVEPOWER        # 0x7D50 (32080) S32
-RegisterMap.ACCUMULATED_ENERGY   = RegisterMap.CUMULATIVE_ENERGY         # 0x7D6A (32106) U32
-
 
 def s16(value):
     """Convert unsigned 16-bit register to signed 16-bit."""

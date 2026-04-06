@@ -95,6 +95,7 @@ class RegisterMap:
 
     # --- RTU modbus_handler / simulator 필수 alias ---
     INNER_TEMP                               = TEMPERATURE
+    AC_POWER                                 = PV_POWER
     TOTAL_ENERGY                             = CUMULATIVE_ENERGY
     ERROR_CODE1                              = FAULT_5
     ERROR_CODE3                              = FREQUENCY
@@ -297,6 +298,16 @@ class SofarStatusConverter:
     @classmethod
     def to_inverter_mode(cls, raw):
         return raw
+
+    @classmethod
+    def to_solarize(cls, raw):
+        """RTU 호환 alias"""
+        return cls.to_inverter_mode(raw)
+
+    @classmethod
+    def to_h01(cls, raw):
+        """RTU 호환 alias"""
+        return cls.to_inverter_mode(raw)
 
 
 # Dynamic-loader alias required by modbus_handler.load_register_module

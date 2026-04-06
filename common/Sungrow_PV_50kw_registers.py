@@ -102,6 +102,7 @@ class RegisterMap:
     PV_STRING_COUNT                          = 8
 
     # --- RTU modbus_handler / simulator 필수 alias ---
+    INNER_TEMP                               = INTERNALTEMPERATURE
     T_PHASE_VOLTAGE                          = S_PHASE_VOLTAGE  # L3 없음 → 단상 대체
     T_PHASE_CURRENT                          = S_PHASE_CURRENT  # L3 없음 → 단상 대체
     TOTAL_ENERGY                             = CUMULATIVE_ENERGY
@@ -125,6 +126,13 @@ class RegisterMap:
     DER_AVM_DIGITAL_METERCONNECT_STATUS      = 0x1210
 
 
+
+
+    # --- Simulator compatibility aliases ---
+    MPPT3_VOLTAGE                            = MPPT_3_VOLTAGE
+    MPPT3_CURRENT                            = MPPT_3_CURRENT
+    PV_POWER                                 = 0x0011  # U16, PV power
+    INVERTER_MODE                            = 0x13AE  # U16, running state
 
 class InverterMode:
     """Inverter Mode Table (0x101D)"""
@@ -488,6 +496,16 @@ class SungrowStatusConverter:
     def to_inverter_mode(cls, raw):
         return raw
 
+    @classmethod
+    def to_solarize(cls, raw):
+        """RTU 호환 alias"""
+        return cls.to_inverter_mode(raw)
+
+    @classmethod
+    def to_h01(cls, raw):
+        """RTU 호환 alias"""
+        return cls.to_inverter_mode(raw)
+
 
 # Dynamic-loader alias required by modbus_handler.load_register_module
 StatusConverter = SungrowStatusConverter
@@ -729,20 +747,3 @@ DATA_PARSER = {
     'string7_current'      : 'STRING_7_CURRENT',
     'string8_current'      : 'STRING_8_CURRENT',
 }
-
-
-# =========================================================================
-# Simulator / RTU compatibility aliases (auto-appended)
-# =========================================================================
-# PV_POWER: alias to AC_POWER (Sungrow total active power register)
-RegisterMap.PV_POWER         = RegisterMap.AC_POWER              # 0x0011
-
-# INNER_TEMP: alias to INTERNALTEMPERATURE
-RegisterMap.INNER_TEMP       = RegisterMap.INTERNALTEMPERATURE    # 0x1390 (5008)
-
-# INVERTER_MODE: virtual register for simulator (Sungrow has no direct mode register)
-RegisterMap.INVERTER_MODE    = 0xE000  # virtual
-
-# MPPT3/4 short aliases
-RegisterMap.MPPT3_VOLTAGE    = RegisterMap.MPPT_3_VOLTAGE        # 0x1397 (5015)
-RegisterMap.MPPT3_CURRENT    = RegisterMap.MPPT_3_CURRENT        # 0x1398 (5016)

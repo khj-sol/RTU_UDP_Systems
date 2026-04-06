@@ -243,6 +243,36 @@ class RegisterMap:
 
 
 
+
+    # --- Simulator compatibility aliases ---
+    PV1_INPUT_VOLTAGE                        = PV_VOLTAGE  # alias for 0x0BB8
+    PV1_VOLTAGE                              = PV_VOLTAGE
+    PV1_CURRENT                              = PV1_INPUT_CURRENT
+    PV1_POWER                                = 0x0BBE  # S32, PV1 input power
+    ARM_VERSION                              = 0x0C90  # ARM firmware version
+    DSP_VERSION                              = 0x0C91  # DSP firmware version
+    DAILY_PRODUCTION                         = 0x0BDC  # U16, daily production
+    SYSTEM_STATUS                            = 0x0BE6  # system status
+    RADIATOR_TEMP                            = 0x0BEF  # S16, radiator temperature
+    CHASSIS_TEMP                             = 0x0BF1  # S16, chassis temperature
+    GRID_FREQUENCY                           = 0x0C1A  # U16, grid frequency
+    GRID_R_VOLTAGE                           = 0x0C19  # U16, grid R voltage
+    INV_R_VOLTAGE                            = 0x0C33  # U16, inv R voltage
+    INV_R_CURRENT                            = 0x0C34  # U16, inv R current
+    INV_S_FREQUENCY                          = 0x0C35  # U16
+    INV_R_POWER                              = 0x0C36  # S32, inv R power
+    INV_S_VOLTAGE                            = 0x0C3B  # U16, inv S voltage
+    INV_S_CURRENT                            = 0x0C3C  # U16, inv S current
+    INV_S_POWER                              = 0x0C3D  # S32, inv S power
+    INV_T_VOLTAGE                            = 0x0C42  # U16, inv T voltage
+    INV_T_CURRENT                            = 0x0C43  # U16, inv T current
+    INV_T_POWER                              = 0x0C44  # S32, inv T power
+    IV_SCAN_COMMAND                          = 0x0FC3  # FC06, IV scan start
+    IV_SCAN_STATUS                           = 0x0C36  # FC04, IV scan status
+    IV_POINTS_PER_STRING                     = 100     # 100 V/I points per string
+    IV_DATA_BASE                             = 0x1388  # FC04, IV data start
+    IV_REGS_PER_STRING                       = 200     # 100V + 100I regs
+
 class IVScanCommand:
     """IV Scan Command values for writing to 0x600D"""
     NON_ACTIVE = 0x0000
@@ -475,7 +505,12 @@ class KstarStatusConverter:
 
     @classmethod
     def to_solarize(cls, raw):
-        """RTU 호환 alias — to_inverter_mode와 동일"""
+        """RTU 호환 alias"""
+        return cls.to_inverter_mode(raw)
+
+    @classmethod
+    def to_h01(cls, raw):
+        """RTU 호환 alias"""
         return cls.to_inverter_mode(raw)
 
 
@@ -827,73 +862,15 @@ DATA_PARSER = {
     'mppt3_current'        : 'PV3_INPUT_CURRENT',
 }
 
-
-# =========================================================================
-# Simulator / RTU compatibility aliases (auto-appended)
-# =========================================================================
-
-# --- Simulator FC04 register aliases ---
-# PV1_VOLTAGE/PV1_CURRENT/PV1_POWER: simulator writes PV data per-MPPT to FC04
-RegisterMap.PV1_VOLTAGE          = RegisterMap.PV_VOLTAGE          # 0x0BB8 (3000)
-RegisterMap.PV1_CURRENT          = RegisterMap.PV1_INPUT_CURRENT   # 0x0BBB (3003)
-RegisterMap.MPPT1_POWER_LOW      = 0x0BBE  # (3006) MPPT1 power S32 low word
-RegisterMap.PV1_POWER            = RegisterMap.MPPT1_POWER_LOW     # 0x0BBE (3006)
-
-# Cumulative/daily production (FC04)
-RegisterMap.CUMULATIVE_PRODUCTION_L = 0x0BDE  # (3038) cumulative energy U32 low word, 0.1kWh
-RegisterMap.DAILY_PRODUCTION     = 0x0BE0  # (3040) daily energy in 0.1kWh
-
-# System/Inverter status (FC04) -- Kstar uses these in FC04 input registers
-RegisterMap.SYSTEM_STATUS        = 0x0BE1  # (3041) system operation status
-
-# Temperature (FC04)
-RegisterMap.RADIATOR_TEMP        = 0x0BD2  # (3026) radiator temp 0.1C
-RegisterMap.CHASSIS_TEMP         = 0x0BD3  # (3027) chassis temp 0.1C
-
-# Grid frequency (FC04 Block2)
-RegisterMap.GRID_FREQUENCY       = 0x0C1A  # (3098) grid frequency 0.01Hz
-
-# R phase (FC04 Block2): inverter output voltage/current
-RegisterMap.INV_R_VOLTAGE        = 0x0C19  # (3097) R phase voltage 0.1V
-RegisterMap.INV_R_CURRENT        = 0x0C34  # (3124) R phase current 0.01A
-RegisterMap.INV_S_FREQUENCY      = 0x0C35  # (3125) S phase frequency
-
-# R/S/T phase power (FC04 Block3)
-RegisterMap.INV_R_POWER          = 0x0C36  # (3126) R phase active power W (S16)
-RegisterMap.INV_S_VOLTAGE        = 0x0C37  # (3127) S phase voltage
-RegisterMap.INV_S_CURRENT        = 0x0C3C  # (3132) S phase current 0.01A
-RegisterMap.INV_S_POWER          = 0x0C3D  # (3133) S phase active power W (S16)
-RegisterMap.INV_T_VOLTAGE        = 0x0C3E  # (3134) T phase voltage
-RegisterMap.INV_T_CURRENT        = 0x0C43  # (3139) T phase current 0.01A
-RegisterMap.INV_T_POWER          = 0x0C44  # (3140) T phase active power W (S16)
-
-# Grid voltage (FC04 Block2/3)
-RegisterMap.GRID_R_VOLTAGE       = 0x0C19  # (3097) grid R phase voltage 0.1V
-RegisterMap.GRID_S_VOLTAGE       = 0x0C37  # (3127) grid S phase voltage 0.1V
-RegisterMap.GRID_T_VOLTAGE       = 0x0C3E  # (3134) grid T phase voltage 0.1V
-
-# Firmware version aliases (FC03)
-RegisterMap.ARM_VERSION          = 0x0C90  # (3216) ARM firmware version
-RegisterMap.DSP_VERSION          = 0x0C91  # (3217) DSP firmware version
-
-# DSP alarm code low word alias
-RegisterMap.DSP_ALARM_CODE_L     = RegisterMap.DSP_ERROR_CODE_L  # 0x0BD4 (3028)
-
-# RTU read block constants (FC04)
+# Block read boundaries (used by custom RTU helper functions)
 RegisterMap.BLOCK1_START         = 0x0BB8  # (3000) PV_VOLTAGE
-RegisterMap.BLOCK1_COUNT         = 60      # 3000~3059
 RegisterMap.BLOCK2_START         = 0x0BF4  # (3060)
-RegisterMap.BLOCK2_COUNT         = 65      # 3060~3124
 RegisterMap.BLOCK3_START         = 0x0C35  # (3125)
-RegisterMap.BLOCK3_COUNT         = 25      # 3125~3149
 
-# IV Scan registers
-RegisterMap.IV_SCAN_COMMAND      = 0x0FC3  # (4035) FC06 write trigger for IV scan
-RegisterMap.IV_SCAN_STATUS       = 0x0C36  # (3126) FC04 IV scan status
-RegisterMap.IV_POINTS_PER_STRING = 100     # 100 V/I data points per string
-RegisterMap.IV_DATA_BASE         = 0x1388  # (5000) IV data start address
-RegisterMap.IV_REGS_PER_STRING   = 200     # 100 voltage + 100 current registers
 
+# =========================================================================
+# RTU modbus_handler custom helpers (Kstar-specific)
+# =========================================================================
 
 class KstarSystemStatus:
     """Kstar system_status register -> InverterMode conversion table"""
