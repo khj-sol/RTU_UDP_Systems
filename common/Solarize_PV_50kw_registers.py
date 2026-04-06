@@ -601,3 +601,28 @@ DATA_PARSER = {
     'string7_current'      : 'STRING7_CURRENT',
     'string8_current'      : 'STRING8_CURRENT',
 }
+
+
+# U32 워드 순서: 'LH' = Low word at lower addr, 'HL' = High word at lower addr
+U32_WORD_ORDER = 'LH'
+
+
+# H01 스칼라 필드 → (RegisterMap 속성명, 변환기 키)
+# modbus_handler._read_inverter_data_dynamic()이 이 맵으로 데이터 수집
+H01_FIELD_MAP = {
+    'r_voltage':         ('R_PHASE_VOLTAGE', 'voltage_to_V'),
+    's_voltage':         ('S_PHASE_VOLTAGE', 'voltage_to_V'),
+    't_voltage':         ('T_PHASE_VOLTAGE', 'voltage_to_V'),
+    'r_current':         ('R_PHASE_CURRENT', 'current_to_01A'),
+    's_current':         ('S_PHASE_CURRENT', 'current_to_01A'),
+    't_current':         ('T_PHASE_CURRENT', 'current_to_01A'),
+    'frequency':         ('FREQUENCY', 'frequency_to_01Hz'),
+    'ac_power':          ('AC_POWER', 'power_to_W'),
+    'pv_power':          ('PV_POWER', 'power_to_W'),
+    'power_factor':      ('POWER_FACTOR', 'pf_raw'),
+    'cumulative_energy': ('TOTAL_ENERGY', 'energy_kwh_to_Wh'),
+    'mode':              ('INVERTER_MODE', 'raw'),
+    'alarm1':            ('ERROR_CODE1', 'raw'),
+    'alarm2':            ('ERROR_CODE2', 'raw'),
+    'alarm3':            ('ERROR_CODE3', 'raw'),
+}
