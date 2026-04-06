@@ -131,6 +131,8 @@ class RegisterMap:
     # --- Simulator compatibility aliases ---
     MPPT3_VOLTAGE                            = MPPT_3_VOLTAGE
     MPPT3_CURRENT                            = MPPT_3_CURRENT
+    MPPT4_VOLTAGE                            = MPPT_3_VOLTAGE  # MPPT4 전압 레지스터 없음
+    MPPT4_CURRENT                            = MPPT_4_CURRENT
     PV_POWER                                 = 0x0011  # U16, PV power
     INVERTER_MODE                            = 0x13AE  # U16, running state
 
@@ -686,6 +688,15 @@ DATA_TYPES = {
     'STRING_6_CURRENT': 'STRINGING',
     'STRING_7_CURRENT': 'STRINGING',
     'STRING_8_CURRENT': 'STRINGING',
+    # STRING alias data types
+    'STRING1_CURRENT': 'U16',
+    'STRING2_CURRENT': 'U16',
+    'STRING3_CURRENT': 'U16',
+    'STRING4_CURRENT': 'U16',
+    'STRING5_CURRENT': 'U16',
+    'STRING6_CURRENT': 'U16',
+    'STRING7_CURRENT': 'U16',
+    'STRING8_CURRENT': 'U16',
     'QUICK_GRIDDISPATCH_MODE': 'U16',
     'SWIFT_GRIDDISPATCH_MODE': 'U16',
 }

@@ -214,6 +214,7 @@ class RegisterMap:
 
     # --- MPPT alias (modbus_handler: MPPT{N}_ 형식) ---
     MPPT1_CURRENT                            = PV1_INPUT_CURRENT
+    MPPT2_CURRENT                            = PV2_INPUT_CURRENT
     PV_STRING_COUNT                          = 3
 
     # --- STRING alias (modbus_handler: STRING{N}_CURRENT 형식) ---
