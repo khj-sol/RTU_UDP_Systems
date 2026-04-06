@@ -1664,8 +1664,10 @@ def build_h01_match_table(categorized: dict, meta: dict) -> List[dict]:
                 mppt_n = (offset // 2) + 1
                 if offset % 2 == 0:  # 짝수 = voltage
                     r.h01_field = f'mppt{mppt_n}_voltage'
+                    r.definition = f'DC_VOLTAGE_{mppt_n}'
                 else:  # 홀수 = current
                     r.h01_field = f'mppt{mppt_n}_current'
+                    r.definition = f'DC_CURRENT_{mppt_n}'
                 categorized['MONITORING'].append(r)
                 reclassified.append(r)
                 continue
