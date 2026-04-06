@@ -1392,6 +1392,61 @@ def update_review_history(review_items: list, manufacturer: str,
     return added
 
 
+def _register_device_model(protocol_name: str, manufacturer: str, log):
+    """device_models.ini에 새 프로토콜이 없으면 자동 등록"""
+    import configparser
+
+    config_dir = os.path.join(RTU_COMMON_DIR, '..', 'config') if RTU_COMMON_DIR else ''
+    ini_path = os.path.join(config_dir, 'device_models.ini')
+    if not os.path.isfile(ini_path):
+        return
+
+    try:
+        cfg = configparser.ConfigParser()
+        cfg.read(ini_path, encoding='utf-8')
+
+        # 이미 등록된 프로토콜인지 확인
+        existing_protocols = {}
+        if cfg.has_section('inverter_protocols'):
+            for mid, proto in cfg.items('inverter_protocols'):
+                if not mid.startswith('#'):
+                    existing_protocols[proto.strip()] = mid.strip()
+
+        pname = protocol_name.lower().strip()
+        if pname in existing_protocols:
+            return  # 이미 등록됨
+
+        # 새 model_id 결정 (기존 최대 + 1)
+        max_id = 0
+        if cfg.has_section('inverter_models'):
+            for mid, _ in cfg.items('inverter_models'):
+                try:
+                    max_id = max(max_id, int(mid))
+                except ValueError:
+                    pass
+        new_id = str(max_id + 1)
+
+        # 등록
+        if not cfg.has_section('inverter_models'):
+            cfg.add_section('inverter_models')
+        cfg.set('inverter_models', new_id, manufacturer or pname.title())
+
+        if not cfg.has_section('inverter_features'):
+            cfg.add_section('inverter_features')
+        cfg.set('inverter_features', new_id, 'false, true, false')
+
+        if not cfg.has_section('inverter_protocols'):
+            cfg.add_section('inverter_protocols')
+        cfg.set('inverter_protocols', new_id, pname)
+
+        with open(ini_path, 'w', encoding='utf-8') as f:
+            cfg.write(f)
+        log(f'  device_models.ini 등록: [{new_id}] {pname} ({manufacturer})')
+
+    except Exception as e:
+        log(f'  device_models.ini 등록 실패: {e}', 'warn')
+
+
 # ─── Stage 3 메인 함수 ───────────────────────────────────────────────────────
 
 def run_stage3(
@@ -1609,6 +1664,10 @@ def run_stage3(
     else:
         failed = [k for k, v in validation.items() if not v]
         log(f'  레퍼런스 미등록 (검증 실패: {failed})', 'warn')
+
+    # device_models.ini 자동 등록 — 새 프로토콜이면 추가
+    if all_passed and protocol_name:
+        _register_device_model(protocol_name, manufacturer, log)
 
     log('Stage 3 완료', 'ok')
 
