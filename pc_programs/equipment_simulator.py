@@ -2133,6 +2133,382 @@ class SungrowSimulator:
 
 
 # =============================================================================
+# Generic Inverter Simulator (dynamic register module loading)
+# =============================================================================
+
+class GenericInverterSimulator:
+    """Generic Inverter Simulator — dynamically loads any *_registers.py module.
+
+    Supports all Model Maker v2 generated register files. Falls back gracefully
+    when optional attributes (INVERTER_MODE, STRING*_VOLTAGE, etc.) are missing.
+    """
+
+    VERSION = "1.0.0"
+    NOMINAL_POWER = 50000  # 50kW default
+
+    def __init__(self, protocol_name, logger=None):
+        self.protocol_name = protocol_name
+        self.logger = logger or logging.getLogger(f"Generic-{protocol_name}")
+        self.running = False
+
+        # Load register module dynamically
+        self._module = self._load_module(protocol_name)
+        self.reg_map = getattr(self._module, 'RegisterMap', None)
+        self.inv_mode_cls = getattr(self._module, 'InverterMode', None)
+        self.scale = getattr(self._module, 'SCALE', {})
+        self.mppt_channels = getattr(self._module, 'MPPT_CHANNELS', 4)
+        self.string_channels = getattr(self._module, 'STRING_CHANNELS', 0)
+        self._get_mppt_regs = getattr(self._module, 'get_mppt_registers', None)
+        self._get_string_regs = getattr(self._module, 'get_string_registers', None)
+
+        # Use FC03 by default (no register file uses RTU_FC_CODE currently)
+        self.fc_code = getattr(self._module, 'RTU_FC_CODE', 3)
+
+        # Simulation state
+        self.start_time = time.time()
+        self.total_energy = 1000.0  # kWh
+        self.on_off = 0
+        self.power_limit = 1000
+        self.power_factor_set = 1000
+        self.reactive_power_set = 0
+        self.control_mode = 'PF'
+        self.operation_mode = 0
+
+        # Resolve scale factors
+        self._s_voltage = self.scale.get('voltage', 0.1)
+        self._s_current = self.scale.get('current', 0.01)
+        self._s_power = self.scale.get('power', 0.1)
+        self._s_freq = self.scale.get('frequency', 0.01)
+
+        # PV nominal voltages per MPPT (0.1V units → ~390V)
+        self._pv_v_nom = [3900 + i * 50 for i in range(self.mppt_channels)]
+
+        self.store = self._create_datastore()
+        self._current = {}
+        self._current_lock = threading.Lock()
+
+        self.logger.info(f"[GENERIC] Loaded protocol '{protocol_name}' | "
+                         f"MPPT={self.mppt_channels} STR={self.string_channels} FC={self.fc_code:02d}")
+
+    @staticmethod
+    def _load_module(protocol_name):
+        """Load common/{protocol}_registers.py using same logic as RTU modbus_handler."""
+        import importlib, glob as _glob
+
+        common_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'common')
+
+        # 1st: exact name
+        module_name = f"common.{protocol_name}_registers"
+        try:
+            return importlib.import_module(module_name)
+        except ImportError:
+            pass
+
+        # 2nd: case-insensitive prefix glob
+        prefix = protocol_name.split('_')[0].lower()
+        candidates = sorted(_glob.glob(os.path.join(common_dir, '*_registers.py')))
+        for fpath in candidates:
+            fname = os.path.basename(fpath)
+            if fname.lower().startswith(prefix) and not fname.startswith('REF_'):
+                mod_name = f"common.{fname[:-3]}"
+                try:
+                    return importlib.import_module(mod_name)
+                except ImportError:
+                    continue
+
+        raise ImportError(f"Register module for protocol '{protocol_name}' not found in {common_dir}")
+
+    def _find_addr(self, *names):
+        """Try multiple attribute names on RegisterMap, return first valid int address or None."""
+        if self.reg_map is None:
+            return None
+        for name in names:
+            addr = getattr(self.reg_map, name, None)
+            if addr is not None and isinstance(addr, int):
+                return addr
+        return None
+
+    def _create_datastore(self):
+        """Create Modbus datastore — FC03 holding register or FC04 input register."""
+        block = ModbusLoggedHoldingBlock(
+            0, [0] * 0x8500, self.logger, simulator=self,
+            name=self.protocol_name[:3].upper()
+        )
+
+        if self.fc_code == 4:
+            store = ModbusSlaveContext(
+                di=ModbusSequentialDataBlock(0, [0] * 10),
+                co=ModbusSequentialDataBlock(0, [0] * 10),
+                hr=ModbusSequentialDataBlock(0, [0] * 10),
+                ir=block,
+            )
+        else:
+            store = ModbusSlaveContext(
+                di=ModbusSequentialDataBlock(0, [0] * 10),
+                co=ModbusSequentialDataBlock(0, [0] * 10),
+                hr=block,
+                ir=ModbusSequentialDataBlock(0, [0] * 10),
+            )
+
+        self.store = store
+        block._internal_update = True
+        self._init_control_registers()
+        block._internal_update = False
+        return store
+
+    def _init_control_registers(self):
+        """Set DER-AVM control register initial values."""
+        fc = self.fc_code + 1 if self.fc_code == 4 else 3  # FC04→fc_as_hex=4, FC03→3
+        addr = self._find_addr('DER_POWER_FACTOR_SET')
+        if addr is not None:
+            self.store.setValues(fc, addr, [self.power_factor_set])
+        addr = self._find_addr('DER_ACTION_MODE')
+        if addr is not None:
+            self.store.setValues(fc, addr, [self.operation_mode])
+        addr = self._find_addr('DER_REACTIVE_POWER_PCT')
+        if addr is not None:
+            self.store.setValues(fc, addr, [self.reactive_power_set])
+        addr = self._find_addr('DER_ACTIVE_POWER_PCT')
+        if addr is not None:
+            self.store.setValues(fc, addr, [self.power_limit])
+        addr = self._find_addr('INVERTER_ON_OFF')
+        if addr is not None:
+            self.store.setValues(fc, addr, [self.on_off])
+
+    def _get_sun_factor(self):
+        """Time-based sun intensity (0.0~1.0), sine wave 06:00-18:00."""
+        now = datetime.now()
+        hour = now.hour + now.minute / 60.0
+        if 6.0 <= hour <= 18.0:
+            return max(0.0, math.sin(math.pi * (hour - 6.0) / 12.0))
+        return 0.0
+
+    def _set_reg(self, addr, values):
+        """Write values to the correct function code store."""
+        if addr is None:
+            return
+        fc = self.fc_code + 1 if self.fc_code == 4 else 3
+        self.store.setValues(fc, addr, values)
+
+    def _get_reg(self, addr, count=1):
+        """Read values from the correct function code store."""
+        if addr is None:
+            return [0] * count
+        fc = self.fc_code + 1 if self.fc_code == 4 else 3
+        return self.store.getValues(fc, addr, count=count)
+
+    def _write_u32(self, low_addr, value):
+        """Write a U32 value to low and high word registers."""
+        if low_addr is None:
+            return
+        val = int(value) & 0xFFFFFFFF
+        self._set_reg(low_addr, [val & 0xFFFF])
+        # Check for _HIGH attribute at low_addr+1
+        self._set_reg(low_addr + 1, [(val >> 16) & 0xFFFF])
+
+    def _update_registers(self):
+        """Update all register values — called every ~1s by EquipmentSimulator."""
+        sun = self._get_sun_factor()
+        sun_var = sun * (1.0 + random.uniform(-0.03, 0.03))
+
+        EFFICIENCY = 0.975
+        power_cap = self.NOMINAL_POWER * (self.power_limit / 1000.0)
+
+        if sun_var > 0.01 and self.on_off == 0:
+            possible_ac_w = sun_var * self.NOMINAL_POWER * EFFICIENCY
+            ac_power_w = min(possible_ac_w, power_cap)
+            pv_total_w = ac_power_w / EFFICIENCY
+        else:
+            ac_power_w = 0
+            pv_total_w = 0
+
+        # --- MPPT data ---
+        n_mppt = self.mppt_channels or 4
+        for i in range(n_mppt):
+            if pv_total_w > 0:
+                mppt_v_raw = int(self._pv_v_nom[i] * (0.92 + 0.08 * sun_var)
+                                 + random.uniform(-10, 10))
+                mppt_p_w = pv_total_w / n_mppt * random.uniform(0.98, 1.02)
+                mppt_c_raw = int(mppt_p_w / (mppt_v_raw * self._s_voltage)
+                                 / self._s_current) if mppt_v_raw > 0 else 0
+                mppt_p_raw = int(mppt_p_w / self._s_power)
+            else:
+                mppt_v_raw, mppt_c_raw, mppt_p_raw = 0, 0, 0
+
+            if self._get_mppt_regs:
+                try:
+                    regs = self._get_mppt_regs(i + 1)
+                    # (voltage, current, power_low, power_high)
+                    self._set_reg(regs[0], [mppt_v_raw])
+                    self._set_reg(regs[1], [mppt_c_raw])
+                    self._set_reg(regs[2], [mppt_p_raw & 0xFFFF])
+                    self._set_reg(regs[3], [(mppt_p_raw >> 16) & 0xFFFF])
+                except (ValueError, IndexError):
+                    pass
+            else:
+                # Scan RegisterMap for MPPTn_VOLTAGE/CURRENT/POWER
+                n = i + 1
+                v_addr = self._find_addr(f'MPPT{n}_VOLTAGE', f'PV{n}_VOLTAGE')
+                c_addr = self._find_addr(f'MPPT{n}_CURRENT', f'PV{n}_CURRENT')
+                p_addr = self._find_addr(f'MPPT{n}_POWER')
+                self._set_reg(v_addr, [mppt_v_raw])
+                self._set_reg(c_addr, [mppt_c_raw])
+                if p_addr is not None:
+                    self._set_reg(p_addr, [mppt_p_raw & 0xFFFF])
+                    self._set_reg(p_addr + 1, [(mppt_p_raw >> 16) & 0xFFFF])
+
+        # --- String data ---
+        for i in range(self.string_channels):
+            mppt_idx = i // max(1, self.string_channels // max(1, n_mppt))
+            mppt_idx = min(mppt_idx, n_mppt - 1)
+            if pv_total_w > 0:
+                str_v_raw = int(self._pv_v_nom[mppt_idx] * (0.92 + 0.08 * sun_var)
+                                + random.uniform(-5, 5))
+                str_c_raw = int((pv_total_w / n_mppt / max(1, self.string_channels // n_mppt))
+                                / (str_v_raw * self._s_voltage) / self._s_current) if str_v_raw > 0 else 0
+            else:
+                str_v_raw, str_c_raw = 0, 0
+
+            if self._get_string_regs:
+                try:
+                    v_addr, c_addr = self._get_string_regs(i + 1)
+                    self._set_reg(v_addr, [str_v_raw])
+                    self._set_reg(c_addr, [str_c_raw])
+                except (ValueError, IndexError):
+                    pass
+            else:
+                n = i + 1
+                v_addr = self._find_addr(f'STRING{n}_VOLTAGE')
+                c_addr = self._find_addr(f'STRING{n}_CURRENT')
+                self._set_reg(v_addr, [str_v_raw])
+                self._set_reg(c_addr, [str_c_raw])
+
+        # --- AC phase data ---
+        ac_voltage_raw = int(380.0 / self._s_voltage) if ac_power_w > 0 else 0
+        ac_freq_raw = int(60.0 / self._s_freq)
+        ac_power_raw = int(ac_power_w / self._s_power)
+        pv_power_raw = int(pv_total_w / self._s_power)
+
+        # Phase voltages (try multiple naming conventions)
+        for names in [('L1_VOLTAGE', 'R_PHASE_VOLTAGE', 'A_PHASE_VOLTAGE'),
+                      ('L2_VOLTAGE', 'S_PHASE_VOLTAGE', 'B_PHASE_VOLTAGE'),
+                      ('L3_VOLTAGE', 'T_PHASE_VOLTAGE', 'C_PHASE_VOLTAGE')]:
+            addr = self._find_addr(*names)
+            self._set_reg(addr, [ac_voltage_raw])
+
+        # Phase currents
+        apparent_w = math.sqrt(ac_power_w**2) if ac_power_w > 0 else 0
+        phase_current_raw = int(apparent_w / 3 / 380.0 / self._s_current) if apparent_w > 0 else 0
+        for names in [('L1_CURRENT', 'R_PHASE_CURRENT'),
+                      ('L2_CURRENT', 'S_PHASE_CURRENT'),
+                      ('L3_CURRENT', 'T_PHASE_CURRENT')]:
+            addr = self._find_addr(*names)
+            self._set_reg(addr, [phase_current_raw])
+
+        # Frequency
+        addr = self._find_addr('FREQUENCY')
+        self._set_reg(addr, [ac_freq_raw])
+
+        # AC Power (U32)
+        addr = self._find_addr('AC_POWER', 'ACTIVE_POWER')
+        if addr is not None:
+            self._write_u32(addr, ac_power_raw)
+
+        # PV Power (U32)
+        addr = self._find_addr('PV_POWER')
+        if addr is not None:
+            self._write_u32(addr, pv_power_raw)
+
+        # Power factor
+        pf = self.power_factor_set / 1000.0
+        pf = max(0.85, min(1.0, abs(pf)))
+        pf_raw = int(pf * 1000)
+        addr = self._find_addr('POWER_FACTOR')
+        self._set_reg(addr, [pf_raw & 0xFFFF])
+
+        # Cumulative energy
+        total_kwh = int(self.total_energy)
+        addr = self._find_addr('CUMULATIVE_ENERGY', 'CUMULATIVE_ENERGY_LOW', 'TOTAL_ENERGY')
+        if addr is not None:
+            self._write_u32(addr, total_kwh)
+
+        # Accumulate energy
+        if ac_power_w > 0:
+            self.total_energy += ac_power_w / 3600000.0  # W·s → kWh
+
+        # Inverter mode
+        addr = self._find_addr('INVERTER_MODE')
+        if addr is not None:
+            if self.inv_mode_cls:
+                mode_val = getattr(self.inv_mode_cls, 'STANDBY', 1) if self.on_off == 1 \
+                    else getattr(self.inv_mode_cls, 'ON_GRID', 3)
+            else:
+                mode_val = 1 if self.on_off == 1 else 3
+            self._set_reg(addr, [mode_val])
+
+        # Error codes
+        for name in ('ERROR_CODE1', 'ERROR_CODE2', 'ERROR_CODE3'):
+            addr = self._find_addr(name)
+            self._set_reg(addr, [0])
+
+        # Temperature
+        addr = self._find_addr('INNER_TEMP', 'INTERNALTEMPERATURE', 'TEMPERATURE',
+                               'INVERTER_INNERTEMPERATURE', 'INVERTER_MODULETEMPERATURE')
+        self._set_reg(addr, [45])
+
+        # Update display dict (thread-safe)
+        with self._current_lock:
+            self._current = {
+                'sun_factor': sun,
+                'pv_power_kw': pv_total_w / 1000.0,
+                'ac_power_kw': ac_power_w / 1000.0,
+                'voltage': 380.0 if ac_power_w > 0 else 0,
+                'on_off': 'ON' if self.on_off == 0 else 'OFF',
+                'status': 'Running' if (self.on_off == 0 and sun_var > 0.01) else (
+                    'OFF' if self.on_off == 1 else 'Standby'),
+                'ctrl_mode': self.control_mode,
+            }
+
+    def _check_control_changes(self):
+        """Poll DER-AVM control registers for external writes."""
+        addr = self._find_addr('INVERTER_ON_OFF')
+        if addr is not None:
+            val = self._get_reg(addr)[0]
+            if val != self.on_off and val in (0, 1):
+                self.on_off = val
+                self.logger.info(f"[{self.protocol_name}] ON/OFF -> {'OFF' if val else 'ON'}")
+
+        addr = self._find_addr('DER_ACTIVE_POWER_PCT')
+        if addr is not None:
+            val = self._get_reg(addr)[0]
+            if val != self.power_limit and 0 <= val <= 1100:
+                self.power_limit = val
+                self.logger.info(f"[{self.protocol_name}] Power limit -> {val/10:.1f}%")
+
+        addr = self._find_addr('DER_POWER_FACTOR_SET')
+        if addr is not None:
+            val = self._get_reg(addr)[0]
+            if val != self.power_factor_set:
+                self.power_factor_set = val
+                self.control_mode = 'PF'
+                self.logger.info(f"[{self.protocol_name}] PF -> {val/1000:.3f}")
+
+        addr = self._find_addr('DER_REACTIVE_POWER_PCT')
+        if addr is not None:
+            val = self._get_reg(addr)[0]
+            if val != self.reactive_power_set:
+                self.reactive_power_set = val
+                self.control_mode = 'RP'
+                self.logger.info(f"[{self.protocol_name}] Reactive -> {val/10:.1f}%")
+
+        addr = self._find_addr('DER_ACTION_MODE')
+        if addr is not None:
+            val = self._get_reg(addr)[0]
+            if val != self.operation_mode:
+                self.operation_mode = val
+
+
+# =============================================================================
 # =============================================================================
 # Broadcast Proxy (slave_id=0)
 # =============================================================================
@@ -2580,8 +2956,8 @@ def _create_inverter_by_protocol(protocol, logger):
     elif p.startswith('sungrow'):
         return SungrowSimulator(logger)
     else:
-        # Generic: use Solarize simulator as fallback
-        return InverterSimulator(logger)
+        # Generic: dynamically load register module for any protocol
+        return GenericInverterSimulator(protocol, logger)
 
 
 def _interactive_setup():
