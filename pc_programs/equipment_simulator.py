@@ -542,20 +542,19 @@ class InverterSimulator:
         self.store.setValues(3, RegisterMap.DER_AVM_DIGITAL_METERCONNECT_STATUS + 1, [0x0001])
     
     def _init_iv_scan_registers(self):
-        """Initialize IV Scan data registers using store.setValues()"""
+        """Initialize IV Scan data registers — 200V~Voc, 64점"""
         for mppt in range(1, self.mppt_count + 1):
             voc = self.tracker_voc[mppt - 1]
-            v_min = self.tracker_v_min[mppt - 1]
-            
+
             v_regs = get_iv_tracker_voltage_registers(mppt, self.iv_scan_data_points)
-            voltages = generate_iv_voltage_data(voc, v_min, self.iv_scan_data_points)
+            voltages = generate_iv_voltage_data(voc, 200.0, self.iv_scan_data_points)
             self.store.setValues(3, v_regs['base'], voltages)
-            
+
             for string in range(1, self.strings_per_mppt + 1):
                 string_idx = (mppt - 1) * self.strings_per_mppt + (string - 1)
                 isc = self.string_isc[string_idx]
                 i_regs = get_iv_string_current_registers(mppt, string, self.iv_scan_data_points)
-                currents = generate_iv_current_data(isc, voc, v_min, self.iv_scan_data_points)
+                currents = generate_iv_current_data(isc, voc, 200.0, self.iv_scan_data_points)
                 self.store.setValues(3, i_regs['base'], currents)
     
     def _get_sun_factor(self):
@@ -742,43 +741,27 @@ class InverterSimulator:
         }
     
     def _regenerate_iv_data(self):
-        """Regenerate IV Scan data with realistic single-diode model curves.
+        """Regenerate IV Scan data — 200V~Voc 등간격, 스캔 시점 파워 참조.
 
-        I(V) = Isc * (1 - exp((V - Voc) / (n * Vt)))
-        where Vt ~ 1.5V (thermal voltage), n ~ 1.3 (ideality factor)
-        Isc is scaled by current radiation level.
+        I(V) = Isc * (1 - exp((V - Voc) / (n * Vt * Ns)))
+        Isc는 현재 복사량(sun_fraction) 비례.
         """
         env = self.env
-        sun_frac = max(0.1, env.get_sun_fraction())  # at least 10% for valid curve
+        sun_frac = max(0.1, env.get_sun_fraction())
 
         for mppt in range(1, self.mppt_count + 1):
             voc = self.tracker_voc[mppt - 1] + random.uniform(-3, 3)
-            v_min = self.tracker_v_min[mppt - 1]
 
             v_regs = get_iv_tracker_voltage_registers(mppt, self.iv_scan_data_points)
-            voltages = generate_iv_voltage_data(voc, v_min, self.iv_scan_data_points)
+            voltages = generate_iv_voltage_data(voc, 200.0, self.iv_scan_data_points)
             self.store.setValues(3, v_regs['base'], voltages)
 
             for string in range(1, self.strings_per_mppt + 1):
                 string_idx = (mppt - 1) * self.strings_per_mppt + (string - 1)
-                # Isc scales linearly with radiation
                 isc = self.string_isc[string_idx] * sun_frac + random.uniform(-0.2, 0.2)
                 isc = max(0.5, isc)
 
-                # Generate realistic IV curve using single-diode approximation
-                n_vt = 1.3 * 1.5  # n * Vt
-                n_pts = self.iv_scan_data_points
-                currents = []
-                for p in range(n_pts):
-                    v = v_min + (voc - v_min) * p / max(1, n_pts - 1)
-                    i_val = isc * (1.0 - math.exp((v - voc) / n_vt))
-                    i_val = max(0.0, i_val)
-                    # Convert to register format (0.01A, S16)
-                    i_reg = int(i_val * 100)
-                    if i_reg < 0:
-                        i_reg += 65536
-                    currents.append(i_reg)
-
+                currents = generate_iv_current_data(isc, voc, 200.0, self.iv_scan_data_points)
                 i_regs = get_iv_string_current_registers(mppt, string, self.iv_scan_data_points)
                 self.store.setValues(3, i_regs['base'], currents)
     
@@ -1511,39 +1494,25 @@ class KstarSimulator:
             self.iv_scan_status = 0
 
     def _init_iv_scan_data(self):
-        """Pre-populate IV curve data in FC04 registers 5000-7399.
-        Uses single-diode model: I(V) = Isc * (1 - exp((V - Voc) / (n * Vt)))
-        """
+        """Pre-populate IV curve data in FC04 registers — 200V~Voc, 100점, 스캔 시점 파워 참조."""
         from common.Kstar_PV_60kw_registers import generate_iv_voltage_data, generate_iv_current_data
         mppt_count = 3
         strings_per_mppt = 4
         data_points = KstarRegisters.IV_POINTS_PER_STRING  # 100
-        env = self.env
-        sun_frac = max(0.1, env.get_sun_fraction())
+        sun_frac = max(0.1, self.env.get_sun_fraction())
 
         for mppt in range(mppt_count):
             voc = 750.0 + mppt * 10.0 + random.uniform(-5, 5)
-            v_min = 200.0
-            isc_base = 12.0 * sun_frac  # Scale Isc by radiation
+            isc_base = 12.0 * sun_frac
 
-            voltages = generate_iv_voltage_data(voc, v_min, data_points)
+            voltages = generate_iv_voltage_data(voc, 200.0, data_points)
 
             for s in range(strings_per_mppt):
                 string_idx = mppt * strings_per_mppt + s
                 base = KstarRegisters.IV_DATA_BASE + string_idx * KstarRegisters.IV_REGS_PER_STRING
                 isc_str = max(0.5, isc_base + random.uniform(-0.3, 0.3))
 
-                # Generate realistic IV curve using single-diode approximation
-                n_vt = 1.3 * 1.5  # n * Vt
-                currents = []
-                for p in range(data_points):
-                    v = v_min + (voc - v_min) * p / max(1, data_points - 1)
-                    i_val = isc_str * (1.0 - math.exp((v - voc) / n_vt))
-                    i_val = max(0.0, i_val)
-                    i_reg = int(i_val * 100)
-                    if i_reg < 0:
-                        i_reg += 65536
-                    currents.append(i_reg)
+                currents = generate_iv_current_data(isc_str, voc, 200.0, data_points)
 
                 # Write interleaved V/I pairs to FC04 input registers
                 iv_regs = []

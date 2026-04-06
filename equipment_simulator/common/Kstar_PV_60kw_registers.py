@@ -198,6 +198,19 @@ class RegisterMap:
     GRID_FREQUENCY                           = 0x0C1A  # U16, 0.01Hz
     INV_R_VOLTAGE                            = 0x0C33  # U16, 0.1V
     INV_R_CURRENT                            = 0x0C34  # U16, 0.01A
+
+    # --- Kstar dedicated handler block aliases (modbus_handler) ---
+    BLOCK1_START                             = 0x0BB8  # FC04, 3000 (PV1_INPUT_VOLTAGE)
+    BLOCK1_COUNT                             = 60      # 3000~3059
+    BLOCK2_START                             = 0x0BF4  # FC04, 3060
+    BLOCK2_COUNT                             = 65      # 3060~3124
+    BLOCK3_START                             = 0x0C35  # FC04, 3125
+    BLOCK3_COUNT                             = 25      # 3125~3149
+    DSP_ALARM_CODE_L                         = DSP_ALARM_CODE    # 0x0BD3
+    DSP_ALARM_CODE_H                         = ARM_ALARM_CODE    # 0x0BDC
+    DSP_ERROR_CODE_L                         = DSP_ERROR_CODE    # 0x0BD4
+    GRID_S_VOLTAGE                           = 0x0C37  # 3127, U16, 0.1V
+    GRID_T_VOLTAGE                           = 0x0C3E  # 3134, U16, 0.1V
     INV_S_FREQUENCY                          = 0x0C35  # U16, 0.01Hz
     INV_R_POWER                              = 0x0C36  # S16, 1W
     INV_S_VOLTAGE                            = 0x0C3B  # U16, 0.1V
@@ -540,20 +553,28 @@ def get_iv_string_mapping(total_strings=9, strings_per_mppt=3):
     return mapping
 
 
-def generate_iv_voltage_data(voc, v_min, data_points=64):
-    """Generate IV scan voltage array (U16, 0.1V units, ascending v_min->voc)."""
-    step = (voc - v_min) / max(data_points - 1, 1)
-    return [int((v_min + step * i) * 10) & 0xFFFF for i in range(data_points)]
+def generate_iv_voltage_data(voc, v_min=200.0, data_points=100):
+    """Generate IV scan voltage array (U16, 0.1V units, 200V~Voc 등간격)."""
+    v_start = max(v_min, 200.0)
+    step = (voc - v_start) / max(data_points - 1, 1)
+    return [int((v_start + step * i) * 10) & 0xFFFF for i in range(data_points)]
 
 
-def generate_iv_current_data(isc, voc, v_min, data_points=64):
-    """Generate IV scan current array (U16, 0.01A units) using IV curve approximation."""
-    step = (voc - v_min) / max(data_points - 1, 1)
+def generate_iv_current_data(isc, voc, v_min=200.0, data_points=100):
+    """Generate IV scan current array (U16, 0.01A units) 단일 다이오드 모델.
+
+    I(V) = Isc * (1 - exp((V - Voc) / (n * Vt * Ns)))
+    """
+    import math
+    v_start = max(v_min, 200.0)
+    step = (voc - v_start) / max(data_points - 1, 1)
+    ns = max(1, voc / 50.0)
+    n_vt_ns = 1.3 * 0.026 * ns
     regs = []
     for i in range(data_points):
-        v = v_min + step * i
-        ratio = v / voc if voc > 0 else 0
-        current = max(0.0, isc * (1.0 - ratio ** 20))
+        v = v_start + step * i
+        current = isc * (1.0 - math.exp((v - voc) / n_vt_ns))
+        current = max(0.0, min(isc, current))
         regs.append(int(current * 100) & 0xFFFF)
     return regs
 
@@ -732,3 +753,195 @@ DATA_PARSER = {
     'string8_current'      : 'PV2_STRING_CURRENT_4',
     'string9_current'      : 'RS_PHASE_GRID_VOLTAGE',
 }
+
+
+# =========================================================================
+# Kstar System Status — raw status code constants
+# =========================================================================
+class KstarSystemStatus:
+    """Kstar system status register raw values."""
+    STANDBY       = 0   # Waiting / standby
+    CHECK         = 1   # Self-check
+    RUNNING       = 2   # Normal operation (grid-connected)
+    FAULT         = 3   # Fault
+    PERMANENT_FAULT = 4 # Permanent fault
+
+
+# =========================================================================
+# Kstar Status Converter — map raw status to Solarize InverterMode
+# =========================================================================
+class KstarStatusConverter:
+    """Convert Kstar system status to Solarize InverterMode values."""
+
+    # Kstar raw → Solarize InverterMode mapping
+    _MAP = {
+        KstarSystemStatus.STANDBY:        InverterMode.STANDBY,   # 0x01
+        KstarSystemStatus.CHECK:          InverterMode.STANDBY,   # 0x01
+        KstarSystemStatus.RUNNING:        InverterMode.ON_GRID,   # 0x03
+        KstarSystemStatus.FAULT:          InverterMode.FAULT,     # 0x05
+        KstarSystemStatus.PERMANENT_FAULT: InverterMode.FAULT,    # 0x05
+    }
+
+    @classmethod
+    def to_solarize(cls, raw):
+        """Convert Kstar raw status to Solarize InverterMode value."""
+        return cls._MAP.get(raw, InverterMode.STANDBY)
+
+    @classmethod
+    def to_inverter_mode(cls, raw):
+        """Alias for to_solarize (generic interface)."""
+        return cls.to_solarize(raw)
+
+
+# =========================================================================
+# Helper functions for Kstar dedicated handler (modbus_handler)
+# =========================================================================
+
+def calc_pv_total_power(block1_regs):
+    """Calculate total PV (DC) power from MPPT power registers in Block1.
+
+    Each MPPT power is S32 (2 regs). PV1/2/3 powers are at known offsets
+    from BLOCK1_START (0x0BB8).
+
+    Args:
+        block1_regs: list of register values from Block1 read (FC04, start=0x0BB8)
+
+    Returns:
+        int: Total PV power in watts
+    """
+    base = RegisterMap.BLOCK1_START
+    total = 0
+    # PV1_INPUT_POWER (0x0BBE), PV2 (0x0BC0), PV3 (0x0BC2) — each S32
+    for addr in (RegisterMap.PV1_INPUT_POWER,
+                 RegisterMap.PV2_INPUT_POWER,
+                 RegisterMap.PV3_INPUT_POWER):
+        offset = addr - base
+        if offset + 1 < len(block1_regs):
+            total += registers_to_s32(block1_regs[offset], block1_regs[offset + 1])
+    return total
+
+
+def calc_ac_total_power(block3_regs):
+    """Calculate total AC power from R/S/T phase power registers in Block3.
+
+    Each phase power is S16 at INV_R/S/T_POWER offsets from BLOCK3_START.
+
+    Args:
+        block3_regs: list of register values from Block3 read (FC04, start=0x0C35)
+
+    Returns:
+        int: Total AC power in watts (signed)
+    """
+    base = RegisterMap.BLOCK3_START
+
+    def _s16(v):
+        return v - 65536 if v > 32767 else v
+
+    total = 0
+    for addr in (RegisterMap.INV_R_POWER,
+                 RegisterMap.INV_S_POWER,
+                 RegisterMap.INV_T_POWER):
+        offset = addr - base
+        if offset < len(block3_regs):
+            total += _s16(block3_regs[offset])
+    return total
+
+
+def get_mppt_data(block1_regs, mppt_num):
+    """Get MPPT data (voltage, current, power) for a specific MPPT channel.
+
+    Args:
+        block1_regs: list of register values from Block1 read
+        mppt_num: MPPT number (1-3)
+
+    Returns:
+        dict: {'voltage': raw_0.1V, 'current': raw_0.01A, 'power': W}
+    """
+    base = RegisterMap.BLOCK1_START
+
+    # Voltage registers: PV1=0x0BB8, PV2=0x0BB9, PV3=0x0BBA
+    v_addr = RegisterMap.PV1_INPUT_VOLTAGE + (mppt_num - 1)
+    # Current registers: PV1=0x0BBB, PV2=0x0BBC, PV3=0x0BBD
+    c_addr = RegisterMap.PV1_INPUT_CURRENT + (mppt_num - 1)
+    # Power registers: PV1=0x0BBE(S32), PV2=0x0BC0(S32), PV3=0x0BC2(S32)
+    p_addr = RegisterMap.PV1_INPUT_POWER + (mppt_num - 1) * 2
+
+    v_offset = v_addr - base
+    c_offset = c_addr - base
+    p_offset = p_addr - base
+
+    voltage = block1_regs[v_offset] if v_offset < len(block1_regs) else 0
+    current = block1_regs[c_offset] if c_offset < len(block1_regs) else 0
+    power = 0
+    if p_offset + 1 < len(block1_regs):
+        power = registers_to_s32(block1_regs[p_offset], block1_regs[p_offset + 1])
+
+    return {'voltage': voltage, 'current': current, 'power': power}
+
+
+def get_string_currents(block1_regs, strings_per_mppt=3):
+    """Get string currents from Block1 registers.
+
+    Kstar has per-string current registers (PV1_STRING_CURRENT_1..4, PV2_STRING_CURRENT_1..4, etc.)
+    For 3 MPPTs x 3 strings = 9 strings total.
+
+    Args:
+        block1_regs: list of register values from Block1 read
+        strings_per_mppt: number of strings per MPPT (default 3)
+
+    Returns:
+        list of dicts: [{'raw_current': value_0.01A}, ...]
+    """
+    base = RegisterMap.BLOCK1_START
+    result = []
+
+    # String current registers start at PV1_STRING_CURRENT_1 = 0x0BF8
+    # PV1: 0x0BF8..0x0BFB (4 regs), PV2: 0x0BFC..0x0BFF (4 regs), PV3: 0x0C00 (1 reg)
+    string_addrs = [
+        RegisterMap.PV1_STRING_CURRENT_1,  # 0x0BF8
+        RegisterMap.PV1_STRING_CURRENT_2,  # 0x0BF9
+        RegisterMap.PV1_STRING_CURRENT_3,  # 0x0BFA
+        RegisterMap.PV2_STRING_CURRENT_1,  # 0x0BFC
+        RegisterMap.PV2_STRING_CURRENT_2,  # 0x0BFD
+        RegisterMap.PV2_STRING_CURRENT_3,  # 0x0BFE
+        RegisterMap.PV3_STRING_CURRENT_1,  # 0x0C00
+    ]
+
+    # Use up to strings_per_mppt * 3 strings
+    total_strings = strings_per_mppt * MPPT_CHANNELS
+    for i in range(total_strings):
+        if i < len(string_addrs):
+            offset = string_addrs[i] - base
+            if offset < len(block1_regs):
+                raw = block1_regs[offset]
+                # S16 conversion
+                if raw > 32767:
+                    raw = raw - 65536
+                result.append({'raw_current': raw})
+            else:
+                result.append({'raw_current': 0})
+        else:
+            result.append({'raw_current': 0})
+
+    return result
+
+
+def get_cumulative_energy_wh(block1_regs):
+    """Get cumulative energy in Wh from Block1 registers.
+
+    TOTAL_ENERGY_YIELD at 0x0BDE (U32, scale 0.1kWh).
+
+    Args:
+        block1_regs: list of register values from Block1 read
+
+    Returns:
+        int: Cumulative energy in Wh
+    """
+    base = RegisterMap.BLOCK1_START
+    offset = RegisterMap.TOTAL_ENERGY_YIELD - base
+
+    if offset + 1 < len(block1_regs):
+        raw_u32 = registers_to_u32(block1_regs[offset], block1_regs[offset + 1])
+        # 0.1 kWh → Wh: multiply by 100
+        return raw_u32 * 100
+    return 0

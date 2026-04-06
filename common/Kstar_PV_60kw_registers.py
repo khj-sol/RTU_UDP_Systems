@@ -553,20 +553,28 @@ def get_iv_string_mapping(total_strings=9, strings_per_mppt=3):
     return mapping
 
 
-def generate_iv_voltage_data(voc, v_min, data_points=64):
-    """Generate IV scan voltage array (U16, 0.1V units, ascending v_min->voc)."""
-    step = (voc - v_min) / max(data_points - 1, 1)
-    return [int((v_min + step * i) * 10) & 0xFFFF for i in range(data_points)]
+def generate_iv_voltage_data(voc, v_min=200.0, data_points=100):
+    """Generate IV scan voltage array (U16, 0.1V units, 200V~Voc 등간격)."""
+    v_start = max(v_min, 200.0)
+    step = (voc - v_start) / max(data_points - 1, 1)
+    return [int((v_start + step * i) * 10) & 0xFFFF for i in range(data_points)]
 
 
-def generate_iv_current_data(isc, voc, v_min, data_points=64):
-    """Generate IV scan current array (U16, 0.01A units) using IV curve approximation."""
-    step = (voc - v_min) / max(data_points - 1, 1)
+def generate_iv_current_data(isc, voc, v_min=200.0, data_points=100):
+    """Generate IV scan current array (U16, 0.01A units) 단일 다이오드 모델.
+
+    I(V) = Isc * (1 - exp((V - Voc) / (n * Vt * Ns)))
+    """
+    import math
+    v_start = max(v_min, 200.0)
+    step = (voc - v_start) / max(data_points - 1, 1)
+    ns = max(1, voc / 50.0)
+    n_vt_ns = 1.3 * 0.026 * ns
     regs = []
     for i in range(data_points):
-        v = v_min + step * i
-        ratio = v / voc if voc > 0 else 0
-        current = max(0.0, isc * (1.0 - ratio ** 20))
+        v = v_start + step * i
+        current = isc * (1.0 - math.exp((v - voc) / n_vt_ns))
+        current = max(0.0, min(isc, current))
         regs.append(int(current * 100) & 0xFFFF)
     return regs
 
