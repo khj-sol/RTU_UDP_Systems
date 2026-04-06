@@ -204,9 +204,33 @@ class RegisterMap:
     CUMULATIVE_ENERGY_LOW                    = CUMULATIVE_ENERGY
     DER_AVM_DIGITAL_METERCONNECT_STATUS      = 0x1210
 
-    # --- STRING alias (2 strings: MPPT당 1 string) ---
+    # --- STRING registers (PDF Input Reg 70~85: 8 strings) ---
+    V_STRING1                                = 0x0046  # 0.1V
+    # CURR_STRING1 = 0x0047 already defined
+    # V_STRING2 = 0x0048 already defined
+    # CURR_STRING2 = 0x0049 already defined
+    V_STRING3                                = 0x004A  # 0.1V
+    CURR_STRING3                             = 0x004B  # 0.1A
+    # V_STRING4 = 0x004C already defined
+    CURR_STRING4                             = 0x004D  # 0.1A
+    # V_STRING5 = 0x004E already defined
+    CURR_STRING5                             = 0x004F  # 0.1A
+    V_STRING6                                = 0x0050  # 0.1V
+    # CURR_STRING6 = 0x0051 already defined
+    # V_STRING7 = 0x0052 already defined
+    CURR_STRING7                             = 0x0053  # 0.1A
+    # V_STRING8 = 0x0054 already defined
+    # CURR_STRING8 = 0x0055 already defined
+
+    # --- STRING alias (modbus_handler: STRING{N}_CURRENT) ---
     STRING1_CURRENT                          = CURR_STRING1
     STRING2_CURRENT                          = CURR_STRING2
+    STRING3_CURRENT                          = CURR_STRING3
+    STRING4_CURRENT                          = CURR_STRING4
+    STRING5_CURRENT                          = CURR_STRING5
+    STRING6_CURRENT                          = CURR_STRING6
+    STRING7_CURRENT                          = CURR_STRING7
+    STRING8_CURRENT                          = CURR_STRING8
 
 
 
@@ -986,7 +1010,7 @@ SCALE = {
 
 # Channel configuration (used by modbus_handler for dynamic array sizing)
 MPPT_CHANNELS = 2
-STRING_CHANNELS = 2
+STRING_CHANNELS = 8
 
 
 def registers_to_u32(low, high):
