@@ -341,6 +341,12 @@ class RegisterMap:
     DER_ACTIVE_POWER_PCT                     = 0x07D3
     INVERTER_ON_OFF                          = 0x0834
 
+    # --- Simulator compatibility aliases ---
+    CUMULATIVE_ENERGY                        = ACCUMULATEDPOWERGENERATION  # 0x7D6A
+    PHASE_AACTIVEPOWER                       = 0x7D50  # S32, 1W (32080)
+    POWER_FACTOR                             = POWERFACTOR  # 0x7D54
+    PV_POWER                                 = 0x7D40  # S32, 1W (32064~32065)
+    REACTIVE_POWER                           = REACTIVEPOWER  # 0x7D52
 
 
 class InverterMode:

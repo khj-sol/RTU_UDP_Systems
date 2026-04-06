@@ -82,6 +82,19 @@ class RegisterMap:
     DER_ACTIVE_POWER_PCT                     = 0x07D3
     INVERTER_ON_OFF                          = 0x0834
 
+    # --- Simulator compatibility aliases ---
+    AC_POWER                                 = 0x0076  # S32, 0.1W
+    MPPT1_CURRENT                            = 0x0041  # U16, 0.01A
+    MPPT2_VOLTAGE                            = 0x0042  # U16, 0.1V
+    MPPT2_CURRENT                            = 0x0043  # U16, 0.01A
+    R_PHASE_VOLTAGE                          = 0x0070  # U16, 0.1V
+    R_PHASE_CURRENT                          = 0x0073  # U16, 0.01A
+    S_PHASE_VOLTAGE                          = 0x0071  # U16, 0.1V
+    S_PHASE_CURRENT                          = 0x0074  # U16, 0.01A
+    T_PHASE_VOLTAGE                          = 0x0072  # U16, 0.1V
+    T_PHASE_CURRENT                          = 0x0075  # U16, 0.01A
+    STRING3_CURRENT                          = 0x0062  # S16, 0.01A
+    STRING4_CURRENT                          = 0x0063  # S16, 0.01A
 
 
 class InverterMode:

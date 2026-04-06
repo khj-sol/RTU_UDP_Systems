@@ -180,6 +180,38 @@ class RegisterMap:
     DER_ACTIVE_POWER_PCT                     = 0x07D3
     INVERTER_ON_OFF                          = 0x0834
 
+    # --- Simulator compatibility aliases ---
+    ARM_VERSION                              = 0x0C90  # 3216, U16 ARM FW version
+    DSP_VERSION                              = 0x0C91  # 3217, U16 DSP FW version
+    MODEL_NAME_BASE                          = MACHINE_MODEL  # 0x0C80 ASCII 8 regs
+    SERIAL_NUMBER_BASE                       = 0x0C9C  # 3228, ASCII 11 regs
+    PV1_VOLTAGE                              = PV1_INPUT_VOLTAGE  # 0x0BB8
+    PV1_CURRENT                              = PV1_INPUT_CURRENT  # 0x0BBB
+    PV1_POWER                                = PV1_INPUT_POWER    # 0x0BBE
+    CUMULATIVE_PRODUCTION_L                  = 0x0BE1  # U32 low, 0.1kWh
+    DAILY_PRODUCTION                         = 0x0BDC  # U16, 0.1kWh
+    SYSTEM_STATUS                            = 0x0BE6  # U16 system status
+    INVERTER_STATUS                          = 0x0BE7  # U16 inverter status
+    RADIATOR_TEMP                            = 0x0BEF  # S16, 0.1 deg C
+    CHASSIS_TEMP                             = 0x0BF1  # S16, 0.1 deg C
+    GRID_R_VOLTAGE                           = 0x0C19  # U16, 0.1V
+    GRID_FREQUENCY                           = 0x0C1A  # U16, 0.01Hz
+    INV_R_VOLTAGE                            = 0x0C33  # U16, 0.1V
+    INV_R_CURRENT                            = 0x0C34  # U16, 0.01A
+    INV_S_FREQUENCY                          = 0x0C35  # U16, 0.01Hz
+    INV_R_POWER                              = 0x0C36  # S16, 1W
+    INV_S_VOLTAGE                            = 0x0C3B  # U16, 0.1V
+    INV_S_CURRENT                            = 0x0C3C  # U16, 0.01A
+    INV_S_POWER                              = 0x0C3D  # S16, 1W
+    INV_T_VOLTAGE                            = 0x0C42  # U16, 0.1V
+    INV_T_CURRENT                            = 0x0C43  # U16, 0.01A
+    INV_T_POWER                              = 0x0C44  # S16, 1W
+    IV_SCAN_COMMAND                          = 0x0FC3  # FC06 write to start scan
+    IV_SCAN_STATUS                           = 0x0C36  # FC04, low=status, high=progress
+    IV_DATA_BASE                             = 0x1388  # 5000, FC04 IV data start
+    IV_POINTS_PER_STRING                     = 100     # 100 V/I data points per string
+    IV_REGS_PER_STRING                       = 200     # 100 pairs x 2 regs (V+I)
+    INVERTER_MODE                            = SYSTEM_STATUS  # 0x0BE6
 
 
 class InverterMode:
