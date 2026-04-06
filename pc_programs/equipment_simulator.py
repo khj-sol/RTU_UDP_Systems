@@ -89,10 +89,25 @@ except ImportError as e:
 
 from common.Solarize_PV_50kw_registers import (
     RegisterMap, InverterMode, SCALE,
-    IVScanCommand, IVScanStatus,
     generate_iv_voltage_data, generate_iv_current_data,
     get_iv_tracker_voltage_registers, get_iv_string_current_registers
 )
+
+# IV Scan 상수 — 레지스터 파일에 없을 수 있으므로 시뮬레이터 자체 정의
+try:
+    from common.Solarize_PV_50kw_registers import IVScanCommand, IVScanStatus
+except ImportError:
+    class IVScanCommand:
+        NON_ACTIVE = 0
+        ACTIVE = 1
+
+    class IVScanStatus:
+        IDLE = 0
+        RUNNING = 1
+        FINISHED = 2
+        @classmethod
+        def to_string(cls, v):
+            return {0: 'IDLE', 1: 'RUNNING', 2: 'FINISHED'}.get(v, f'UNKNOWN({v})')
 from common.REF_relay_registers import KDU300RegisterMap, float_to_registers
 from common.REF_weather_registers import (
     SEM5046RegisterMap,
