@@ -1463,7 +1463,7 @@ class HuaweiSimulator:
     def _init_registers(self):
         """초기 레지스터 값 설정"""
         # Running Status: Standby
-        self.store.setValues(3, HuaweiRegisters.RUNNINGSTATUS, [HuaweiStatusConverter.STATUS_STANDBY_INIT])
+        self.store.setValues(3, HuaweiRegisters.RUNNINGSTATUS, [1])  # STANDBY=1
         # Fault codes: 0
         self.store.setValues(3, HuaweiRegisters.FAULT_CODE, [0, 0, 0, 0])
         # Grid frequency: 60.00Hz → 6000 (0.01Hz)
@@ -1532,8 +1532,7 @@ class HuaweiSimulator:
         self.store.setValues(3, HuaweiRegisters.FREQUENCY, [self.NOMINAL_FREQUENCY])
 
         # ── Running Status (32000) ────────────────────────────────────────────
-        status = HuaweiStatusConverter.STATUS_ON_GRID if sun_var > 0.01 \
-                 else HuaweiStatusConverter.STATUS_STANDBY_SUNLIGHT
+        status = 3 if sun_var > 0.01 else 1  # ON_GRID=3, STANDBY=1
         self.store.setValues(3, HuaweiRegisters.RUNNINGSTATUS, [status])
 
         # ── 내부 온도 (32087, S16, 0.1°C) ────────────────────────────────────
