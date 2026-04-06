@@ -19,7 +19,7 @@ class RegisterMap:
     FW_VERSION2H                             = 0x000C  # ASCII
     FW_VERSION2M                             = 0x000D  # U16
     L1_CURRENT                               = 0x000F  # U16, scale A 0.1
-    FREQUENCY                                = 0x000F  # U16
+    FREQUENCY                                = 0x000D  # U16, Fac (0.01Hz)
     SERIAL_NO_5                              = 0x0017  # U16
     SERIAL_NO_3                              = 0x0019  # U16, scale VA 0.1
     SERIAL_NO_2                              = 0x001A  # U16, scale KWH 0.1
@@ -47,7 +47,7 @@ class RegisterMap:
     # Monitoring Data
     # =========================================================================
     INVERTER_STATUS                          = 0x0000  # U16
-    POWER_FACTOR                             = 0x0000  # U16
+    POWER_FACTOR                             = 0x002D  # U16, IPF (0-20000)
     TEMPERATURE                              = 0x0001  # U16, scale W 0.1
     VPV1                                     = 0x0003  # U16, scale V 0.1
     PV1CURR                                  = 0x0004  # U16, scale A 0.1
