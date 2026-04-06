@@ -484,13 +484,39 @@ def _add_h01_mapping_sheet(wb, s1: dict, openpyxl_module) -> None:
         cell.fill = hdr_fill
         cell.border = thin
 
-    # 자동 매칭 빌드: h01_field → [(name, addr_hex), ...] (복수 매칭 지원)
+    # 자동 매칭 빌드: h01_match 테이블 우선 사용 (Stage1 H01 매칭 결과)
     h01_auto: Dict[str, List[Tuple[str, str]]] = {}
     all_cats = (s1.get('monitoring', []) + s1.get('info', []) +
                 s1.get('status', []) + s1.get('alarm', []))
+
+    # 1차: h01_match 테이블에서 매칭 정보 수집 (DER/HANDLER/PDF 전부 포함)
+    for hm in s1.get('h01_match', []):
+        field = hm.get('field', '').strip()
+        status = hm.get('status', '')
+        if not field or status not in ('O', '~'):
+            continue
+        source = hm.get('source', '')
+        defn = hm.get('definition', '') or ''
+        addr = hm.get('address', '') or ''
+        name = to_upper_snake(defn) if defn and defn != '-' else ''
+        if source == 'HANDLER':
+            display_name = 'HANDLER'
+            display_addr = ''
+        elif source == 'DER':
+            display_name = name or defn
+            display_addr = addr
+        else:
+            display_name = name or defn
+            display_addr = addr
+        if display_name:
+            entries = h01_auto.setdefault(field, [])
+            if not any(e[0] == display_name for e in entries):
+                entries.append((display_name, display_addr))
+
+    # 2차: reg.h01_field에서 추가 매칭 보완 (h01_match에 없는 것)
     for reg in all_cats:
         h01 = (getattr(reg, 'h01_field', '') or '').strip()
-        if h01:
+        if h01 and h01 in {f for f, _ in _H01_MAPPING_FIELDS}:
             name = to_upper_snake(reg.definition)
             addr = getattr(reg, 'address_hex', '') or ''
             if name:
