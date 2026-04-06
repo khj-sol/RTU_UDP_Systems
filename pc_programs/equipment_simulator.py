@@ -1463,15 +1463,15 @@ class HuaweiSimulator:
     def _init_registers(self):
         """초기 레지스터 값 설정"""
         # Running Status: Standby
-        self.store.setValues(3, HuaweiRegisters.RUNNING_STATUS, [HuaweiStatusConverter.STATUS_STANDBY_INIT])
+        self.store.setValues(3, HuaweiRegisters.RUNNINGSTATUS, [HuaweiStatusConverter.STATUS_STANDBY_INIT])
         # Fault codes: 0
-        self.store.setValues(3, HuaweiRegisters.FAULT_CODE_1, [0, 0, 0, 0])
+        self.store.setValues(3, HuaweiRegisters.FAULT_CODE, [0, 0, 0, 0])
         # Grid frequency: 60.00Hz → 6000 (0.01Hz)
-        self.store.setValues(3, HuaweiRegisters.GRID_FREQUENCY, [self.NOMINAL_FREQUENCY])
+        self.store.setValues(3, HuaweiRegisters.FREQUENCY, [self.NOMINAL_FREQUENCY])
         # Power factor: 1.000 → 1000 (0.001)
         self.store.setValues(3, HuaweiRegisters.POWER_FACTOR, [1000])
         # Internal temp: 35.0°C → 350 (0.1°C)
-        self.store.setValues(3, HuaweiRegisters.INTERNAL_TEMP, [350])
+        self.store.setValues(3, HuaweiRegisters.INTERNALTEMPERATURE, [350])
 
     def _get_sun_factor(self):
         """현재 시각 기반 일사량 팩터 (0.0~1.0)"""
@@ -1501,18 +1501,18 @@ class HuaweiSimulator:
                     i = 0
                 pv_regs.append(v & 0xFFFF)   # U16 voltage (0.1V)
                 pv_regs.append(i & 0xFFFF)   # S16 current (0.01A)
-        self.store.setValues(3, HuaweiRegisters.PV_STRING_BASE, pv_regs)  # 16 regs
+        self.store.setValues(3, HuaweiRegisters.PV_VOLTAGE, pv_regs)  # 16 regs
 
         # ── DC 입력 전력 (32064~32065, S32, 1W) ──────────────────────────────
         pv_power_w = int(self.NOMINAL_POWER * sun_var * random.uniform(0.97, 1.03)) \
                      if sun_var > 0 else 0
         # S32 big-endian: hi-word first, lo-word second
-        self.store.setValues(3, HuaweiRegisters.INPUT_POWER,
+        self.store.setValues(3, HuaweiRegisters.PV_POWER,
                              [(pv_power_w >> 16) & 0xFFFF, pv_power_w & 0xFFFF])
 
         # ── AC 3상 전압 (32069~32071, U16, 1V) ───────────────────────────────
         ac_v = self.NOMINAL_VOLTAGE
-        self.store.setValues(3, HuaweiRegisters.PHASE_A_VOLTAGE, [ac_v, ac_v, ac_v])
+        self.store.setValues(3, HuaweiRegisters.POWERGRIDPHASE_AVOLTAGE, [ac_v, ac_v, ac_v])
 
         # ── AC 3상 전류 (32072~32077, S32, 0.001A) ───────────────────────────
         ac_power_w = int(pv_power_w * 0.975)
@@ -1521,30 +1521,30 @@ class HuaweiSimulator:
         cur_regs = []
         for _ in range(3):
             cur_regs += [(phase_ma >> 16) & 0xFFFF, phase_ma & 0xFFFF]
-        self.store.setValues(3, HuaweiRegisters.PHASE_A_CURRENT, cur_regs)
+        self.store.setValues(3, HuaweiRegisters.POWERGRIDPHASE_ACURRENT, cur_regs)
 
         # ── 유효전력/무효전력/역률/주파수 (32080~32085) ───────────────────────
         # S32 big-endian: hi-word first, lo-word second
-        self.store.setValues(3, HuaweiRegisters.ACTIVE_POWER,
+        self.store.setValues(3, HuaweiRegisters.PHASE_AACTIVEPOWER,
                              [(ac_power_w >> 16) & 0xFFFF, ac_power_w & 0xFFFF])
         self.store.setValues(3, HuaweiRegisters.REACTIVE_POWER, [0, 0])   # 무효전력 0
         self.store.setValues(3, HuaweiRegisters.POWER_FACTOR, [1000])      # PF = 1.000
-        self.store.setValues(3, HuaweiRegisters.GRID_FREQUENCY, [self.NOMINAL_FREQUENCY])
+        self.store.setValues(3, HuaweiRegisters.FREQUENCY, [self.NOMINAL_FREQUENCY])
 
         # ── Running Status (32000) ────────────────────────────────────────────
         status = HuaweiStatusConverter.STATUS_ON_GRID if sun_var > 0.01 \
                  else HuaweiStatusConverter.STATUS_STANDBY_SUNLIGHT
-        self.store.setValues(3, HuaweiRegisters.RUNNING_STATUS, [status])
+        self.store.setValues(3, HuaweiRegisters.RUNNINGSTATUS, [status])
 
         # ── 내부 온도 (32087, S16, 0.1°C) ────────────────────────────────────
         temp = int((35.0 + sun_var * 20.0 + random.uniform(-2, 2)) * 10)
-        self.store.setValues(3, HuaweiRegisters.INTERNAL_TEMP, [temp & 0xFFFF])
+        self.store.setValues(3, HuaweiRegisters.INTERNALTEMPERATURE, [temp & 0xFFFF])
 
         # ── 누적 발전량 (32106~32107, U32, 1kWh) ─────────────────────────────
         self.total_energy_kwh += ac_power_w / 3600000.0   # W→kWh (1초 간격)
         energy_kwh = int(self.total_energy_kwh)
         # U32 big-endian: hi-word first, lo-word second
-        self.store.setValues(3, HuaweiRegisters.ACCUMULATED_ENERGY,
+        self.store.setValues(3, HuaweiRegisters.CUMULATIVE_ENERGY,
                              [(energy_kwh >> 16) & 0xFFFF, energy_kwh & 0xFFFF])
 
         # ── DEA-AVM Real-time Monitoring (0x03E8-0x03FD) ──────────────────────
