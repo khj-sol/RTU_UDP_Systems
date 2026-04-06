@@ -2960,8 +2960,78 @@ def _create_inverter_by_protocol(protocol, logger):
         return GenericInverterSimulator(protocol, logger)
 
 
+def _load_config_from_ini():
+    """Read rs485_ch1.ini + rtu_config.ini -> device list for simulator.
+
+    New default config source (replaces simulator_config.json).
+    rs485_ch1.ini is the single source of truth for device configuration,
+    shared by both RTU and simulator.
+    """
+    import configparser
+    config_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'config')
+    ini_path = os.path.join(config_dir, 'rs485_ch1.ini')
+
+    if not os.path.isfile(ini_path):
+        raise FileNotFoundError(f"rs485_ch1.ini not found: {ini_path}")
+
+    cfg = configparser.ConfigParser()
+    cfg.read(ini_path, encoding='utf-8')
+
+    # Load model names from device_models.ini for display
+    all_models = _load_device_models_ini()
+    model_names = {}
+    for dtype_key in ('inverter', 'relay', 'weather'):
+        for m in all_models[dtype_key]:
+            model_names[(dtype_key, m['protocol'])] = m['name']
+
+    # device_type mapping: 1=inverter, 4=relay, 5=weather
+    dtype_map = {1: 'inverter', 4: 'relay', 5: 'weather'}
+
+    devices = []
+    for section in sorted(cfg.sections()):
+        if not section.startswith('device_'):
+            continue
+        installed = cfg.get(section, 'installed', fallback='NO').strip().upper()
+        if installed != 'YES':
+            continue
+
+        sid = cfg.getint(section, 'slave_id')
+        dtype_id = cfg.getint(section, 'device_type', fallback=1)
+        protocol = cfg.get(section, 'protocol', fallback='solarize').strip()
+        model_id = cfg.getint(section, 'model', fallback=1)
+        name = cfg.get(section, 'name', fallback='').strip()
+
+        dtype = dtype_map.get(dtype_id, 'inverter')
+
+        # Auto-generate name from device_models.ini or protocol
+        if not name:
+            name = model_names.get((dtype, protocol), f'{protocol.title()} #{sid}')
+
+        devices.append({
+            'slave_id': sid,
+            'type': dtype,
+            'name': name,
+            'protocol': protocol,
+            'model_id': model_id,
+        })
+
+    # Read port settings from rtu_config.ini
+    rtu_ini = os.path.join(config_dir, 'rtu_config.ini')
+    port = 'COM10'
+    baudrate = 9600
+    if os.path.isfile(rtu_ini):
+        rtu_cfg = configparser.ConfigParser()
+        rtu_cfg.read(rtu_ini, encoding='utf-8')
+        if rtu_cfg.has_option('RS485', 'serial_port'):
+            port = rtu_cfg.get('RS485', 'serial_port').strip()
+        if rtu_cfg.has_option('RS485', 'baudrate'):
+            baudrate = rtu_cfg.getint('RS485', 'baudrate')
+
+    return {'port': port, 'baudrate': baudrate, 'devices': devices}
+
+
 def _interactive_setup():
-    """Interactive device configuration"""
+    """Interactive device configuration (fallback when rs485_ch1.ini missing)"""
     print("=" * 70)
     print("  Equipment Simulator v1.4.0")
     print("  Modbus RTU Slave Simulator (Multi-Device)")
@@ -3065,9 +3135,6 @@ def _interactive_setup():
         json.dump(config, f, indent=2, ensure_ascii=False)
     print(f"  Config saved: {config_path}")
 
-    # Generate matching RTU rs485_ch1.ini
-    _generate_rtu_config(devices, inv_models)
-
     return config
 
 
@@ -3082,11 +3149,11 @@ def main():
         description='Equipment Simulator v1.4.0'
     )
     parser.add_argument('--port', type=str, default=None,
-                        help='Serial port (overrides interactive/config)')
+                        help='Serial port (overrides config)')
     parser.add_argument('--baudrate', type=int, default=None,
-                        help='Baudrate (overrides interactive/config)')
+                        help='Baudrate (overrides config)')
     parser.add_argument('--config', type=str, default=None,
-                        help='Load config JSON (skip interactive setup)')
+                        help='Load config JSON (backward compat, overrides INI)')
     # Legacy args for backward compatibility
     parser.add_argument('--inverter-id', type=int, default=None)
     parser.add_argument('--relay-id', type=int, default=None)
@@ -3115,6 +3182,7 @@ def main():
             ]
         }
     elif args.config:
+        # Priority 1: CLI --config (JSON file, backward compat)
         try:
             with open(args.config, encoding='utf-8') as f:
                 config = json.load(f)
@@ -3122,20 +3190,35 @@ def main():
             print(f"  [ERROR] Config file error: {e}")
             sys.exit(1)
     else:
-        # Try auto-load last config
-        auto_cfg = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'simulator_config.json')
-        if os.path.isfile(auto_cfg):
-            print(f"  Previous config found: {auto_cfg}")
-            use_prev = input("  Use previous config? [Y/n]: ").strip().lower()
-            if use_prev != 'n':
+        # Priority 2: Read from rs485_ch1.ini (new default)
+        try:
+            config = _load_config_from_ini()
+            if config.get('devices'):
+                print(f"\n  Loaded {len(config['devices'])} devices from rs485_ch1.ini:")
+                for d in config['devices']:
+                    fc = "FC04" if d['type'] == 'inverter' and d['protocol'].lower().startswith('kstar') else "FC03"
+                    print(f"    [Slave {d['slave_id']:2d}] {d['type']:8s} {d['protocol']:12s} {d['name']} ({fc})")
+                print()
+            else:
+                config = None
+        except Exception as e:
+            print(f"  rs485_ch1.ini load failed: {e}")
+            config = None
+
+        # Priority 3: Fallback to simulator_config.json
+        if not config or not config.get('devices'):
+            auto_cfg = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'simulator_config.json')
+            if os.path.isfile(auto_cfg):
+                print(f"  Fallback: loading {auto_cfg}")
                 try:
                     with open(auto_cfg, encoding='utf-8') as f:
                         config = json.load(f)
                 except (FileNotFoundError, json.JSONDecodeError) as e:
-                    print(f"  [WARNING] Config load error: {e}, starting interactive setup")
+                    print(f"  [WARNING] Config load error: {e}")
                     config = None
 
-    if config is None:
+    # Priority 4: Interactive setup
+    if config is None or not config.get('devices'):
         config = _interactive_setup()
 
     # Override port/baudrate from CLI (with validation)
@@ -3145,6 +3228,12 @@ def main():
         if args.baudrate not in (1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200):
             print(f"  [WARNING] Non-standard baudrate: {args.baudrate}")
         config['baudrate'] = args.baudrate
+
+    # Ensure port/baudrate defaults
+    if 'port' not in config:
+        config['port'] = 'COM10'
+    if 'baudrate' not in config:
+        config['baudrate'] = 9600
 
     simulator = EquipmentSimulator(config)
     simulator.start()
