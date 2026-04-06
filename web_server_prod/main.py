@@ -690,19 +690,14 @@ async def shutdown():
 # Main
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    # DB 초기화 옵션 (기본: 유지)
+    # DB 자동 초기화 (기존 DB 삭제 후 새로 시작)
     if os.path.exists(DB_PATH):
-        choice = input(f"  기존 DB 발견: {DB_PATH}\n  삭제하고 새로 시작? [y/N]: ").strip().lower()
-        if choice == 'y':
-            os.remove(DB_PATH)
-            # WAL/SHM 파일도 삭제
-            for ext in ('-wal', '-shm'):
-                p = DB_PATH + ext
-                if os.path.exists(p):
-                    os.remove(p)
-            print("  DB 삭제 완료. 새로 생성됩니다.")
-        else:
-            print("  기존 DB 유지.")
+        os.remove(DB_PATH)
+        for ext in ('-wal', '-shm'):
+            p = DB_PATH + ext
+            if os.path.exists(p):
+                os.remove(p)
+        print(f"  기존 DB 삭제 완료: {DB_PATH}")
     print()
 
     uvicorn.run(
