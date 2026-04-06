@@ -472,12 +472,12 @@ def _add_h01_mapping_sheet(wb, s1: dict, openpyxl_module) -> None:
     ws['A1'] = 'H01_MAPPING — H01 필드별 레지스터 수동 매핑'
     ws['A1'].font = Font(bold=True, size=13)
     ws['A2'] = ('※ D열에서 매핑할 레지스터명을 선택/입력하세요.'
-                '  E~G열은 추천 후보, H열은 전체 목록(드롭다운용).')
+                '  E~G열은 추천 후보, H열은 전체 목록, I열은 FC코드(3 or 4).')
     ws['A2'].font = Font(italic=True, color='555555')
 
     # Row 3 헤더
     headers = ['No', 'H01 Field', '설명', '매칭된 레지스터 (주소)',
-               '추천 후보 1', '추천 후보 2', '추천 후보 3', '전체 레지스터 목록']
+               '추천 후보 1', '추천 후보 2', '추천 후보 3', '전체 레지스터 목록', 'FC']
     for j, h in enumerate(headers, start=1):
         cell = ws.cell(row=3, column=j, value=h)
         cell.font = hdr_font
@@ -486,6 +486,7 @@ def _add_h01_mapping_sheet(wb, s1: dict, openpyxl_module) -> None:
 
     # 자동 매칭 빌드: h01_match 테이블 우선 사용 (Stage1 H01 매칭 결과)
     h01_auto: Dict[str, List[Tuple[str, str]]] = {}
+    h01_fc: Dict[str, str] = {}  # h01_field → FC ('3' or '4')
     all_cats = (s1.get('monitoring', []) + s1.get('info', []) +
                 s1.get('status', []) + s1.get('alarm', []))
 
@@ -513,16 +514,19 @@ def _add_h01_mapping_sheet(wb, s1: dict, openpyxl_module) -> None:
             if not any(e[0] == display_name for e in entries):
                 entries.append((display_name, display_addr))
 
-    # 2차: reg.h01_field에서 추가 매칭 보완 (h01_match에 없는 것)
+    # 2차: reg.h01_field에서 추가 매칭 보완 + FC 수집
     for reg in all_cats:
         h01 = (getattr(reg, 'h01_field', '') or '').strip()
         if h01 and h01 in {f for f, _ in _H01_MAPPING_FIELDS}:
             name = to_upper_snake(reg.definition)
             addr = getattr(reg, 'address_hex', '') or ''
+            fc = str(getattr(reg, 'fc', '') or '').strip()
             if name:
                 entries = h01_auto.setdefault(h01, [])
                 if not any(e[0] == name for e in entries):
                     entries.append((name, addr))
+            if fc and h01 not in h01_fc:
+                h01_fc[h01] = fc
 
     # 전체 레지스터 목록 (H열, 드롭다운용) — 이름만
     avail_entries: list = []
@@ -572,6 +576,21 @@ def _add_h01_mapping_sheet(wb, s1: dict, openpyxl_module) -> None:
     for i, name in enumerate(avail_entries):
         ws.cell(row=DATA_START + i, column=8, value=name).fill = ref_fill
 
+    # I열: FC 코드 (기본값 자동, 사용자 수정 가능)
+    # 기본 FC 감지 (MONITORING 다수파)
+    _fc_vals = [str(getattr(r, 'fc', '')).strip() for r in all_cats
+                if str(getattr(r, 'fc', '')).strip()]
+    if _fc_vals and all(v in ('4', '04', 'FC04') for v in _fc_vals):
+        default_fc = '4'
+    else:
+        default_fc = '3'
+
+    for i, (field, desc) in enumerate(_H01_MAPPING_FIELDS):
+        row = DATA_START + i
+        fc_val = h01_fc.get(field, default_fc)
+        cell_fc = ws.cell(row=row, column=9, value=int(fc_val) if fc_val else 3)
+        cell_fc.border = thin
+
     # DataValidation — D열에 H열 범위 드롭다운
     last_avail_row = DATA_START + max(len(avail_entries), n_fields) - 1
     last_data_row  = DATA_START + n_fields - 1
@@ -590,6 +609,13 @@ def _add_h01_mapping_sheet(wb, s1: dict, openpyxl_module) -> None:
         dv.sqref = f'D{DATA_START}:D{last_data_row}'
         ws.add_data_validation(dv)
 
+    # DataValidation — I열 FC 드롭다운 (3 or 4)
+    dv_fc = DataValidation(type='list', formula1='"3,4"', allow_blank=False, showDropDown=False)
+    dv_fc.prompt = 'FC03=Holding, FC04=Input'
+    dv_fc.promptTitle = 'Function Code'
+    dv_fc.sqref = f'I{DATA_START}:I{last_data_row}'
+    ws.add_data_validation(dv_fc)
+
     ws.column_dimensions['A'].width = 5
     ws.column_dimensions['B'].width = 22
     ws.column_dimensions['C'].width = 30
@@ -598,6 +624,7 @@ def _add_h01_mapping_sheet(wb, s1: dict, openpyxl_module) -> None:
     ws.column_dimensions['F'].width = 35
     ws.column_dimensions['G'].width = 35
     ws.column_dimensions['H'].width = 35
+    ws.column_dimensions['I'].width = 5
 
 
 # ─── Stage 2 메인 함수 ───────────────────────────────────────────────────────

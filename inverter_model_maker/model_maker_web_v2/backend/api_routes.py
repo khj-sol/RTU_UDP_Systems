@@ -596,12 +596,17 @@ def get_h01_mapping(session_id: str):
                 if sv:
                     suggestions.append(str(sv).strip())
 
+            # FC 코드 (I열, col 9)
+            fc_val = ws.cell(row=row, column=9).value
+            fc = int(fc_val) if fc_val else 3
+
             fields.append({
                 'h01_field': h01_field,
                 'description': description,
                 'current_register': current_register,
                 'is_matched': bool(current_register),
                 'suggestions': suggestions,
+                'fc': fc,
             })
 
         wb.close()
@@ -625,6 +630,7 @@ def save_h01_mapping(session_id: str, body: dict):
         raise HTTPException(400, 'Stage 2 not completed')
 
     mappings = body.get('mappings', {})
+    fc_map = body.get('fc', {})  # {h01_field: 3 or 4}
 
     try:
         import openpyxl
@@ -643,6 +649,8 @@ def save_h01_mapping(session_id: str, body: dict):
             if h01_field in mappings:
                 ws.cell(row=row, column=4, value=mappings[h01_field] or None)
                 updated += 1
+            if h01_field in fc_map:
+                ws.cell(row=row, column=9, value=int(fc_map[h01_field]))
 
         wb.save(stage2_excel)
         wb.close()

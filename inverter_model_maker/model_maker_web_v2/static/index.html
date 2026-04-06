@@ -200,7 +200,7 @@
     .h01-mapping-section h4 { color: #7eb8f7; margin-bottom: 6px; }
     .h01-row {
       display: grid;
-      grid-template-columns: 148px 1fr;
+      grid-template-columns: 148px 1fr 46px;
       gap: 6px;
       align-items: center;
       padding: 3px 0;
@@ -944,9 +944,16 @@
         });
         opts += '</optgroup>';
 
+        const fc = f.fc || 3;
+        const fcSel3 = fc === 3 ? ' selected' : '';
+        const fcSel4 = fc === 4 ? ' selected' : '';
+
         row.innerHTML = `
           <div class="${cls}" title="${f.description}">${icon} ${f.h01_field}</div>
-          <select class="h01-select" data-field="${f.h01_field}" style="padding:3px 6px;font-size:11px">${opts}</select>`;
+          <select class="h01-select" data-field="${f.h01_field}" style="padding:3px 6px;font-size:11px;flex:1">${opts}</select>
+          <select class="h01-fc" data-field="${f.h01_field}" style="padding:3px 4px;font-size:11px;width:42px" title="FC">
+            <option value="3"${fcSel3}>F3</option><option value="4"${fcSel4}>F4</option>
+          </select>`;
         table.appendChild(row);
       });
 
@@ -962,6 +969,9 @@
     const selects = document.querySelectorAll('.h01-select[data-field]');
     const mappings = {};
     selects.forEach(s => { mappings[s.dataset.field] = s.value; });
+    const fcSelects = document.querySelectorAll('.h01-fc[data-field]');
+    const fc = {};
+    fcSelects.forEach(s => { fc[s.dataset.field] = parseInt(s.value); });
 
     const btn = document.getElementById('btn-save-mapping');
     btn.disabled = true;
@@ -971,7 +981,7 @@
       const r = await fetch(`${API}/h01-mapping/${sessionId}`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({mappings}),
+        body: JSON.stringify({mappings, fc}),
       });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const d = await r.json();
