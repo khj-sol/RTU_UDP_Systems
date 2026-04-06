@@ -403,8 +403,56 @@ _H01_MAPPING_FIELDS = [
 ]
 
 
+# H01 필드별 추천 후보 키워드 패턴 (소문자 매칭)
+_H01_SUGGEST_PATTERNS: Dict[str, List[str]] = {
+    'pv_voltage':        ['pv.*volt', 'dc.*volt', 'mppt.*volt'],
+    'pv_current':        ['pv.*curr', 'dc.*curr', 'mppt.*curr', 'string.*curr'],
+    'pv_power':          ['pv.*power', 'dc.*power', 'total.*dc'],
+    'r_voltage':         ['l1.*volt', 'r.*phase.*volt', 'phase.*a.*volt', 'grid.*volt', 'ac.*volt'],
+    's_voltage':         ['l2.*volt', 's.*phase.*volt', 'phase.*b.*volt'],
+    't_voltage':         ['l3.*volt', 't.*phase.*volt', 'phase.*c.*volt'],
+    'r_current':         ['l1.*curr', 'r.*phase.*curr', 'phase.*a.*curr', 'grid.*curr', 'ac.*curr'],
+    's_current':         ['l2.*curr', 's.*phase.*curr', 'phase.*b.*curr'],
+    't_current':         ['l3.*curr', 't.*phase.*curr', 'phase.*c.*curr'],
+    'ac_power':          ['ac.*power', 'active.*power', 'output.*power', 'total.*active'],
+    'power_factor':      ['power.*factor', 'pf$', 'cos.*phi'],
+    'frequency':         ['frequen', 'freq$', 'grid.*freq'],
+    'cumulative_energy': ['cumulative', 'total.*energy', 'lifetime.*energy', 'generation.*total'],
+    'status':            ['inverter.*mode', 'inverter.*stat', 'device.*stat', 'operat.*mode'],
+    'alarm1':            ['alarm', 'error.*code', 'fault.*code', 'warning'],
+    'alarm2':            ['alarm', 'error.*code', 'fault.*code', 'warning'],
+    'alarm3':            ['alarm', 'error.*code', 'fault.*code', 'warning'],
+}
+
+
+def _suggest_candidates(field: str, all_regs: list, max_n: int = 3) -> list:
+    """H01 필드에 대해 키워드 매칭으로 추천 후보 반환. [{name, addr_hex}, ...]"""
+    patterns = _H01_SUGGEST_PATTERNS.get(field, [])
+    if not patterns:
+        return []
+    candidates = []
+    seen = set()
+    for reg in all_regs:
+        name = to_upper_snake(reg.definition)
+        if not name or name in seen:
+            continue
+        defn_lower = reg.definition.lower().replace(' ', '_')
+        name_lower = name.lower()
+        for pat in patterns:
+            if re.search(pat, defn_lower) or re.search(pat, name_lower):
+                candidates.append({
+                    'name': name,
+                    'addr_hex': getattr(reg, 'address_hex', '') or '',
+                })
+                seen.add(name)
+                break
+        if len(candidates) >= max_n:
+            break
+    return candidates
+
+
 def _add_h01_mapping_sheet(wb, s1: dict, openpyxl_module) -> None:
-    """H01_MAPPING 시트 추가 — H01 필드별 레지스터 수동 매핑 (드롭다운 지원)."""
+    """H01_MAPPING 시트 추가 — H01 필드별 레지스터 수동 매핑 (주소+추천후보 포함)."""
     from openpyxl.styles import Font, PatternFill, Border, Side
     from openpyxl.worksheet.datavalidation import DataValidation
 
@@ -418,23 +466,25 @@ def _add_h01_mapping_sheet(wb, s1: dict, openpyxl_module) -> None:
     auto_fill  = PatternFill('solid', fgColor='D5F5E3')  # 연초록 — 자동 매칭
     empty_fill = PatternFill('solid', fgColor='FDECEA')  # 연빨강 — 미매칭
     ref_fill   = PatternFill('solid', fgColor='EBF5FB')  # 연파랑 — 참조 목록
+    suggest_fill = PatternFill('solid', fgColor='FFF9C4')  # 연노랑 — 추천 후보
 
     # Row 1 제목
     ws['A1'] = 'H01_MAPPING — H01 필드별 레지스터 수동 매핑'
     ws['A1'].font = Font(bold=True, size=13)
-    ws['A2'] = ('※ C열 드롭다운에서 매핑할 레지스터명(UPPER_SNAKE_CASE)을 선택하거나 직접 입력하세요.'
-                '  D열은 참조용 — 편집 불필요.')
+    ws['A2'] = ('※ D열에서 매핑할 레지스터명을 선택/입력하세요.'
+                '  E~G열은 추천 후보, H열은 전체 목록(드롭다운용).')
     ws['A2'].font = Font(italic=True, color='555555')
 
     # Row 3 헤더
-    headers = ['No', 'H01 Field', '설명', '매칭된 레지스터명', '사용 가능한 레지스터 목록']
+    headers = ['No', 'H01 Field', '설명', '매칭된 레지스터 (주소)',
+               '추천 후보 1', '추천 후보 2', '추천 후보 3', '전체 레지스터 목록']
     for j, h in enumerate(headers, start=1):
         cell = ws.cell(row=3, column=j, value=h)
         cell.font = hdr_font
         cell.fill = hdr_fill
         cell.border = thin
 
-    # 자동 매칭 빌드: h01_field → UPPER_SNAKE_CASE 레지스터명
+    # 자동 매칭 빌드: h01_field → (UPPER_SNAKE_CASE, address_hex)
     h01_auto: dict = {}
     all_cats = (s1.get('monitoring', []) + s1.get('info', []) +
                 s1.get('status', []) + s1.get('alarm', []))
@@ -442,16 +492,17 @@ def _add_h01_mapping_sheet(wb, s1: dict, openpyxl_module) -> None:
         h01 = (getattr(reg, 'h01_field', '') or '').strip()
         if h01 and h01 not in h01_auto:
             name = to_upper_snake(reg.definition)
+            addr = getattr(reg, 'address_hex', '') or ''
             if name:
-                h01_auto[h01] = name
+                h01_auto[h01] = (name, addr)
 
-    # 사용 가능한 레지스터 목록 (MONITORING 우선, UPPER_SNAKE_CASE)
-    avail_names: list = []
+    # 전체 레지스터 목록 (H열, 드롭다운용) — 이름만
+    avail_entries: list = []
     seen_avail: set = set()
     for reg in all_cats:
         name = to_upper_snake(reg.definition)
         if name and name not in seen_avail:
-            avail_names.append(name)
+            avail_entries.append(name)
             seen_avail.add(name)
 
     DATA_START = 4
@@ -460,38 +511,46 @@ def _add_h01_mapping_sheet(wb, s1: dict, openpyxl_module) -> None:
     # 데이터 행
     for i, (field, desc) in enumerate(_H01_MAPPING_FIELDS):
         row = DATA_START + i
-        matched = h01_auto.get(field, '')
+        auto = h01_auto.get(field)
+        if auto:
+            matched_display = f'{auto[0]} ({auto[1]})' if auto[1] else auto[0]
+        else:
+            matched_display = ''
 
         ws.cell(row=row, column=1, value=i + 1).border = thin
         ws.cell(row=row, column=2, value=field).border = thin
         ws.cell(row=row, column=3, value=desc).border = thin
 
-        cell_c = ws.cell(row=row, column=4, value=matched)
-        cell_c.border = thin
-        cell_c.fill = auto_fill if matched else empty_fill
+        cell_d = ws.cell(row=row, column=4, value=matched_display)
+        cell_d.border = thin
+        cell_d.fill = auto_fill if auto else empty_fill
 
-        avail_val = avail_names[i] if i < len(avail_names) else ''
-        cell_d = ws.cell(row=row, column=5, value=avail_val)
-        cell_d.fill = ref_fill
+        # 추천 후보 (E~G열)
+        candidates = _suggest_candidates(field, all_cats)
+        for ci, cand in enumerate(candidates[:3]):
+            val = f'{cand["name"]} ({cand["addr_hex"]})' if cand['addr_hex'] else cand['name']
+            cell = ws.cell(row=row, column=5 + ci, value=val)
+            cell.border = thin
+            cell.fill = suggest_fill
 
-    # D열 남은 레지스터명 기록
-    for i in range(n_fields, len(avail_names)):
-        ws.cell(row=DATA_START + i, column=5, value=avail_names[i]).fill = ref_fill
+    # H열: 전체 레지스터 목록 (드롭다운 소스)
+    for i, name in enumerate(avail_entries):
+        ws.cell(row=DATA_START + i, column=8, value=name).fill = ref_fill
 
-    # DataValidation — C열(4열)에 E열(5열) 범위 드롭다운
-    last_avail_row = DATA_START + max(len(avail_names), n_fields) - 1
+    # DataValidation — D열에 H열 범위 드롭다운
+    last_avail_row = DATA_START + max(len(avail_entries), n_fields) - 1
     last_data_row  = DATA_START + n_fields - 1
 
-    if avail_names:
+    if avail_entries:
         dv = DataValidation(
             type='list',
-            formula1=f'$E${DATA_START}:$E${last_avail_row}',
+            formula1=f'$H${DATA_START}:$H${last_avail_row}',
             allow_blank=True,
-            showDropDown=False,  # False = 드롭다운 화살표 표시
+            showDropDown=False,
         )
-        dv.error      = '목록에 없는 값입니다. E열 레지스터 목록을 확인하세요.'
+        dv.error      = '목록에 없는 값입니다. H열 전체 레지스터 목록을 확인하세요.'
         dv.errorTitle = '잘못된 입력'
-        dv.prompt     = 'E열의 레지스터 목록에서 선택하거나 직접 입력하세요.'
+        dv.prompt     = '드롭다운에서 선택하거나 직접 입력하세요.'
         dv.promptTitle = '레지스터 선택'
         dv.sqref = f'D{DATA_START}:D{last_data_row}'
         ws.add_data_validation(dv)
@@ -499,8 +558,11 @@ def _add_h01_mapping_sheet(wb, s1: dict, openpyxl_module) -> None:
     ws.column_dimensions['A'].width = 5
     ws.column_dimensions['B'].width = 22
     ws.column_dimensions['C'].width = 30
-    ws.column_dimensions['D'].width = 35
+    ws.column_dimensions['D'].width = 40
     ws.column_dimensions['E'].width = 35
+    ws.column_dimensions['F'].width = 35
+    ws.column_dimensions['G'].width = 35
+    ws.column_dimensions['H'].width = 35
 
 
 # ─── Stage 2 메인 함수 ───────────────────────────────────────────────────────

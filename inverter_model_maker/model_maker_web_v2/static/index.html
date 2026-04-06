@@ -921,16 +921,28 @@
         row.className = 'h01-row';
         const cls = f.is_matched ? 'h01-matched' : 'h01-unmatched';
         const icon = f.is_matched ? '✓' : '✗';
+        const sugg = f.suggestions || [];
 
+        // 현재 매칭에서 이름만 추출 (주소 제거: "NAME (0xXXXX)" → "NAME")
+        const curName = f.current_register.replace(/\s*\(0x[0-9A-Fa-f]+\)/, '').trim();
+
+        // 드롭다운: 추천 후보 → 구분선 → 전체 목록
         let opts = '<option value="">(없음)</option>';
-        const inList = avail.includes(f.current_register);
-        if (f.current_register && !inList) {
-          opts += `<option value="${f.current_register}" selected>${f.current_register}</option>`;
+        if (sugg.length > 0) {
+          opts += '<optgroup label="── 추천 후보 ──">';
+          sugg.forEach(s => {
+            const sName = s.replace(/\s*\(0x[0-9A-Fa-f]+\)/, '').trim();
+            const sel = sName === curName ? ' selected' : '';
+            opts += `<option value="${sName}"${sel}>${s}</option>`;
+          });
+          opts += '</optgroup>';
         }
+        opts += '<optgroup label="── 전체 목록 ──">';
         avail.forEach(reg => {
-          const sel = reg === f.current_register ? ' selected' : '';
+          const sel = reg === curName ? ' selected' : '';
           opts += `<option value="${reg}"${sel}>${reg}</option>`;
         });
+        opts += '</optgroup>';
 
         row.innerHTML = `
           <div class="${cls}" title="${f.description}">${icon} ${f.h01_field}</div>

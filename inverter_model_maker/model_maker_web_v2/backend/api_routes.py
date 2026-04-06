@@ -569,11 +569,11 @@ def get_h01_mapping(session_id: str):
         ws = wb['H01_MAPPING']
         DATA_START = 4
 
-        # E열 전체에서 사용 가능한 레지스터 목록 수집
+        # H열 전체에서 사용 가능한 레지스터 목록 수집 (드롭다운용)
         available_registers = []
         seen = set()
         for row_idx in range(DATA_START, ws.max_row + 1):
-            val = ws.cell(row=row_idx, column=5).value
+            val = ws.cell(row=row_idx, column=8).value  # H열
             if val:
                 v = str(val).strip()
                 if v and v not in seen:
@@ -588,11 +588,20 @@ def get_h01_mapping(session_id: str):
                 break
             description = str(ws.cell(row=row, column=3).value or '').strip()
             current_register = str(ws.cell(row=row, column=4).value or '').strip()
+
+            # 추천 후보 (E~G열)
+            suggestions = []
+            for col in (5, 6, 7):
+                sv = ws.cell(row=row, column=col).value
+                if sv:
+                    suggestions.append(str(sv).strip())
+
             fields.append({
                 'h01_field': h01_field,
                 'description': description,
                 'current_register': current_register,
                 'is_matched': bool(current_register),
+                'suggestions': suggestions,
             })
 
         wb.close()
