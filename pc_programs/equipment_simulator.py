@@ -618,16 +618,17 @@ class InverterSimulator:
             self.total_energy += (ac_power / 10) / 3600000
             self.today_energy += (ac_power / 10) / 3600
 
-        # Phase data (L1, L2, L3)
-        for base in [RegisterMap.L1_VOLTAGE, RegisterMap.L2_VOLTAGE, RegisterMap.L3_VOLTAGE]:
+        # Phase data (L1, L2, L3) — RTU Solarize handler 하드코딩 주소에 맞춤
+        # L1=0x1001, L2=0x1006, L3=0x100B (각 5 regs: V, I, P_low, P_high, Freq)
+        for base in [0x1001, 0x1006, 0x100B]:
             self.store.setValues(3, base, [ac_voltage, phase_current, phase_power & 0xFFFF, (phase_power >> 16) & 0xFFFF, ac_freq])
 
         # MPPT data — realistic PV voltage 600-800V range
         mppt_addresses = [
-            (RegisterMap.MPPT1_VOLTAGE, RegisterMap.MPPT1_CURRENT, RegisterMap.MPPT1_POWER + 1),
-            (RegisterMap.MPPT2_VOLTAGE, RegisterMap.MPPT2_CURRENT, RegisterMap.MPPT2_POWER + 1),
-            (RegisterMap.MPPT3_VOLTAGE, RegisterMap.MPPT3_CURRENT, RegisterMap.MPPT3_POWER + 1),
-            (RegisterMap.MPPT4_VOLTAGE, RegisterMap.MPPT4_CURRENT, RegisterMap.MPPT4_POWER + 1),
+            (RegisterMap.MPPT1_VOLTAGE, RegisterMap.MPPT1_CURRENT, RegisterMap.MPPT1_POWER),
+            (RegisterMap.MPPT2_VOLTAGE, RegisterMap.MPPT2_CURRENT, RegisterMap.MPPT2_POWER),
+            (RegisterMap.MPPT3_VOLTAGE, RegisterMap.MPPT3_CURRENT, RegisterMap.MPPT3_POWER),
+            (RegisterMap.MPPT4_VOLTAGE, RegisterMap.MPPT4_CURRENT, RegisterMap.MPPT4_POWER),
         ]
 
         for i, (v_addr, c_addr, p_addr) in enumerate(mppt_addresses):
@@ -660,25 +661,22 @@ class InverterSimulator:
             base_addr = RegisterMap.STRING1_VOLTAGE + i * 2
             self.store.setValues(3, base_addr, [str_voltage, str_current])
 
-        # Power registers
-        self.store.setValues(3, RegisterMap.PV_POWER, [pv_power & 0xFFFF, (pv_power >> 16) & 0xFFFF])
-        self.store.setValues(3, RegisterMap.AC_POWER, [ac_power & 0xFFFF, (ac_power >> 16) & 0xFFFF])
+        # Power registers — RTU Solarize handler 주소에 맞춤
+        self.store.setValues(3, 0x1048, [pv_power & 0xFFFF, (pv_power >> 16) & 0xFFFF])  # PV Power
+        self.store.setValues(3, 0x1037, [ac_power & 0xFFFF, (ac_power >> 16) & 0xFFFF])  # AC Power
 
-        # Mode and status
+        # Mode and status — RTU: 0x101C~0x1020 (status, alarm1, alarm2, alarm3, temp)
         mode_val = InverterMode.STANDBY if self.on_off == 1 else self.mode
-        self.store.setValues(3, RegisterMap.INVERTER_MODE, [mode_val])
-        # Inner temperature from environment
         inner_temp = int(env.air_temp + sun_factor * 25.0 + random.uniform(-2, 2))
-        self.store.setValues(3, RegisterMap.INNER_TEMP, [max(0, inner_temp)])
-        self.store.setValues(3, RegisterMap.ERROR_CODE1, [0, 0, 0])
+        self.store.setValues(3, 0x101C, [mode_val, 0, 0, 0, max(0, inner_temp)])
 
-        # Energy registers
+        # Energy registers — RTU: 0x1021~0x1022 (U32, kWh)
         total_kwh = int(self.total_energy)
-        self.store.setValues(3, RegisterMap.CUMULATIVE_ENERGY_LOW, [total_kwh & 0xFFFF, (total_kwh >> 16) & 0xFFFF])
+        self.store.setValues(3, 0x1021, [total_kwh & 0xFFFF, (total_kwh >> 16) & 0xFFFF])
 
-        # Power factor
+        # Power factor — RTU: 0x103D (S16, 0.001)
         pf_reg = int(pf * 1000)
-        self.store.setValues(3, RegisterMap.POWER_FACTOR, [pf_reg & 0xFFFF])
+        self.store.setValues(3, 0x103D, [pf_reg & 0xFFFF])
         
         # DEA-AVM registers
         phase_current_dea = int(phase_current / 10)
