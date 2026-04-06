@@ -406,8 +406,8 @@ class InverterSimulator:
         self.store.setValues(3, 0x600D, [IVScanStatus.IDLE])
         
         # DEA registers
-        self.store.setValues(3, 0x03F9  # DEA_POWER_FACTOR low word, [1000])
-        self.store.setValues(3, 0x03FB  # DEA_FREQUENCY low word, [600])
+        self.store.setValues(3, 0x03F9, [1000])   # DEA_POWER_FACTOR low word
+        self.store.setValues(3, 0x03FB, [600])    # DEA_FREQUENCY low word
         self.store.setValues(3, RegisterMap.DER_AVM_DIGITAL_METERCONNECT_STATUS + 1, [0x0001])
     
     def _init_iv_scan_registers(self):
@@ -588,7 +588,7 @@ class InverterSimulator:
             frequency_dea & 0xFFFF, (frequency_dea >> 16) & 0xFFFF,
             status_flags, 0,
         ]
-        self.store.setValues(3, 0x03E9  # DEA_L1_CURRENT low word, dea_values)
+        self.store.setValues(3, 0x03E9, dea_values)  # DEA_L1_CURRENT low word
         
         # IV Scan status
         if self.iv_scan_status == IVScanStatus.RUNNING:
