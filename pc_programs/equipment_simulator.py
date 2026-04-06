@@ -2283,7 +2283,7 @@ class EquipmentSimulator:
                 print(f"  Port: {self.port} | Baud: {self.baudrate} | Devices: {len(self.devices)}")
                 print("=" * 80)
 
-                for d in self.devices:
+                for d in sorted(self.devices, key=lambda x: x['slave_id']):
                     sim = d['sim']
                     try:
                         lock = getattr(sim, '_current_lock', None)
