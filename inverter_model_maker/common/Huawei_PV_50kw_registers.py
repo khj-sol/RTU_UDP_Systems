@@ -348,6 +348,23 @@ class RegisterMap:
     PV_POWER                                 = 0x7D40  # S32, 1W (32064~32065)
     REACTIVE_POWER                           = REACTIVEPOWER  # 0x7D52
 
+    # --- Huawei dedicated handler aliases (modbus_handler) ---
+    PV_STRING_BASE                           = PV1VOLTAGE       # 0x7D10, 32016
+    PV_STRING_REG_COUNT                      = 16               # 8 strings x 2 regs (V+I)
+    INPUT_POWER                              = 0x7D40           # 32064, S32 1W
+    PHASE_A_VOLTAGE                          = POWERGRIDPHASE_AVOLTAGE  # 0x7D45, 32069
+    PHASE_A_CURRENT                          = POWERGRIDPHASE_ACURRENT  # 0x7D48, 32072
+    PHASE_B_CURRENT                          = POWERGRIDPHASE_BCURRENT  # 0x7D4A, 32074
+    PHASE_C_CURRENT                          = POWERGRIDPHASE_CCURRENT  # 0x7D4C, 32076
+    ACTIVE_POWER                             = 0x7D50           # 32080, S32 1W
+    RUNNING_STATUS                           = 0x7D00           # 32000
+    ACCUMULATED_ENERGY                       = ACCUMULATEDPOWERGENERATION  # 0x7D6A, 32106
+
+
+    # IV Scan block layout
+    IV_TRACKER_BLOCK_SIZE             = 0x0100  # 256 regs per tracker
+    IV_SCAN_DATA_POINTS              = 64      # default data points
+
 
 class InverterMode:
     """Inverter Mode Table (0x101D)"""
@@ -2232,3 +2249,127 @@ DATA_PARSER = {
     'mppt4_voltage'        : 'CEI0_16_MV480',
     'mppt4_current'        : 'PO12_3',
 }
+
+
+# =========================================================================
+# HuaweiStatusConverter alias (modbus_handler imports this name)
+# =========================================================================
+HuaweiStatusConverter = HuaweiPvStatusConverter
+
+# Add to_h01 method — converts Huawei running status to H01 INV_STATUS value
+# Huawei status: 0=Standby, 1=Grid-Connected, 2=Grid-Connected(limited),
+#                3=Fault, 0x100=Shutdown
+# H01 status: 0x01=Standby, 0x03=On-Grid, 0x05=Fault
+_HUAWEI_STATUS_MAP = {
+    0x0000: 0x01,  # Standby
+    0x0001: 0x03,  # Grid-Connected → On-Grid
+    0x0002: 0x03,  # Grid-Connected (limited) → On-Grid
+    0x0003: 0x05,  # Fault
+    0x0100: 0x01,  # Shutdown → Standby
+}
+
+
+@classmethod
+def _to_h01(cls, raw):
+    """Convert Huawei running status register to H01 status code."""
+    return _HUAWEI_STATUS_MAP.get(raw, 0x01)
+
+
+# Monkey-patch to_h01 onto HuaweiPvStatusConverter
+HuaweiPvStatusConverter.to_h01 = _to_h01
+
+
+# =========================================================================
+# Helper functions for Huawei dedicated handler (modbus_handler)
+# =========================================================================
+
+def s16(val):
+    """Convert unsigned 16-bit to signed 16-bit."""
+    return val - 65536 if val > 32767 else val
+
+
+def get_pv_string_data(regs):
+    """Get PV string voltage/current data from Block A registers.
+
+    Block A is 16 registers starting at PV_STRING_BASE (0x7D10).
+    Layout: PV1V, PV1I, PV2V, PV2I, ..., PV8V, PV8I
+    Voltage: S16, scale 10 (0.1V) → raw value is in 0.1V
+    Current: S16, scale 100 (0.01A) → raw value is in 0.01A
+
+    Args:
+        regs: list of 16 register values from Block A read
+
+    Returns:
+        list of dicts: [{'voltage': raw_0.1V, 'current': raw_0.01A}, ...]
+    """
+    result = []
+    for i in range(0, min(len(regs), 16), 2):
+        v_raw = s16(regs[i])
+        c_raw = s16(regs[i + 1]) if i + 1 < len(regs) else 0
+        # Huawei scale: V * 10 (so raw/10 = V), I * 100 (so raw/100 = A)
+        # Convert to common 0.1V / 0.01A format for compatibility
+        result.append({
+            'voltage': abs(v_raw),    # raw in 0.1V (Huawei scale 10)
+            'current': abs(c_raw),    # raw in 0.01A (Huawei scale 100)
+        })
+    return result
+
+
+def get_mppt_from_strings(pv_data):
+    """Get MPPT data derived from PV string data.
+
+    Huawei strings map to MPPTs (2 strings per MPPT typically):
+    MPPT1 = PV1+PV2, MPPT2 = PV3+PV4, MPPT3 = PV5+PV6, MPPT4 = PV7+PV8
+
+    Args:
+        pv_data: list of dicts from get_pv_string_data()
+
+    Returns:
+        list of dicts: [{'voltage': avg_0.1V, 'current': sum_0.01A}, ...]
+    """
+    result = []
+    strings_per_mppt = 2
+    for mppt_idx in range(MPPT_CHANNELS):
+        start = mppt_idx * strings_per_mppt
+        end = start + strings_per_mppt
+        group = pv_data[start:end] if start < len(pv_data) else []
+
+        if group:
+            # Voltage = average of non-zero strings
+            voltages = [s['voltage'] for s in group if s['voltage'] > 0]
+            avg_v = int(sum(voltages) / len(voltages)) if voltages else 0
+            # Current = sum of all strings in this MPPT
+            total_c = sum(s['current'] for s in group)
+            result.append({'voltage': avg_v, 'current': total_c})
+        else:
+            result.append({'voltage': 0, 'current': 0})
+
+    return result
+
+
+def get_string_currents(pv_data):
+    """Get string currents list from PV string data.
+
+    Args:
+        pv_data: list of dicts from get_pv_string_data()
+
+    Returns:
+        list of int: raw current values (0.01A)
+    """
+    return [s['current'] for s in pv_data]
+
+
+def get_cumulative_energy_wh(reg_low, reg_high):
+    """Get cumulative energy in Wh from two U16 registers.
+
+    Huawei ACCUMULATED_ENERGY (32106~32107): U32, scale 1 kWh.
+
+    Args:
+        reg_low: low word (U16)
+        reg_high: high word (U16)
+
+    Returns:
+        int: Cumulative energy in Wh
+    """
+    kwh = registers_to_u32(reg_low, reg_high)
+    return kwh * 1000  # kWh → Wh
