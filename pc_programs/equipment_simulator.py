@@ -1592,6 +1592,13 @@ class HuaweiSimulator:
         self.store.setValues(3, HuaweiRegisters.PHASE_AACTIVEPOWER, [0, 0])
         # PV 전력 초기화
         self.store.setValues(3, HuaweiRegisters.PV_POWER, [0, 0])
+        # 누적발전량 초기화 (0x7D6A, U32 1kWh) — RTU 주소
+        init_kwh = int(self.total_energy_kwh)
+        self.store.setValues(3, 0x7D6A, [(init_kwh >> 16) & 0xFFFF, init_kwh & 0xFFFF])
+        # Running Status 초기화 (0x7D00, 6 regs)
+        self.store.setValues(3, 0x7D00, [1, 0, 0, 0, 0, 0])  # STANDBY=1
+        # Block E 초기화 (0x7D50, 6 regs: power, reactive, pf, freq)
+        self.store.setValues(3, 0x7D50, [0, 0, 0, 0, 1000, self.NOMINAL_FREQUENCY])
 
     def _get_sun_factor(self):
         """Get sun factor from shared environment."""
