@@ -1620,46 +1620,46 @@ class HuaweiSimulator:
                 pv_regs.append(i & 0xFFFF)
         self.store.setValues(3, HuaweiRegisters.PV_VOLTAGE, pv_regs)
 
-        # DC input power (S32, 1W)
+        # DC input power — RTU Block B: INPUT_POWER(0x7D40), S32 1W
         pv_power_w = int(self.NOMINAL_POWER * sun_var * random.uniform(0.97, 1.03)) \
                      if sun_var > 0 else 0
-        self.store.setValues(3, HuaweiRegisters.PV_POWER,
-                             [(pv_power_w >> 16) & 0xFFFF, pv_power_w & 0xFFFF])
+        self.store.setValues(3, 0x7D40, [(pv_power_w >> 16) & 0xFFFF, pv_power_w & 0xFFFF])
 
-        # AC 3-phase voltage (U16, 1V)
+        # AC 3-phase voltage — RTU Block C: PHASE_A_VOLTAGE(0x7D45), U16×3 1V
         ac_v = self.NOMINAL_VOLTAGE + int(random.uniform(-2, 2))
-        self.store.setValues(3, HuaweiRegisters.POWERGRIDPHASE_AVOLTAGE, [ac_v, ac_v, ac_v])
+        self.store.setValues(3, 0x7D45, [ac_v, ac_v, ac_v])
 
-        # AC power and current
+        # AC 3-phase current — RTU Block D: PHASE_A_CURRENT(0x7D48), S32×3 0.001A
         ac_power_w = int(pv_power_w * 0.97)
         phase_ma = int(ac_power_w / 3 / ac_v * 1000) if (ac_power_w > 0 and ac_v > 0) else 0
         cur_regs = []
         for _ in range(3):
             cur_regs += [(phase_ma >> 16) & 0xFFFF, phase_ma & 0xFFFF]
-        self.store.setValues(3, HuaweiRegisters.POWERGRIDPHASE_ACURRENT, cur_regs)
+        self.store.setValues(3, 0x7D48, cur_regs)
 
-        # Active power / reactive power / PF / frequency
+        # Block E: ACTIVE_POWER(0x7D50)~0x7D55, 6 regs 연속
+        # [ac_power_H, ac_power_L, reactive_H, reactive_L, pf(S16), freq(U16 0.01Hz)]
         pf_val = int(random.uniform(0.98, 1.0) * 1000) if ac_power_w > 0 else 1000
         grid_freq = int(env.frequency * 100)
-        self.store.setValues(3, HuaweiRegisters.PHASE_AACTIVEPOWER,
-                             [(ac_power_w >> 16) & 0xFFFF, ac_power_w & 0xFFFF])
-        self.store.setValues(3, HuaweiRegisters.REACTIVE_POWER, [0, 0])
-        self.store.setValues(3, HuaweiRegisters.POWER_FACTOR, [pf_val])
-        self.store.setValues(3, HuaweiRegisters.FREQUENCY, [grid_freq])
+        self.store.setValues(3, 0x7D50, [
+            (ac_power_w >> 16) & 0xFFFF, ac_power_w & 0xFFFF,  # Active Power S32
+            0, 0,                                                 # Reactive Power S32
+            pf_val & 0xFFFF,                                     # Power Factor S16
+            grid_freq & 0xFFFF,                                  # Frequency U16
+        ])
 
-        # Running Status (32000)
-        status = 3 if sun_var > 0.01 else 1
-        self.store.setValues(3, HuaweiRegisters.RUNNINGSTATUS, [status])
+        # Running Status — RTU Block F: RUNNING_STATUS(0x7D00), 6 regs
+        status = 3 if sun_var > 0.01 else 1  # ON_GRID=3, STANDBY=1
+        self.store.setValues(3, 0x7D00, [status, 0, 0, 0, 0, 0])
 
         # Internal temperature (S16, 0.1C) — from environment
         temp = int((env.air_temp + sun_var * 25.0 + random.uniform(-2, 2)) * 10)
         self.store.setValues(3, HuaweiRegisters.INTERNALTEMPERATURE, [temp & 0xFFFF])
 
-        # Cumulative energy (U32, 1kWh)
+        # Cumulative energy — RTU Block G: ACCUMULATED_ENERGY(0x7D6A), U32 1kWh
         self.total_energy_kwh += ac_power_w / 3600000.0
         energy_kwh = int(self.total_energy_kwh)
-        self.store.setValues(3, HuaweiRegisters.CUMULATIVE_ENERGY,
-                             [(energy_kwh >> 16) & 0xFFFF, energy_kwh & 0xFFFF])
+        self.store.setValues(3, 0x7D6A, [(energy_kwh >> 16) & 0xFFFF, energy_kwh & 0xFFFF])
 
         # DEA-AVM registers
         def _to_s32_regs(v):
