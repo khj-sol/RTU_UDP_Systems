@@ -309,6 +309,9 @@ def detect_channel_number(definition: str) -> Optional[tuple]:
         return None
     if 'test' in dl or 'threshold' in dl:
         return None
+    # V2: alarm/fault/error 레지스터는 MPPT 채널이 아님 (Solis Fault Code 03 등 오감지 방지)
+    if any(k in dl for k in ['fault', 'error', 'alarm', 'warning']):
+        return None
 
     # Kstar: PV{n} String current {m} → STRING
     m = PV_STRING_CURRENT_RE.search(definition)
