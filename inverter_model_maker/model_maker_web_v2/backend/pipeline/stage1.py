@@ -1697,10 +1697,36 @@ def build_h01_match_table(categorized: dict, meta: dict) -> List[dict]:
                 'note': '보조 알람 없음' if slot != 'alarm1' else '알람 미발견',
             })
 
+    # MPPT voltage를 먼저 모두 수집 → current 매칭 시 주소 근접성 활용
+    mppt_v_addrs = {}  # {n: address}
+    for n in range(1, max_mppt + 1):
+        v_reg = _find_matched_reg(categorized, f'mppt{n}_voltage')
+        if v_reg and isinstance(v_reg.address, int):
+            mppt_v_addrs[n] = v_reg.address
+
     for n in range(1, max_mppt + 1):
         for mtype in ['voltage', 'current']:
             field = f'mppt{n}_{mtype}'
             reg = _find_matched_reg(categorized, field)
+
+            # current인 경우 주소 근접성 검증 (voltage ±10 범위)
+            if reg and mtype == 'current' and n in mppt_v_addrs and isinstance(reg.address, int):
+                v_addr = mppt_v_addrs[n]
+                if abs(reg.address - v_addr) > 10:
+                    # 잘못된 매칭 — voltage 근처에서 current 재검색
+                    better = None
+                    for cat in ['MONITORING', 'INFO']:
+                        for r in categorized.get(cat, []):
+                            if not isinstance(r.address, int): continue
+                            dl = r.definition.lower()
+                            if any(k in dl for k in ['current', 'curr', '전류']):
+                                if abs(r.address - v_addr) <= 3:
+                                    better = r
+                                    break
+                        if better: break
+                    if better:
+                        reg = better
+
             if reg:
                 rows.append(_make_pdf_match_row(field, reg))
             elif mtype == 'voltage':
