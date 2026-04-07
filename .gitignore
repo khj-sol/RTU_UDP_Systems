@@ -25,3 +25,7 @@ inverter_model_maker/model_maker_web_v2/temp/*
 !inverter_model_maker/model_maker_web_v2/temp/.gitkeep
 inverter_model_maker/model_maker_web_v2/results/*/
 !inverter_model_maker/model_maker_web_v2/results/_success_index.json
+
+# Excel lock files
+inverter_model_maker/*/~$*.xlsx
+INVERTER_MODEL_MAKER/*/~$*.xlsx
