@@ -359,6 +359,93 @@ def test_der_avm_monitor(rtu_id):
     return pass_cnt > 0
 
 
+def test_info(rtu_id):
+    """Phase 7: Verify RTU Info (H05 body 1) and Inverter Info (H05 body 11).
+
+    - RTU Info: trigger via /api/control/rtu_info, then check /api/rtus rtu_info field
+    - Inverter Info: trigger via /api/control/inv_model for INV_1, then check
+      /api/rtus/{id}/devices INV_1 data has model_name + serial_number
+    """
+    log("=" * 80)
+    log(f"PHASE 7: RTU Info + Inverter Info")
+    fail = 0
+
+    # 7.1 RTU Info — trigger explicit request
+    log(f"  7.1 Triggering H03 CTRL_RTU_INFO")
+    r = post_api('/api/control/rtu_info', {
+        'rtu_id': rtu_id, 'device_num': 0, 'value': 0
+    })
+    if r and 'error' not in r:
+        log(f"      sent: {r}", 'OK')
+    else:
+        log(f"      FAIL: {r}", 'FAIL')
+        fail += 1
+    time.sleep(3)
+
+    rtus_list = fetch_api('/api/rtus')
+    rtu_info = None
+    if rtus_list:
+        for r in rtus_list.get('rtus', []):
+            if int(r.get('rtu_id', -1)) == int(rtu_id):
+                rtu_info = r.get('rtu_info', {})
+                log(f"      rtu_info={rtu_info} rtu_type={r.get('rtu_type')}", 'OK')
+                break
+    if not rtu_info or not rtu_info.get('model'):
+        log(f"      RTU info missing/empty", 'FAIL')
+        fail += 1
+    else:
+        for f in ('model', 'phone', 'serial', 'firmware'):
+            if not rtu_info.get(f):
+                log(f"      missing field: {f}", 'FAIL')
+                fail += 1
+
+    # 7.2 Inverter Info — trigger requests for several inverters
+    log(f"  7.2 Triggering H03 CTRL_INV_MODEL for INV_1, INV_3, INV_4, INV_9")
+    for dn in (1, 3, 4, 9):
+        r = post_api('/api/control/model_info', {
+            'rtu_id': rtu_id, 'device_num': dn, 'value': 0
+        })
+        if r and 'error' not in r:
+            log(f"      INV_{dn} sent", 'OK')
+        else:
+            log(f"      INV_{dn} FAIL: {r}", 'FAIL')
+            fail += 1
+        time.sleep(0.5)
+    time.sleep(4)
+
+    data = fetch_api(f'/api/rtus/{rtu_id}/devices')
+    if not data:
+        log(f"      Cannot fetch devices", 'FAIL')
+        return False
+    devs = data.get('devices', {})
+    expected_models = {
+        1: 'SRPV',     # solarize
+        3: 'KSG',      # kstar
+        4: 'SUN2000',  # huawei
+        9: 'MOD',      # growatt
+    }
+    for dn, expected_prefix in expected_models.items():
+        key = f'INV_{dn}'
+        dev = devs.get(key, {})
+        d = dev.get('data', {})
+        model_name = d.get('model_name', '')
+        serial = d.get('serial_number', '')
+        iv_cap = d.get('iv_scan')
+        der_cap = d.get('der_avm')
+        log(f"      {key}: model='{model_name}' sn='{serial}' "
+            f"iv_scan={iv_cap} der_avm={der_cap}")
+        if not model_name:
+            log(f"      {key} missing model_name", 'FAIL')
+            fail += 1
+        elif expected_prefix not in model_name:
+            log(f"      {key} model_name '{model_name}' missing prefix '{expected_prefix}'", 'FAIL')
+            fail += 1
+        if not serial:
+            log(f"      {key} missing serial_number", 'FAIL')
+            fail += 1
+    return fail == 0
+
+
 def test_kstar_night(rtu_id, dev_num=3):
     """Phase 6: Verify Kstar nighttime standby behavior.
 
@@ -580,6 +667,7 @@ def main():
             phase_results['phase4'] = test_iv_scan(TEST_RTU_ID, dev_num=1)
             phase_results['phase5'] = test_der_avm_monitor(TEST_RTU_ID)
             phase_results['phase6'] = test_kstar_night(TEST_RTU_ID, dev_num=3)
+            phase_results['phase7'] = test_info(TEST_RTU_ID)
 
             print()
             print('=' * 80)
