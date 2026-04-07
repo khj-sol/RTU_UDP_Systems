@@ -169,19 +169,56 @@ def read_stage1_excel_v2(excel_path: str) -> dict:
                     result['monitoring'].append(reg)
 
     # ── 5_IV 시트: IV 레지스터 (backward compat: 4_IV도 지원) ──
+    # 두 섹션:
+    #   1) IV Scan Command (헤더: Name/Address/Type/R/W/Description)
+    #   2) IV Data 레지스터 매핑 (헤더: No/Type/Name/Address/Regs/Data Type/Scale)
+    # 빈 행이나 새 섹션 제목 행에서 헤더 재감지
     iv_sheet = '5_IV' if '5_IV' in wb.sheetnames else ('4_IV' if '4_IV' in wb.sheetnames else None)
     if iv_sheet:
         ws = wb[iv_sheet]
-        for row in ws.iter_rows(min_row=2, values_only=True):
+        col_name = col_addr = col_type = None
+        in_data_rows = False
+        for row in ws.iter_rows(values_only=True):
             cells = [str(c).strip() if c is not None else '' for c in row]
-            if cells[0] and cells[0].isdigit() and len(cells) >= 4:
-                addr = parse_address(cells[3]) if len(cells) > 3 else None
-                if addr is not None:
-                    result['iv_regs'].append(RegisterRow(
-                        definition=cells[2] if len(cells) > 2 else cells[1],
-                        address=addr, data_type=cells[5] if len(cells) > 5 else 'U16',
-                        category='IV_SCAN',
-                    ))
+            if not any(cells):
+                # 빈 행 → 다음 섹션 헤더 대기 모드
+                in_data_rows = False
+                col_name = col_addr = col_type = None
+                continue
+            upper = [c.upper() for c in cells]
+            # 헤더 감지: NAME + ADDRESS 컬럼 있는 행
+            if 'NAME' in upper and 'ADDRESS' in upper:
+                col_name = upper.index('NAME')
+                col_addr = upper.index('ADDRESS')
+                if 'TYPE' in upper:
+                    col_type = upper.index('TYPE')
+                else:
+                    col_type = None
+                # 'DATA TYPE' 컬럼이 있으면 그것을 사용
+                if 'DATA TYPE' in upper:
+                    col_type = upper.index('DATA TYPE')
+                in_data_rows = True
+                continue
+            if not in_data_rows or col_name is None:
+                continue
+            # 데이터 행
+            try:
+                name = cells[col_name] if col_name < len(cells) else ''
+                addr_str = cells[col_addr] if col_addr < len(cells) else ''
+                if not name or not addr_str:
+                    continue
+                addr = parse_address(addr_str)
+                if addr is None:
+                    continue
+                dtype = cells[col_type] if col_type is not None and col_type < len(cells) else 'U16'
+                result['iv_regs'].append(RegisterRow(
+                    definition=name,
+                    address=addr,
+                    data_type=dtype or 'U16',
+                    category='IV_SCAN',
+                ))
+            except (IndexError, ValueError):
+                continue
 
     wb.close()
     return result
@@ -751,32 +788,33 @@ def run_stage2(
     log(f'총 레지스터: {total_regs}개, H01: {h01_matched}/{h01_total}, DER: {der_matched}/{der_total}')
 
     # ── Stage 2 검증: MPPT 전압/전류 + String 전압/전류 추출 여부 ──
+    # 인버터 타입:
+    #   String type   : MPPT 1~N개, 각각 V/I 있음. 일부는 String 전류도 있음.
+    #   Central type  : MPPT 1개. V는 PV_VOLTAGE, I는 PV1_CURRENT/PV2_CURRENT 등
+    #                   "PV (n) 전류" 형식으로 표시될 수 있음.
+    # 매핑 의미: MPPT/String V/I → H01 의 pv_voltage/pv_current/pv_power
+    #           (pv_power 는 직접 또는 V*I 계산)
     import re as _re
-    # 우선 h01_field 기반 매칭 (Stage1이 할당한 의미적 태그)
-    # 보조: 이름 regex (h01_field 없는 경우)
     _H01_MPPT_V_RE = _re.compile(r'^mppt(\d+)_voltage$', _re.I)
     _H01_MPPT_I_RE = _re.compile(r'^mppt(\d+)_current$', _re.I)
     _H01_STR_V_RE  = _re.compile(r'^string(\d+)_voltage$', _re.I)
     _H01_STR_I_RE  = _re.compile(r'^string(\d+)_current$', _re.I)
-    _NAME_MPPT_V_RE = _re.compile(r'(MPPT|PV|REG|MOD|MODULE|VPV|STRING)\s*_?(\d+)\s*_?(VOLTAGE|VOLT|DCV)|^VDC(\d+)|^V_?DC_?(\d+)', _re.I)
-    _NAME_MPPT_I_RE = _re.compile(r'(MPPT|PV|REG|MOD|MODULE|IPV)\s*_?(\d+)\s*_?(CURRENT|CURR|DCA)|^IDC(\d+)|^I_?DC_?(\d+)', _re.I)
+    # central type fallback names
+    _CENTRAL_PV_V = {'PV_VOLTAGE', 'PV_INPUT_VOLTAGE', 'DC_VOLTAGE', 'DC_INPUT_VOLTAGE',
+                     'BUS_VOLTAGE', 'DC_BUS_VOLTAGE', 'VPV', 'VDC', 'V_DC', 'V_PV'}
+    _CENTRAL_PV_I = {'PV_CURRENT', 'PV_INPUT_CURRENT', 'DC_CURRENT', 'DC_INPUT_CURRENT',
+                     '태양전지_전류', 'IPV', 'IDC', 'I_DC', 'I_PV'}
 
     mppt_v_found = set()
     mppt_i_found = set()
     str_v_found = set()
     str_i_found = set()
-
-    def _add_match(re_pat, name, target_set):
-        m = re_pat.match(name)
-        if m:
-            for g in m.groups():
-                if g and g.isdigit():
-                    target_set.add(int(g))
-                    return
+    central_pv_v_found = False
+    central_pv_i_count = set()  # PV(n) 전류 개수
 
     for reg in s1['monitoring'] + s1['info']:
         h01 = (getattr(reg, 'h01_field', '') or '').strip().lower()
-        # h01_field 기반 (가장 신뢰 높음 — Stage1이 의미적으로 할당)
+        # h01_field 기반 (가장 신뢰 높음)
         if h01:
             m = _H01_MPPT_V_RE.match(h01)
             if m:
@@ -790,21 +828,34 @@ def run_stage2(
             m = _H01_STR_I_RE.match(h01)
             if m:
                 str_i_found.add(int(m.group(1))); continue
-        # 보조: 이름 regex
+        # 이름 기반 보조 매칭
         name = to_upper_snake(reg.definition) if reg.definition else ''
         if not name:
             continue
-        _add_match(_NAME_MPPT_V_RE, name, mppt_v_found)
-        _add_match(_NAME_MPPT_I_RE, name, mppt_i_found)
-        if name.startswith('STRING'):
-            ms = _re.match(r'^STRING\s*_?(\d+)\s*_?(VOLTAGE|CURRENT)', name, _re.I)
-            if ms:
-                idx = int(ms.group(1))
-                if 'VOLT' in ms.group(2).upper():
-                    str_v_found.add(idx)
-                else:
-                    str_i_found.add(idx)
-        # 한글 "태양전지1_전류" 계열
+        # 채널 번호 기반 (MPPTn/PVn/REGn 등)
+        cm = _re.match(r'^(?:MPPT|PV|REG|MOD|MODULE|VPV)_?(\d+)_?(?:INPUT_?)?(VOLTAGE|VOLT|DCV)$', name)
+        if cm:
+            mppt_v_found.add(int(cm.group(1))); continue
+        cm = _re.match(r'^(?:MPPT|PV|REG|MOD|MODULE|IPV)_?(\d+)_?(?:INPUT_?)?(CURRENT|CURR|DCA)$', name)
+        if cm:
+            mppt_i_found.add(int(cm.group(1)))
+            central_pv_i_count.add(int(cm.group(1)))  # central type "PV(n)"도 같이 카운트
+            continue
+        # STRING n V/I
+        sm = _re.match(r'^STRING_?(\d+)_?(?:INPUT_?)?(VOLTAGE|VOLT|CURRENT|CURR)$', name)
+        if sm:
+            idx = int(sm.group(1))
+            if 'VOLT' in sm.group(2):
+                str_v_found.add(idx)
+            else:
+                str_i_found.add(idx)
+            continue
+        # Central type fallback (PV_VOLTAGE 단독, 채널 번호 없음)
+        if name in _CENTRAL_PV_V:
+            central_pv_v_found = True
+        if name in _CENTRAL_PV_I:
+            mppt_i_found.add(1)  # 단일 PV 전류 → MPPT1로
+        # 한글 "태양전지N_전류"
         km = _re.match(r'태양전지\s*(\d+)\s*_?\s*(전압|전류)', reg.definition or '')
         if km:
             idx = int(km.group(1))
@@ -813,7 +864,11 @@ def run_stage2(
             else:
                 mppt_i_found.add(idx)
 
-    # 검증 카운트 (expected = mppt_count, total_strings)
+    # Central type 보정: MPPT V는 없는데 PV_VOLTAGE 단독이면 mppt1_voltage로 카운트
+    if not mppt_v_found and central_pv_v_found:
+        mppt_v_found.add(1)
+
+    # 검증 카운트
     stage2_validation = {
         'mppt_voltage': {
             'found': len([i for i in mppt_v_found if 1 <= i <= mppt_count]),
@@ -832,10 +887,71 @@ def run_stage2(
             'expected': total_strings,
         },
     }
+
+    # ── IV Scan 검증: 지원 인버터에 한해 IV 명령/결과 레지스터 ──
+    # meta['iv_scan'] 은 'Yes'/'No'/'-' 문자열 또는 bool 일 수 있음
+    _iv_raw = meta.get('iv_scan', False)
+    if isinstance(_iv_raw, bool):
+        iv_supported = _iv_raw
+    else:
+        iv_supported = str(_iv_raw).strip().lower() in ('yes', 'true', '1', 'y')
+    iv_data_points = 0
+    try:
+        iv_data_points = int(meta.get('iv_data_points', 0) or 0)
+    except (ValueError, TypeError):
+        pass
+    iv_trackers = 0
+    try:
+        iv_trackers = int(meta.get('iv_trackers', 0) or 0)
+    except (ValueError, TypeError):
+        pass
+
+    iv_command_found = False
+    iv_result_found = 0
+    if iv_supported:
+        # IV 명령 레지스터 (IV_CURVE_SCAN, IV_SCAN_COMMAND, 0x600D 등)
+        for reg in s1.get('iv_regs', []) + s1['monitoring']:
+            n = (to_upper_snake(reg.definition) if reg.definition else '').upper()
+            if n in ('IV_CURVE_SCAN', 'IV_SCAN_COMMAND', 'IV_SCAN_CONTROL',
+                     'IV_SCAN_START', 'IV_COMMAND'):
+                iv_command_found = True
+                break
+            # 주소 0x600D (Solarize 표준)
+            try:
+                addr = reg.address if isinstance(reg.address, int) else None
+                if addr in (0x600D, 0x600E):
+                    iv_command_found = True
+                    break
+            except Exception:
+                pass
+
+        # IV 결과 레지스터 (tracker별 voltage 블록 + string current 블록)
+        # 5_IV 시트에서 읽은 모든 데이터 레지스터를 카운트
+        # 단, IV_CURVE_SCAN/IV_SCAN_COMMAND 같은 명령 레지스터는 제외
+        _IV_CMD_NAMES = {'IV_CURVE_SCAN', 'IV_SCAN_COMMAND', 'IV_SCAN_CONTROL',
+                         'IV_SCAN_START', 'IV_COMMAND'}
+        for reg in s1.get('iv_regs', []):
+            n = (to_upper_snake(reg.definition) if reg.definition else '').upper()
+            if not n or n in _IV_CMD_NAMES:
+                continue
+            iv_result_found += 1
+
+    stage2_validation['iv_scan'] = {
+        'supported': iv_supported,
+        'command_found': iv_command_found,
+        'result_count': iv_result_found,
+        'expected_trackers': iv_trackers,
+        'data_points': iv_data_points,
+    }
+
     log(f'MPPT V: {stage2_validation["mppt_voltage"]["found"]}/{mppt_count}, '
         f'MPPT I: {stage2_validation["mppt_current"]["found"]}/{mppt_count}, '
         f'String V: {stage2_validation["string_voltage"]["found"]}/{total_strings}, '
         f'String I: {stage2_validation["string_current"]["found"]}/{total_strings}')
+    if iv_supported:
+        log(f'IV Scan: cmd {"✓" if iv_command_found else "✗"}, '
+            f'result regs {iv_result_found}, trackers {iv_trackers}, '
+            f'points {iv_data_points}')
 
     # ── Step 6: Excel 생성 (3시트) ──
     basename = os.path.splitext(os.path.basename(stage1_path))[0].replace('_stage1', '')

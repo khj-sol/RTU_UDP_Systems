@@ -815,6 +815,7 @@
       h01ok && derOk ? 'ok' : 'warn');
 
     // Stage 2 검증: MPPT 전압/전류 + String 전압/전류 추출 여부
+    // (H01 pv_voltage/pv_current/pv_power 매핑의 기반)
     const v = msg.stage2_validation || {};
     const mppt_v = v.mppt_voltage || {found:0, expected:0};
     const mppt_i = v.mppt_current || {found:0, expected:0};
@@ -833,6 +834,21 @@
       + `String V ${mark(str_v.found, str_v.expected)} ${str_v.found}/${str_v.expected}  `
       + `String I ${mark(str_i.found, str_i.expected)} ${str_i.found}/${str_i.expected}`,
       lvl);
+
+    // IV Scan 검증: 지원 인버터에 한해
+    const iv = v.iv_scan || {};
+    if (iv.supported) {
+      const cmdMark = iv.command_found ? '✓' : '✗';
+      const expTrk = iv.expected_trackers || 0;
+      const resCount = iv.result_count || 0;
+      const trkMark = (expTrk > 0 && resCount >= expTrk) ? '✓' :
+                      (resCount > 0 ? '⚠' : '✗');
+      const ivLvl = (iv.command_found && resCount > 0) ? 'ok' : 'warn';
+      appendLog('s2',
+        `IV Scan: 명령 ${cmdMark}  결과레지스터 ${trkMark} ${resCount}개  `
+        + `(트래커 ${expTrk}, 데이터포인트 ${iv.data_points || 0})`,
+        ivLvl);
+    }
     if (msg.review_count > 0 && msg.review_items && msg.review_items.length > 0) {
       appendLog('s2', `REVIEW ${msg.review_count}개 — 판정 후 H01 매핑 확인`, 'warn');
       showReview(msg.review_items);
