@@ -1002,6 +1002,7 @@ def _gen_read_blocks(all_regs: List[RegisterRow], fc_code: int = 3,
     two_reg_types = {'FLOAT32', 'U32', 'S32'}
 
     # (fc, address, size) 수집 — 개별 레지스터 FC 참조
+    # Modbus 주소는 0~65535 범위 (16-bit). 초과 주소는 유효하지 않음 → 제외.
     entries = []
     for reg in all_regs:
         if reg.category not in read_cats:
@@ -1009,6 +1010,8 @@ def _gen_read_blocks(all_regs: List[RegisterRow], fc_code: int = 3,
         if not isinstance(reg.address, int):
             continue
         size = 2 if (reg.data_type or '').upper() in two_reg_types else 1
+        if reg.address < 0 or reg.address + size > 65536:
+            continue  # Modbus 주소 범위 초과 → READ_BLOCKS에 포함 불가
         # 개별 FC: reg.fc가 있으면 사용, 없으면 기본 fc_code
         reg_fc_str = str(getattr(reg, 'fc', '') or '').strip()
         if reg_fc_str in ('3', '03', 'FC03'):
@@ -1308,6 +1311,11 @@ def _compute_blocks_and_parser(monitoring_regs: List[RegisterRow], fc_code: int 
 
         dtype = (reg.data_type or 'U16').upper()
         if dtype in ('TEXT', 'ASCII', 'STRINGING', 'STRING'):
+            continue
+
+        # Modbus 주소는 16-bit (0~65535). 초과 시 제외.
+        reg_size_check = 2 if dtype in ('U32', 'S32', 'FLOAT32') else 1
+        if addr + reg_size_check > 65536:
             continue
 
         # h01_field 우선 → H01_ALIASES 테이블 → 원래 이름
@@ -1827,15 +1835,212 @@ def run_stage3(
     if all_passed and protocol_name:
         _register_device_model(protocol_name, manufacturer, log)
 
+    # ── Stage 4: RTU 호환성 검증 ──
+    log('Stage 4: RTU 호환성 검증...')
+    stage4 = run_stage4_verification(output_path, log=log)
+    log(f'  H01 매핑: {stage4["h01_resolved"]}/{stage4["h01_total"]} '
+        f'({stage4["h01_pct"]:.0f}%)')
+    log(f'  주소 범위: {stage4["addr_status"]}')
+    log(f'  통신 시뮬레이션: {stage4["comm_status"]}')
+    log(f'  최종 등급: {stage4["grade"]}',
+        'ok' if stage4['grade'] == 'PASS' else 'warn')
+    if stage4.get('warnings'):
+        for w in stage4['warnings']:
+            log(f'    ⚠ {w}', 'warn')
+
     log('Stage 3 완료', 'ok')
 
     return {
         'output_path': output_path,
         'filename': output_name,
         'validation': validation,
+        'stage4': stage4,
         'synonym_added': syn_added,
         'review_recorded': rv_recorded,
         'mppt_count': mppt_count,
         'total_strings': total_strings,
         'register_count': len(all_regs),
     }
+
+
+def run_stage4_verification(register_file_path: str, log=None) -> dict:
+    """Stage 4: 생성된 _registers.py 파일의 RTU 호환성 검증.
+
+    검증 항목:
+      1. 모듈 로드 (RegisterMap, H01_FIELD_MAP, SCALE 등 필수 요소)
+      2. H01 매핑률 (16개 표준 필드 중 RegisterMap에서 resolvable한 비율)
+      3. READ_BLOCKS 주소 범위 (모든 addr+count ≤ 65536)
+      4. 가짜 Modbus slave 통신 시뮬레이션 (pymodbus 있으면)
+
+    Returns:
+        dict: {
+          'grade': 'PASS' | 'WARN' | 'FAIL',
+          'h01_total': int, 'h01_resolved': int, 'h01_pct': float,
+          'addr_status': 'OK' | 'WARN: N blocks out of range',
+          'comm_status': 'OK' | 'SKIP' | 'FAIL: ...',
+          'warnings': [str, ...],
+          'sample_data': dict | None,  # 통신 성공 시
+        }
+    """
+    import importlib.util
+    result = {
+        'grade': 'FAIL',
+        'h01_total': 0, 'h01_resolved': 0, 'h01_pct': 0.0,
+        'addr_status': 'UNKNOWN',
+        'comm_status': 'SKIP',
+        'warnings': [],
+        'sample_data': None,
+    }
+
+    # 1) 모듈 로드
+    try:
+        spec = importlib.util.spec_from_file_location(
+            'stage4_test_module', register_file_path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+    except Exception as e:
+        result['warnings'].append(f'모듈 로드 실패: {type(e).__name__}: {e}')
+        return result
+
+    rm = getattr(mod, 'RegisterMap', None)
+    h01_map = getattr(mod, 'H01_FIELD_MAP', None)
+    if rm is None or h01_map is None:
+        result['warnings'].append(
+            'RegisterMap 또는 H01_FIELD_MAP 누락')
+        return result
+
+    # 2) H01 매핑률
+    result['h01_total'] = len(h01_map)
+    resolved = 0
+    unresolved = []
+    for h01_key, val in h01_map.items():
+        if isinstance(val, tuple) and len(val) >= 1:
+            attr_name = val[0]
+        else:
+            attr_name = str(val)
+        if hasattr(rm, attr_name):
+            resolved += 1
+        else:
+            unresolved.append(h01_key)
+    result['h01_resolved'] = resolved
+    result['h01_pct'] = (resolved / max(1, result['h01_total'])) * 100
+    if unresolved:
+        result['warnings'].append(
+            f'미해결 H01 필드: {", ".join(unresolved[:6])}'
+            + (f' 외 {len(unresolved)-6}' if len(unresolved) > 6 else ''))
+
+    # 3) READ_BLOCKS 주소 검증
+    rb = getattr(mod, 'READ_BLOCKS', None) or []
+    bad_blocks = 0
+    for blk in rb:
+        try:
+            start = blk['start']
+            count = blk['count']
+            if start < 0 or start + count > 65536:
+                bad_blocks += 1
+        except Exception:
+            bad_blocks += 1
+    if bad_blocks == 0:
+        result['addr_status'] = f'OK ({len(rb)} blocks)'
+    else:
+        result['addr_status'] = f'WARN: {bad_blocks}/{len(rb)} blocks out of range'
+        result['warnings'].append(
+            f'READ_BLOCKS 중 {bad_blocks}개가 65536 초과 (제외 권장)')
+
+    # 4) 가짜 slave 통신 시뮬레이션
+    try:
+        import pymodbus
+        from pymodbus.server import StartTcpServer
+        from pymodbus.datastore import (
+            ModbusServerContext, ModbusSequentialDataBlock,
+        )
+        try:
+            from pymodbus.datastore import ModbusDeviceContext as _SlaveCtx
+            _ctx_kw = 'devices'
+        except ImportError:
+            from pymodbus.datastore import ModbusSlaveContext as _SlaveCtx
+            _ctx_kw = 'slaves'
+    except ImportError:
+        result['comm_status'] = 'SKIP (pymodbus 없음)'
+        _grade(result)
+        return result
+
+    import threading, time, socket, sys
+    # 자유 포트 잡기
+    s = socket.socket(); s.bind(('127.0.0.1', 0)); port = s.getsockname()[1]; s.close()
+
+    def _run_server():
+        try:
+            block = ModbusSequentialDataBlock(0, [(i*7+13) & 0xFFFF for i in range(65535)])
+            slave = _SlaveCtx(di=block, co=block, hr=block, ir=block)
+            ctx = ModbusServerContext(**{_ctx_kw: slave, 'single': True})
+            StartTcpServer(context=ctx, address=('127.0.0.1', port))
+        except Exception:
+            pass
+
+    th = threading.Thread(target=_run_server, daemon=True)
+    th.start()
+    time.sleep(1.0)
+
+    try:
+        # RTU modbus_handler 동적 import — RTU_COMMON_DIR의 부모(V2_0_0)
+        rtu_root = None
+        if RTU_COMMON_DIR and os.path.isdir(RTU_COMMON_DIR):
+            cand = os.path.dirname(RTU_COMMON_DIR.rstrip(os.sep))
+            if os.path.isdir(os.path.join(cand, 'rtu_program')):
+                rtu_root = cand
+        if rtu_root is None:
+            for cand in (PROJECT_ROOT,
+                         os.path.dirname(os.path.dirname(PROJECT_ROOT))):
+                if os.path.isdir(os.path.join(cand, 'rtu_program')):
+                    rtu_root = cand
+                    break
+        if rtu_root and rtu_root not in sys.path:
+            sys.path.insert(0, rtu_root)
+        from rtu_program.modbus_handler import ModbusHandlerTcp
+        h = ModbusHandlerTcp(host='127.0.0.1', port=port,
+                             slave_id=1, reg_module=mod)
+        if not h.connect():
+            result['comm_status'] = 'FAIL: connect failed'
+            _grade(result)
+            return result
+        data = h.read_inverter_data()
+        try:
+            h.disconnect()
+        except Exception:
+            pass
+        if data is None:
+            result['comm_status'] = 'FAIL: read returned None'
+        else:
+            nonzero = sum(1 for k, v in data.items()
+                          if isinstance(v, (int, float)) and v not in (0, 1))
+            mppt = data.get('mppt_data') or []
+            mppt_filled = sum(1 for m in mppt if any(v != 0 for v in m if isinstance(v, (int, float))))
+            result['comm_status'] = (
+                f'OK ({len(data)} keys, {nonzero} non-zero, '
+                f'{len(mppt)} MPPT/{mppt_filled} filled)')
+            result['sample_data'] = {
+                k: data.get(k) for k in
+                ['mode','status','r_voltage','s_voltage','t_voltage',
+                 'frequency','ac_power','pv_power','inner_temp',
+                 'power_factor','cumulative_energy']
+                if k in data
+            }
+    except Exception as e:
+        result['comm_status'] = f'FAIL: {type(e).__name__}: {str(e)[:80]}'
+
+    _grade(result)
+    return result
+
+
+def _grade(result: dict):
+    """Stage 4 결과로부터 PASS/WARN/FAIL 등급 결정."""
+    pct = result.get('h01_pct', 0)
+    addr = result.get('addr_status', '')
+    comm = result.get('comm_status', '')
+    if pct >= 75 and addr.startswith('OK') and comm.startswith('OK'):
+        result['grade'] = 'PASS'
+    elif pct >= 40 or comm.startswith('OK'):
+        result['grade'] = 'WARN'
+    else:
+        result['grade'] = 'FAIL'

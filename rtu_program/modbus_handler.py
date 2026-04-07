@@ -180,6 +180,32 @@ try:
 except ImportError:
     PYMODBUS_AVAILABLE = False
 
+# pymodbus 2.x: slave=, 3.x: device_id=, older variants: address=
+# 첫 호출 시 detection 후 _PYMODBUS_KW에 캐시
+_PYMODBUS_KW = None  # 'slave' | 'device_id'
+
+
+def _pymodbus_call(method, addr, count, slave_id):
+    """pymodbus read_holding_registers/read_input_registers 호환 래퍼.
+    버전별 keyword 차이(slave/device_id)를 한 번만 detect 후 캐시."""
+    global _PYMODBUS_KW
+    if _PYMODBUS_KW == 'slave':
+        return method(addr, count=count, slave=slave_id)
+    if _PYMODBUS_KW == 'device_id':
+        return method(addr, count=count, device_id=slave_id)
+    # First call: detect
+    try:
+        result = method(addr, count=count, device_id=slave_id)
+        _PYMODBUS_KW = 'device_id'
+        return result
+    except TypeError:
+        try:
+            result = method(addr, count=count, slave=slave_id)
+            _PYMODBUS_KW = 'slave'
+            return result
+        except TypeError:
+            return method(address=addr, count=count, slave=slave_id)
+
 
 # =========================================================================
 # Dynamic Register Module Loading
@@ -515,16 +541,24 @@ class ModbusHandlerHAT:
         """Read all READ_BLOCKS and return {addr: value} cache.
 
         Only caches registers that were successfully read.
+        Per-block 예외는 무시 (개별 read fallback 가능).
         """
         cache = {}
         for blk in read_blocks:
-            start = blk['start']
-            count = blk['count']
-            fc = blk.get('fc', 3)
-            result = self._read_block(start, count, fc)
-            if result:
-                for i, v in enumerate(result):
-                    cache[start + i] = v
+            try:
+                start = blk['start']
+                count = blk['count']
+                fc = blk.get('fc', 3)
+                # 주소 범위 검증
+                if start < 0 or start + count > 65536:
+                    continue
+                result = self._read_block(start, count, fc)
+                if result:
+                    for i, v in enumerate(result):
+                        cache[start + i] = v
+            except Exception as e:
+                self.logger.debug(f"_build_reg_cache block skip: {e}")
+                continue
         return cache
 
     def _get_typed_from_cache(self, field_name, addr, cache):
@@ -1802,26 +1836,19 @@ class ModbusHandlerSerial:
     
     def _read_reg(self, addr, count=1):
         """Read holding registers (FC03) via pymodbus, returns list of U16 values or None."""
-        try:
-            result = self.client.read_holding_registers(addr, count=count, slave=self.slave_id)
-        except TypeError:
-            try:
-                result = self.client.read_holding_registers(addr, count=count, device_id=self.slave_id)
-            except TypeError:
-                result = self.client.read_holding_registers(address=addr, count=count, slave=self.slave_id)
+        # 주소 범위 보호: Modbus 16-bit 한계
+        if addr < 0 or addr + count > 65536:
+            return None
+        result = _pymodbus_call(self.client.read_holding_registers, addr, count, self.slave_id)
         if result is None or result.isError():
             return None
         return result.registers
 
     def _read_input_reg(self, addr, count=1):
         """Read input registers (FC04) via pymodbus, returns list of U16 values or None."""
-        try:
-            result = self.client.read_input_registers(addr, count=count, slave=self.slave_id)
-        except TypeError:
-            try:
-                result = self.client.read_input_registers(addr, count=count, device_id=self.slave_id)
-            except TypeError:
-                result = self.client.read_input_registers(address=addr, count=count, slave=self.slave_id)
+        if addr < 0 or addr + count > 65536:
+            return None
+        result = _pymodbus_call(self.client.read_input_registers, addr, count, self.slave_id)
         if result is None or result.isError():
             return None
         return result.registers

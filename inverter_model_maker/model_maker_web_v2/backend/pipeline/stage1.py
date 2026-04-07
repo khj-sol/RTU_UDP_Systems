@@ -37,6 +37,18 @@ from .rules import (
 
 # ─── PDF 추출 ─────────────────────────────────────────────────────────────────
 
+# openpyxl이 거부하는 ASCII 제어문자 (Excel ILLEGAL_CHARACTERS_RE)
+_ILLEGAL_XLS_CHARS = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f]')
+
+
+def _sanitize_pdf_text(s: str) -> str:
+    """PDF 텍스트에서 Excel이 거부하는 제어문자 제거.
+    \\t \\n \\r 만 보존, 나머지 0x00~0x1F는 공백으로."""
+    if not s:
+        return s
+    return _ILLEGAL_XLS_CHARS.sub(' ', s)
+
+
 def extract_pdf_text_and_tables(pdf_path: str, log=None) -> List[dict]:
     """PyMuPDF로 PDF 페이지별 텍스트+테이블 추출.
     log: 진행 상황 콜백 (선택). find_tables()는 스레드 타임아웃(5s/페이지)으로 행 방지.
@@ -53,7 +65,7 @@ def extract_pdf_text_and_tables(pdf_path: str, log=None) -> List[dict]:
         log(f'  PDF 열기 완료: {total}페이지')
     try:
         for i, page in enumerate(doc):
-            text = page.get_text()
+            text = _sanitize_pdf_text(page.get_text())
             tables = []
             # find_tables()는 복잡한 PDF에서 무한 대기할 수 있음 → 5초 타임아웃
             try:
@@ -62,7 +74,13 @@ def extract_pdf_text_and_tables(pdf_path: str, log=None) -> List[dict]:
                     tab_list = future.result(timeout=5)
                 for tab in tab_list:
                     try:
-                        tables.append(tab.extract())
+                        raw = tab.extract()
+                        # Sanitize cells (Excel illegal control chars)
+                        clean = [
+                            [_sanitize_pdf_text(c) if isinstance(c, str) else c
+                             for c in row] for row in raw
+                        ]
+                        tables.append(clean)
                     except Exception:
                         pass
             except concurrent.futures.TimeoutError:
