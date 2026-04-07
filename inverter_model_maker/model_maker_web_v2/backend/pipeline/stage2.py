@@ -317,8 +317,8 @@ def generate_review_alternatives(
         alts = []
         addr = reg.address if isinstance(reg.address, int) else parse_address(reg.address)
 
-        # 1) synonym_db 퍼지 매칭
-        fuzzy = match_synonym_fuzzy(reg.definition, synonym_db, threshold=0.4)
+        # 1) synonym_db 퍼지 매칭 (Phase B: 0.4 → 0.75 false positive 방지)
+        fuzzy = match_synonym_fuzzy(reg.definition, synonym_db, threshold=0.75)
         if fuzzy:
             alts.append({
                 'definition': fuzzy['field'],

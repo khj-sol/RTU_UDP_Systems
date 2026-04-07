@@ -1217,6 +1217,80 @@ def _detect_definition_type(values: dict) -> Optional[str]:
     return None
 
 
+# Phase A: H01 auto-assignment negative keywords
+# 설정/보호/트립/지연/임계치 레지스터는 측정 필드(h01)로 절대 매칭되면 안 됨
+_H01_NEGATIVE_KEYWORDS = (
+    # 고장/알람/보호
+    'fault', 'failure', 'abnormal', 'trip', 'protection', 'protect',
+    # 설정/제한/임계치
+    'limit', 'threshold', 'setpoint', 'set point', 'setting',
+    'de-rate', 'derate', 'de_rate', 'de rate', 'reference',
+    # 시간/램프/지연
+    'ramp', 'delay', 'duration', 'timeout',
+    ' time ',  # "time" alone causes false hits ("runtime" is ok, "X time" is bad)
+    # 통신/시스템
+    'reserved', 'discovery', 'function code', 'register number',
+    'reset', 'clear', 'command', 'calibration', 'factory',
+    # 구성/옵션
+    'model', 'enable', 'disable', 'polarity', 'slope',
+    # 최대/최소/고/저 (측정 아닌 기준값)
+    ' max ', ' min ', 'maximum', 'minimum', 'high1', 'high2', 'high3',
+    'low1', 'low2', 'low3',
+)
+
+
+def _has_h01_negative_keyword(defn: str, comment: str = '') -> bool:
+    """측정 필드로 매칭되면 안 되는 설정/트립/임계치/보호 레지스터인지."""
+    if not defn:
+        return True
+    # 단어 경계 기반 검사용 패딩
+    dl = ' ' + defn.lower().replace('_', ' ').replace('-', ' ') + ' '
+    cl = ' ' + (comment or '').lower().replace('_', ' ').replace('-', ' ') + ' '
+    for kw in _H01_NEGATIVE_KEYWORDS:
+        if kw in dl or kw in cl:
+            return True
+    return False
+
+
+# Phase B: H01 필드별 필수 의미 키워드 — 모든 필드는 이 중 하나가 정의에 있어야 함
+_H01_REQUIRED_KEYWORDS = {
+    'r_voltage': ['volt', '전압', 'vac', 'van', 'uab', 'u_ab', 'phase a', 'l1_', 'l1 ', 'ph_a'],
+    's_voltage': ['volt', '전압', 'vac', 'vbn', 'ubc', 'u_bc', 'phase b', 'l2_', 'l2 ', 'ph_b'],
+    't_voltage': ['volt', '전압', 'vac', 'vcn', 'uca', 'u_ca', 'phase c', 'l3_', 'l3 ', 'ph_c'],
+    'r_current': ['curr', '전류', 'iac', 'amp', 'phase a', 'l1_', 'l1 ', 'ia_', ' ia ', 'aph_a'],
+    's_current': ['curr', '전류', 'iac', 'amp', 'phase b', 'l2_', 'l2 ', 'ib_', ' ib ', 'aph_b'],
+    't_current': ['curr', '전류', 'iac', 'amp', 'phase c', 'l3_', 'l3 ', 'ic_', ' ic ', 'aph_c'],
+    'frequency': ['freq', ' hz', 'hz ', 'fac ', ' fac', '주파', 'ecpnom'],
+    'ac_power':  ['power', 'watt', ' pac', 'active', '전력', 'w_', ' w '],
+    'pv_power':  ['pv power', 'dc power', 'solar power', 'dcw', 'dc_w',
+                  '태양전지 전력', 'pv전력', 'total dc', 'input power', 'ppv'],
+    'cumulative_energy': ['total energy', 'energy total', 'lifetime', 'cumulative',
+                          ' wh', 'wh ', ' kwh', 'kwh ', 'accumulated', '누적', '적산',
+                          'eac', 'einv', 'generate'],
+    'daily_energy': ['daily', 'today', 'day energy', '일발전', '금일', 'day generate'],
+    'inner_temp': ['temp', 'tmp', '온도', 'heat sink', 'heatsink', 'cabinet'],
+    'power_factor': ['power factor', 'cos phi', 'cosphi', '역률', ' pf ', 'ph_f'],
+    'mode':      ['mode', 'state', 'status', '상태', 'operating', 'running',
+                  'work', 'device', 'st_vnd', ' st '],
+    'alarm1':    ['alarm', 'error', 'fault', 'warning', '알람', '에러', '고장'],
+    'alarm2':    ['alarm', 'error', 'fault', 'warning', '알람', '에러', '고장'],
+    'alarm3':    ['alarm', 'error', 'fault', 'warning', '알람', '에러', '고장'],
+    'status':    ['status', 'state', '상태'],
+}
+
+
+def _h01_semantic_valid(h01_field: str, reg_name_or_defn: str) -> bool:
+    """H01 필드와 레지스터 이름이 의미상 호환되는지.
+    예: alarm1 → DAILY_ENERGY 는 False (에너지는 알람 아님)."""
+    if not h01_field or not reg_name_or_defn:
+        return False
+    required = _H01_REQUIRED_KEYWORDS.get(h01_field)
+    if not required:
+        return True  # 제약 없는 필드
+    name_lower = ' ' + str(reg_name_or_defn).lower().replace('_', ' ') + ' '
+    return any(kw in name_lower for kw in required)
+
+
 def assign_h01_field(reg: RegisterRow, synonym_db: dict,
                      ref_patterns: dict = None) -> str:
     """레지스터에 대응하는 H01 필드명 추정 (V2)"""
@@ -1225,6 +1299,12 @@ def assign_h01_field(reg: RegisterRow, synonym_db: dict,
 
     # V2: INFO/ALARM 카테고리는 H01 모니터링 필드가 아님 — 특정 키워드만 매칭
     comment_lower = (getattr(reg, 'comment', '') or '').lower()
+
+    # Phase A: 측정 필드 매칭 차단 — 설정/트립/임계치 레지스터
+    # 단, ALARM 카테고리는 alarm1/2/3 매칭이 필요하므로 이 체크 생략
+    if category not in ('ALARM',) and _has_h01_negative_keyword(
+            reg.definition, getattr(reg, 'comment', '')):
+        return ''
 
     if category == 'INFO':
         # INFO에서 H01과 겹치는 필드만 매핑
@@ -1375,10 +1455,12 @@ def assign_h01_field(reg: RegisterRow, synonym_db: dict,
             if h01:
                 return h01
 
-    # 4) 퍼지 매칭
-    fuzzy = match_synonym_fuzzy(reg.definition, synonym_db)
+    # 4) 퍼지 매칭 (Phase B: 기본 0.7 유지, 의미 검증 추가)
+    fuzzy = match_synonym_fuzzy(reg.definition, synonym_db, threshold=0.75)
     if fuzzy and fuzzy.get('h01_field'):
-        return fuzzy['h01_field']
+        # 의미 검증: fuzzy 결과가 실제로 그 field의 의미에 맞는지 확인
+        if _h01_semantic_valid(fuzzy['h01_field'], reg.definition):
+            return fuzzy['h01_field']
 
     return ''
 
@@ -2373,7 +2455,8 @@ def run_stage1(
 
         if cat == 'REVIEW':
             reg.review_reason = reason or '자동 분류 불가'
-            fuzzy = match_synonym_fuzzy(reg.definition, synonym_db, threshold=0.4)
+            # REVIEW에서는 사용자가 결정하도록 fuzzy 힌트 임계치는 낮게 유지
+            fuzzy = match_synonym_fuzzy(reg.definition, synonym_db, threshold=0.5)
             if fuzzy:
                 reg.review_suggestion = f'{fuzzy["category"]}/{fuzzy["field"]} (유사도 {fuzzy["score"]:.0%})'
             else:

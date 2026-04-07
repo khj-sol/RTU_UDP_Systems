@@ -25,6 +25,7 @@ from . import (
     get_openpyxl, ProgressCallback,
 )
 from .stage2 import read_stage1_excel_v2 as read_stage1_excel  # V2 호환
+from .stage1 import _h01_semantic_valid  # Phase B: H01 의미 검증
 
 
 # ─── Stage 2 Excel 읽기 ─────────────────────────────────────────────────────
@@ -1352,7 +1353,7 @@ def _gen_h01_field_map(all_regs: List[RegisterRow], mppt_count: int, total_strin
     """
     # 사용자 수동 매핑 (Stage2의 H01_MAPPING 시트에서 읽은 것) 우선
     # H01 필드 → 사용자가 선택한 RegisterMap 속성명
-    # 단, 실제 추출된 레지스터 이름과 일치할 때만 적용 (auto-populated 노이즈 차단)
+    # 단, 실제 추출된 레지스터 이름과 일치할 때 + 의미 검증 통과할 때만 적용
     known_names = {to_upper_snake(r.definition) for r in all_regs
                    if r.definition}
     user_map: dict = {}
@@ -1361,8 +1362,13 @@ def _gen_h01_field_map(all_regs: List[RegisterRow], mppt_count: int, total_strin
             if not reg_name:
                 continue
             clean = to_upper_snake(str(reg_name).strip())
-            if clean and clean in known_names:
-                user_map[field] = clean
+            if not clean or clean not in known_names:
+                continue
+            # Phase B: 의미 검증 — alarm1 → DAILY_ENERGY 같은 모순 차단
+            field_clean = field.strip()
+            if not _h01_semantic_valid(field_clean, clean):
+                continue
+            user_map[field_clean] = clean
 
     lines = ['\n', '# H01 스칼라 필드 → (RegisterMap 속성명, 변환기 키)',
              '# modbus_handler._read_inverter_data_dynamic()이 이 매핑을 사용한다.',
@@ -2212,25 +2218,35 @@ def run_stage4_verification(register_file_path: str, log=None) -> dict:
             'RegisterMap 또는 H01_FIELD_MAP 누락')
         return result
 
-    # 2) H01 매핑률
+    # 2) H01 매핑률 — Phase B: semantic 검증 포함
+    #    hasattr() 통과하고, 의미상 호환될 때만 resolved로 카운트
     result['h01_total'] = len(h01_map)
     resolved = 0
     unresolved = []
+    semantic_fail = []
     for h01_key, val in h01_map.items():
         if isinstance(val, tuple) and len(val) >= 1:
             attr_name = val[0]
         else:
             attr_name = str(val)
-        if hasattr(rm, attr_name):
-            resolved += 1
-        else:
-            unresolved.append(h01_key)
+        key_clean = h01_key.strip()
+        if not hasattr(rm, attr_name):
+            unresolved.append(key_clean)
+            continue
+        if not _h01_semantic_valid(key_clean, attr_name):
+            semantic_fail.append(f'{key_clean}→{attr_name}')
+            continue
+        resolved += 1
     result['h01_resolved'] = resolved
     result['h01_pct'] = (resolved / max(1, result['h01_total'])) * 100
     if unresolved:
         result['warnings'].append(
             f'미해결 H01 필드: {", ".join(unresolved[:6])}'
             + (f' 외 {len(unresolved)-6}' if len(unresolved) > 6 else ''))
+    if semantic_fail:
+        result['warnings'].append(
+            f'의미 불일치 매핑: {", ".join(semantic_fail[:4])}'
+            + (f' 외 {len(semantic_fail)-4}' if len(semantic_fail) > 4 else ''))
 
     # 3) READ_BLOCKS 주소 검증
     rb = getattr(mod, 'READ_BLOCKS', None) or []
