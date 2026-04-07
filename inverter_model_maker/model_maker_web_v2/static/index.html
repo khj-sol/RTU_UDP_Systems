@@ -808,6 +808,9 @@
   }
 
   function onStage2Done(msg) {
+    // Stage 2 버튼 재활성화 (사용자가 MPPT/String 수 조정 후 재실행 가능)
+    document.getElementById('btn-s2').disabled = false;
+
     const h01ok = msg.h01_matched === msg.h01_total;
     const derOk = msg.der_matched === msg.der_total;
     appendLog('s2',
@@ -827,13 +830,64 @@
       if (f > 0)  return '⚠';
       return '✗';
     };
-    const lvl = (mppt_v.found >= mppt_v.expected && mppt_i.found >= mppt_i.expected) ? 'ok' : 'warn';
+    const mpptOk = mppt_v.found >= mppt_v.expected && mppt_i.found >= mppt_i.expected;
+    const lvl = mpptOk ? 'ok' : 'warn';
     appendLog('s2',
       `검증: MPPT V ${mark(mppt_v.found, mppt_v.expected)} ${mppt_v.found}/${mppt_v.expected}  `
       + `MPPT I ${mark(mppt_i.found, mppt_i.expected)} ${mppt_i.found}/${mppt_i.expected}  `
       + `String V ${mark(str_v.found, str_v.expected)} ${str_v.found}/${str_v.expected}  `
       + `String I ${mark(str_i.found, str_i.expected)} ${str_i.found}/${str_i.expected}`,
       lvl);
+
+    // 자동 제안: 실제 추출 카운트 vs 사용자 입력
+    // - MPPT V/I 가 expected 보다 작거나 String V/I 가 작으면, 입력 필드 값을 제안
+    const mppt_actual = Math.max(mppt_v.found, mppt_i.found);
+    const str_actual = Math.max(str_v.found, str_i.found);
+    const mppt_input = parseInt(document.getElementById('s2-mppt').value) || 0;
+    const str_input = parseInt(document.getElementById('s2-str').value) || 0;
+    const total_str_input = mppt_input * str_input;
+
+    // 제안 영역 표시 (값 다를 때만)
+    let needsRerun = false;
+    let suggestion = '';
+    if (mppt_actual > 0 && mppt_actual !== mppt_input) {
+      suggestion += `MPPT 채널: 입력 ${mppt_input} → 실제 추출 <b style="color:#86efac">${mppt_actual}</b>  `;
+      needsRerun = true;
+    }
+    if (str_actual > 0 && str_actual !== total_str_input) {
+      // strings_per_mppt 추정: 가능하면 정수
+      const newSpm = mppt_actual > 0 ? Math.ceil(str_actual / mppt_actual) : 1;
+      suggestion += `String 총수: ${total_str_input} → <b style="color:#86efac">${str_actual}</b> (=${mppt_actual}×${newSpm})  `;
+      needsRerun = true;
+    }
+    if (needsRerun) {
+      appendLog('s2',
+        `💡 입력값과 실제 추출 카운트가 다릅니다. ${suggestion}`,
+        'warn');
+      appendLog('s2',
+        `→ MPPT 채널 수와 String 수를 조정 후 'Stage 2 실행' 다시 클릭`,
+        'warn');
+      // 자동으로 입력 필드에 추천값 채워넣기
+      if (mppt_actual > 0 && mppt_actual !== mppt_input) {
+        document.getElementById('s2-mppt').value = mppt_actual;
+        document.getElementById('s2-mppt').style.background = '#1e3a2a';
+        document.getElementById('s2-mppt').style.borderColor = '#86efac';
+      }
+      if (str_actual > 0 && mppt_actual > 0) {
+        const newSpm = Math.ceil(str_actual / mppt_actual);
+        if (newSpm !== str_input) {
+          document.getElementById('s2-str').value = newSpm;
+          document.getElementById('s2-str').style.background = '#1e3a2a';
+          document.getElementById('s2-str').style.borderColor = '#86efac';
+        }
+      }
+    } else {
+      // 입력값이 정확함 — 입력 필드 색 초기화
+      ['s2-mppt', 's2-str'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) { el.style.background = ''; el.style.borderColor = ''; }
+      });
+    }
 
     // IV Scan 검증: 지원 인버터에 한해
     const iv = v.iv_scan || {};
@@ -849,6 +903,7 @@
         + `(트래커 ${expTrk}, 데이터포인트 ${iv.data_points || 0})`,
         ivLvl);
     }
+
     if (msg.review_count > 0 && msg.review_items && msg.review_items.length > 0) {
       appendLog('s2', `REVIEW ${msg.review_count}개 — 판정 후 H01 매핑 확인`, 'warn');
       showReview(msg.review_items);
@@ -858,6 +913,15 @@
         `<br><span style="color:#fbbf24">REVIEW ${msg.review_count}개 미결</span>`;
       return; // REVIEW 판정 → H01 매핑 → Stage 3
     }
+
+    // 재실행 필요 시 Stage 3 활성화하지 않음 — 사용자가 다시 Stage 2 돌리도록
+    if (needsRerun) {
+      document.getElementById('card-s2').className = 'stage-card active';
+      document.getElementById('s3-summary').innerHTML =
+        `<span style="color:#fbbf24">⚠ MPPT/String 수 재조정 필요 — Stage 2 재실행 권장</span>`;
+      return;
+    }
+
     document.getElementById('card-s2').className = 'stage-card done';
     document.getElementById('card-s3').className = 'stage-card active';
     document.getElementById('s3-summary').innerHTML =
