@@ -826,8 +826,16 @@ class GenericInverterSimulator:
         self.scale = getattr(self._module, 'SCALE', {})
         self.mppt_channels = getattr(self._module, 'MPPT_CHANNELS', 4)
         self.string_channels = getattr(self._module, 'STRING_CHANNELS', 0)
-        self._get_mppt_regs = getattr(self._module, 'get_mppt_registers', None)
-        self._get_string_regs = getattr(self._module, 'get_string_registers', None)
+        # Helper functions are only reliable for Solarize-compatible protocols.
+        # Other protocols' helpers are Stage3 copies of Solarize layout (wrong addresses).
+        # Use _find_addr + MPPT{n}_ pattern for all non-Solarize protocols.
+        _proto_lower = protocol_name.lower()
+        if _proto_lower.startswith(('solarize', 'senergy', 'verterking')):
+            self._get_mppt_regs = getattr(self._module, 'get_mppt_registers', None)
+            self._get_string_regs = getattr(self._module, 'get_string_registers', None)
+        else:
+            self._get_mppt_regs = None
+            self._get_string_regs = None
 
         # Use FC03 by default (no register file uses RTU_FC_CODE currently)
         self.fc_code = getattr(self._module, 'RTU_FC_CODE', 3)
