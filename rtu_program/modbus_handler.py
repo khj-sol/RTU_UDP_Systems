@@ -1794,15 +1794,27 @@ class ModbusHandlerSerial:
     
     def _read_reg(self, addr, count=1):
         """Read holding registers (FC03) via pymodbus, returns list of U16 values or None."""
-        result = self.client.read_holding_registers(addr, count, slave=self.slave_id)
-        if result.isError():
+        try:
+            result = self.client.read_holding_registers(addr, count=count, slave=self.slave_id)
+        except TypeError:
+            try:
+                result = self.client.read_holding_registers(addr, count=count, device_id=self.slave_id)
+            except TypeError:
+                result = self.client.read_holding_registers(address=addr, count=count, slave=self.slave_id)
+        if result is None or result.isError():
             return None
         return result.registers
 
     def _read_input_reg(self, addr, count=1):
         """Read input registers (FC04) via pymodbus, returns list of U16 values or None."""
-        result = self.client.read_input_registers(addr, count, slave=self.slave_id)
-        if result.isError():
+        try:
+            result = self.client.read_input_registers(addr, count=count, slave=self.slave_id)
+        except TypeError:
+            try:
+                result = self.client.read_input_registers(addr, count=count, device_id=self.slave_id)
+            except TypeError:
+                result = self.client.read_input_registers(address=addr, count=count, slave=self.slave_id)
+        if result is None or result.isError():
             return None
         return result.registers
 
@@ -2397,10 +2409,20 @@ class PymodbusAdapter:
         self._total = 0
         self._ok = 0
 
+    def _call_pymodbus(self, fn, address, count, slave_id):
+        """pymodbus 2.x/3.x 호환 호출."""
+        try:
+            return fn(address, count=count, slave=slave_id)
+        except TypeError:
+            try:
+                return fn(address, count=count, device_id=slave_id)
+            except TypeError:
+                return fn(address=address, count=count, slave=slave_id)
+
     def read_holding_registers(self, address: int, count: int, slave_id: int):
         """FC03 — 성공 시 list[int], 실패 시 None"""
         try:
-            resp = self._client.read_holding_registers(address, count, slave=slave_id)
+            resp = self._call_pymodbus(self._client.read_holding_registers, address, count, slave_id)
             if resp is None or resp.isError():
                 self._total += 1
                 return None
@@ -2414,7 +2436,7 @@ class PymodbusAdapter:
     def read_input_registers(self, address: int, count: int, slave_id: int):
         """FC04 — 성공 시 list[int], 실패 시 None"""
         try:
-            resp = self._client.read_input_registers(address, count, slave=slave_id)
+            resp = self._call_pymodbus(self._client.read_input_registers, address, count, slave_id)
             if resp is None or resp.isError():
                 self._total += 1
                 return None
@@ -2428,7 +2450,13 @@ class PymodbusAdapter:
     def write_single_register(self, address: int, value: int, slave_id: int) -> bool:
         """FC06 — 성공 시 True"""
         try:
-            resp = self._client.write_register(address, value, slave=slave_id)
+            try:
+                resp = self._client.write_register(address, value=value, slave=slave_id)
+            except TypeError:
+                try:
+                    resp = self._client.write_register(address, value=value, device_id=slave_id)
+                except TypeError:
+                    resp = self._client.write_register(address, value, slave=slave_id)
             ok = resp is not None and not resp.isError()
             self._total += 1
             if ok:
