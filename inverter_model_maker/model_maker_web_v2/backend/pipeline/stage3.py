@@ -145,19 +145,29 @@ def read_stage2_excel(path: str) -> dict:
                 result['review_items'].append(item)
 
     # ── H01_MAPPING 시트 읽기 (수동 매핑 오버라이드) ──
+    # cells[3]: Stage2가 auto-fill하는 "NAME (addr); NAME2 (addr2)" 형식 표시 문자열
+    # → 첫 NAME만 추출 (괄호/세미콜론 제거)
+    # 사용자가 별도 column 또는 단순 NAME으로 덮어쓰면 그것도 처리
+    import re as _re
+    _CLEAN_REG_NAME = _re.compile(r'^([A-Za-z0-9_가-힣]+)')
     if 'H01_MAPPING' in wb.sheetnames:
         ws_h01 = wb['H01_MAPPING']
         header_found = False
         for row in ws_h01.iter_rows(values_only=True):
             cells = [str(c).strip() if c is not None else '' for c in row]
             if not header_found:
-                # 헤더 행 감지: 'H01 Field' 컬럼 존재 확인
                 if 'H01 Field' in cells:
                     header_found = True
                 continue
-            # cells[1]=H01 Field, cells[3]=매칭된 레지스터명
+            # cells[1]=H01 Field, cells[3]=매칭된 레지스터명 (display)
             if len(cells) >= 4 and cells[1] and cells[3]:
-                result['h01_manual_mapping'][cells[1]] = cells[3]
+                raw = cells[3].split(';')[0].strip()  # 첫 항목만
+                m = _CLEAN_REG_NAME.match(raw)
+                if m:
+                    clean = m.group(1)
+                    # 최소 2자, 의미있는 이름만
+                    if len(clean) >= 2 and clean.upper() not in ('NONE', 'NULL', 'N_A'):
+                        result['h01_manual_mapping'][cells[1]] = clean
 
     wb.close()
     return result
@@ -1326,25 +1336,25 @@ def _gen_h01_field_map(all_regs: List[RegisterRow], mppt_count: int, total_strin
     DATA_PARSER (문자열)와 달리 (레지스터명, 변환키) 튜플 형식으로 생성.
     use_dynamic_read=True가 되려면 이 dict가 반드시 필요.
     """
-    h01_to_reg: dict = {}
-    for reg in all_regs:
-        h01 = getattr(reg, 'h01_field', '') or ''
-        if h01 and h01 not in h01_to_reg:
-            name = to_upper_snake(reg.definition)
-            if name:
-                h01_to_reg[h01] = name
+    # 사용자 수동 매핑 (Stage2의 H01_MAPPING 시트에서 읽은 것) 우선
+    # H01 필드 → 사용자가 선택한 RegisterMap 속성명
+    # 단, 실제 추출된 레지스터 이름과 일치할 때만 적용 (auto-populated 노이즈 차단)
+    known_names = {to_upper_snake(r.definition) for r in all_regs
+                   if r.definition}
+    user_map: dict = {}
     if h01_manual_mapping:
         for field, reg_name in h01_manual_mapping.items():
-            if reg_name and reg_name.strip():
-                h01_to_reg[field] = reg_name.strip()
+            if not reg_name:
+                continue
+            clean = to_upper_snake(str(reg_name).strip())
+            if clean and clean in known_names:
+                user_map[field] = clean
 
     lines = ['\n', '# H01 스칼라 필드 → (RegisterMap 속성명, 변환기 키)',
              '# modbus_handler._read_inverter_data_dynamic()이 이 매핑을 사용한다.',
              'H01_FIELD_MAP = {']
 
-    # 표준 alias 12개: H01_FIELD_MAP은 RegisterMap의 표준 alias를 사용
-    # Stage2 자동 매칭은 품질이 불안정할 수 있으므로 H01_FIELD_MAP에서는 표준 alias 고정
-    # (DATA_PARSER는 Stage2 매칭 우선, H01_FIELD_MAP은 표준 alias 고정)
+    # 표준 alias 16개. 사용자 수동 매핑이 있으면 그쪽 우선.
     _STANDARD_FIELDS = [
         ('mode',              'INVERTER_MODE',     'raw'),
         ('r_voltage',         'R_PHASE_VOLTAGE',   'voltage_to_V'),
@@ -1364,7 +1374,10 @@ def _gen_h01_field_map(all_regs: List[RegisterRow], mppt_count: int, total_strin
         ('alarm3',            'ERROR_CODE3',       'raw'),
     ]
     for h01, std_alias, conv in _STANDARD_FIELDS:
-        lines.append(f"    '{h01:20s}': ('{std_alias}', '{conv}'),")
+        # 사용자 매핑이 있으면 그쪽으로 override
+        attr = user_map.get(h01, std_alias)
+        comment = '  # user' if h01 in user_map else ''
+        lines.append(f"    '{h01:20s}': ('{attr}', '{conv}'),{comment}")
 
     lines.append('}')
     lines.append('')
@@ -1839,13 +1852,21 @@ def run_stage3(
         r'GRID_VOLTAGE|GRID_CURRENT|OUTPUT_(POWER|VOLTAGE|CURRENT))',
         re.IGNORECASE
     )
+    # 사용자가 H01_MAPPING으로 직접 선택한 레지스터는 절대 필터하지 않음
+    # (Stage2 H01_MAPPING D열에서 추출한 register name 보존)
+    _user_pinned = set()
+    for v in (h01_manual_mapping or {}).values():
+        if v:
+            _user_pinned.add(to_upper_snake(str(v).strip()))
+
     mon_regs = regs_by_cat.get('MONITORING', [])
     if len(mon_regs) > 50:  # 레지스터가 많을 때만 필터 적용 (소규모 PDF는 그대로)
         essential_mon = [
             r for r in mon_regs
             if (getattr(r, 'h01_field', '') or
                 _MPPT_STR_PAT.match(to_upper_snake(r.definition or '')) or
-                _AC_ALIAS_PAT.match(to_upper_snake(r.definition or '')))
+                _AC_ALIAS_PAT.match(to_upper_snake(r.definition or '')) or
+                to_upper_snake(r.definition or '') in _user_pinned)
         ]
         if essential_mon:  # 필터 결과가 비어있지 않을 때만 교체
             log(f'  MONITORING 필터: {len(mon_regs)} → {len(essential_mon)} '
