@@ -16,11 +16,11 @@ class RegisterMap:
     # =========================================================================
     # Device Information
     # =========================================================================
-    FREQUENCY                                = 0x000F  # U16
+    # FREQUENCY 0x000F — Stage3 오류, 0x7D55로 override (하단 alias)
     SERIAL_NUMBER                            = 0x0014  # U16
     FIRMWARE_VERSION                         = 0x001E  # U16
     NRS_097_2_1                              = 0x002D  # U16
-    PV_POWER                                 = 0x0036  # U16
+    # PV_POWER 0x0036 — Stage3 오류, INPUT_POWER(0x7D40)로 대체 (하단 alias)
     ZAMBIA_MV480                             = 0x0063  # U16
     LOW_INSULATION_RESISTANCE                = 0x080E  # U16
     MODEL                                    = 0x7530  # STRING
@@ -57,7 +57,7 @@ class RegisterMap:
     LATEST_HISTORICAL_ALARM_SERIAL_NUMBER    = 0x7DAE  # U32
     LATEST_HISTORICAL_ALARM_SERIAL_NUMBER_HIGH = 0x7DAF
     TOTALBUSVOLTAGE                          = 0x7DB0  # S16, scale V 10
-    CUMULATIVE_ENERGY                        = 0x7DD8  # U32, scale kWh 100
+    CUMULATIVE_ENERGY                        = 0x7D6A  # U32, 1kWh (PDF Huawei ACCUMULATED_ENERGY)
     CUMULATIVE_ENERGY_HIGH                   = 0x7DD9
     RUNNINGTIMEOFCAPACITORBANK               = 0x88B8  # U32, scale 10
     RUNNINGTIMEOFCAPACITORBANK_HIGH          = 0x88B9
@@ -115,7 +115,7 @@ class RegisterMap:
     PRC_024_ERCOT_MV480                      = 0x003B  # U16
     EN50438_IE_MV480                         = 0x003D  # U16
     IEEE_1547A_MV480                         = 0x003F  # U16
-    MPPT3_CURRENT                            = 0x0047  # U16
+    # MPPT3_CURRENT 0x0047 — Stage3 오류, PV3CURRENT(0x7D15)로 대체됨
     CEI0_21_MV480                            = 0x004A  # U16
     HECO_MV600                               = 0x0051  # U16
     PRC_024_WESTERN_MV600                    = 0x0053  # U16
@@ -134,7 +134,7 @@ class RegisterMap:
     C10_11_MV800                             = 0x00FE  # U16
     G99_TYPEB_HV_MV480                       = 0x0105  # U16
     G99_TYPEB_HV_MV800                       = 0x0106  # U16
-    MPPT2_VOLTAGE                            = 0x0107  # U16
+    # MPPT2_VOLTAGE 0x0107 — Stage3 오류, PV2VOLTAGE(0x7D12)로 대체됨
     PV_VOLTAGE                               = 0x7D10  # S16, scale V 10
     PV1CURRENT                               = 0x7D11  # S16, scale A 100
     PV2VOLTAGE                               = 0x7D12  # S16, scale V 10
@@ -309,32 +309,40 @@ class RegisterMap:
     FAULTY_MONITORING_UNIT                   = 0xF000  # U16
 
     # R/S/T Phase Aliases
-    R_VOLTAGE                                = L1_VOLTAGE
-    R_CURRENT                                = L1_CURRENT
-    S_VOLTAGE                                = L2_VOLTAGE
-    S_CURRENT                                = L2_CURRENT
-    T_VOLTAGE                                = L3_VOLTAGE
-    T_CURRENT                                = L3_CURRENT
+    # --- R/S/T alias — PDF Huawei Phase_X = 0x7D45~0x7D4D ---
+    R_VOLTAGE                                = 0x7D45
+    R_CURRENT                                = 0x7D48
+    S_VOLTAGE                                = 0x7D46
+    S_CURRENT                                = 0x7D4A
+    T_VOLTAGE                                = 0x7D47
+    T_CURRENT                                = 0x7D4C
 
     # --- Standard handler compatibility aliases (H01 Body Type 4 required) ---
-    R_PHASE_VOLTAGE                          = L1_VOLTAGE
-    T_PHASE_VOLTAGE                          = L3_VOLTAGE
-    R_PHASE_CURRENT                          = L1_CURRENT
-    S_PHASE_CURRENT                          = L2_CURRENT
-    T_PHASE_CURRENT                          = L3_CURRENT
-    S_PHASE_VOLTAGE                          = L2_VOLTAGE  # L2 없음 → 대체
+    R_PHASE_VOLTAGE                          = 0x7D45
+    S_PHASE_VOLTAGE                          = 0x7D46
+    T_PHASE_VOLTAGE                          = 0x7D47
+    R_PHASE_CURRENT                          = 0x7D48
+    S_PHASE_CURRENT                          = 0x7D4A
+    T_PHASE_CURRENT                          = 0x7D4C
 
-    # --- MPPT alias (modbus_handler: MPPT{N}_ 형식) ---
-    MPPT1_CURRENT                            = PV1CURRENT
-    MPPT2_CURRENT                            = PV2CURRENT
-    MPPT3_VOLTAGE                            = PV3VOLTAGE
-    MPPT4_VOLTAGE                            = PV4VOLTAGE
-    MPPT4_CURRENT                            = PV4CURRENT
+    # --- MPPT alias (modbus_handler: MPPT{N}_ 형식) — PDF 기반 정정 ---
+    MPPT1_VOLTAGE                            = 0x7D10
+    MPPT1_CURRENT                            = 0x7D11
+    MPPT2_VOLTAGE                            = 0x7D12
+    MPPT2_CURRENT                            = 0x7D13
+    MPPT3_VOLTAGE                            = 0x7D14
+    MPPT3_CURRENT                            = 0x7D15
+    MPPT4_VOLTAGE                            = 0x7D16
+    MPPT4_CURRENT                            = 0x7D17
     PV_STRING_COUNT                          = 4
 
     # --- RTU modbus_handler / simulator 필수 alias ---
     INNER_TEMP                               = TEMPERATURE
-    AC_POWER                                 = PV_POWER
+    AC_POWER                                 = 0x7D50  # PDF Huawei ACTIVE_POWER
+    PV_POWER                                 = 0x7D40  # PDF Huawei INPUT_POWER
+    POWER_FACTOR                             = 0x7D54  # S16, 0.001
+    FREQUENCY                                = 0x7D55  # U16, 0.01Hz
+    INVERTER_MODE                            = 0x7D00  # U16, Running Status
     TOTAL_ENERGY                             = CUMULATIVE_ENERGY
     ERROR_CODE1                              = L2_VOLTAGE
     DER_POWER_FACTOR_SET                     = 0x07D0
@@ -352,6 +360,7 @@ class RegisterMap:
     # RTU HuaweiModbusHandler 호환 alias
     PV_STRING_BASE = PV_VOLTAGE  # 0x7D10
     INPUT_POWER = 0x7D40
+    PV_POWER_OVERRIDE_7D40 = 0x7D40  # marker
     PHASE_A_VOLTAGE = 0x7D45
     PHASE_A_CURRENT = 0x7D48
     PHASE_B_VOLTAGE = 0x7D46

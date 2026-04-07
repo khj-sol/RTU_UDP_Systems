@@ -16,7 +16,7 @@ class RegisterMap:
     # =========================================================================
     # Device Information
     # =========================================================================
-    FREQUENCY                                = 0x000F  # U16
+    # FREQUENCY 0x000F — Stage3 오류, GRID_FREQUENCY(0x0C1A)로 override
     PBUS_VOLTAGE                             = 0x0BC4  # U16, scale V 0.1
     NBUS_VOLTAGE                             = 0x0BC5  # U16, scale V 0.1
     L1_VOLTAGE                               = 0x0BC7  # U16, scale V 0.1
@@ -44,7 +44,7 @@ class RegisterMap:
     TEMPERATURE                              = 0x0001  # U16
     REACTIVE_POWER                           = 0x0003  # U16
     PV_PARALLEL_OPEN                         = 0x0007  # U16
-    PV_POWER                                 = 0x000B  # U16
+    # PV_POWER 0x000B — Kstar는 자체 PV power 레지스터 없음 (Block1 MPPT 합산)
     L2_VOLTAGE                               = 0x000D  # U16
     BIT17                                    = 0x0011  # U16
     BIT18                                    = 0x0012  # U16
@@ -52,12 +52,12 @@ class RegisterMap:
     L3_CURRENT                               = 0x0014  # U16
     L3_VOLTAGE                               = 0x0016  # U16
     BIT26                                    = 0x001A  # U16
-    CUMULATIVE_ENERGY                        = 0x001C  # U16
+    # CUMULATIVE_ENERGY 0x001C — Stage3 오류, CUMULATIVE_PRODUCTION_L(0x0BDE)로 override
     BLU_E_10KT_M1                            = 0x007B  # U16
     BLU_E_12KT_M0                            = 0x007C  # U16
-    MPPT2_VOLTAGE                            = 0x007F  # U16
+    # MPPT2_VOLTAGE 0x007F — Stage3 오류, PV2_INPUT_VOLTAGE(0x0BB9)로 override
     BLU_E_15KT_M2                            = 0x0080  # U16
-    MPPT3_VOLTAGE                            = 0x0081  # U16
+    # MPPT3_VOLTAGE 0x0081 — Stage3 오류, PV3_INPUT_VOLTAGE(0x0BBA)로 override
     BLU_E_17KT_M0                            = 0x0082  # U16
     BLU_E_20KT_M0                            = 0x0084  # U16
     BLU_E_20KT_M1                            = 0x0085  # U16
@@ -145,7 +145,7 @@ class RegisterMap:
     PV1_CURRENTCALIBRATIONCOEFFICIENT        = 0x0C8E  # U16
     PV2_CURRENTCALIBRATIONCOEFFICIENT        = 0x0C8F  # U16
     PV3PV12_CURRENTCALIBRATIONCOEFFICIENT    = 0x0C90  # U16
-    MPPT3_CURRENT                            = 0x0CE4  # U16
+    # MPPT3_CURRENT 0x0CE4 — Stage3 오류, PV3_INPUT_CURRENT(0x0BBD)로 override
     PV1_CURRENT_POINT_1                      = 0x1389  # S16, scale A 0.01
     PV1_VOLTAGE_POINT_2                      = 0x138A  # U16, scale V 0.1
     PV1_CURRENT_POINT_2                      = 0x138B  # S16, scale A 0.01
@@ -212,9 +212,13 @@ class RegisterMap:
     S_PHASE_CURRENT                          = S_PHASE_GRID_TIED_CURRENT
     T_PHASE_CURRENT                          = L3_CURRENT
 
-    # --- MPPT alias (modbus_handler: MPPT{N}_ 형식) ---
-    MPPT1_CURRENT                            = PV1_INPUT_CURRENT
-    MPPT2_CURRENT                            = PV2_INPUT_CURRENT
+    # --- MPPT alias (modbus_handler: MPPT{N}_ 형식) — PDF 기반 정정 ---
+    MPPT1_VOLTAGE                            = 0x0BB8  # PV1_INPUT_VOLTAGE
+    MPPT1_CURRENT                            = 0x0BBB  # PV1_INPUT_CURRENT
+    MPPT2_VOLTAGE                            = 0x0BB9  # PV2_INPUT_VOLTAGE
+    MPPT2_CURRENT                            = 0x0BBC  # PV2_INPUT_CURRENT
+    MPPT3_VOLTAGE                            = 0x0BBA  # PV3_INPUT_VOLTAGE
+    MPPT3_CURRENT                            = 0x0BBD  # PV3_INPUT_CURRENT
     PV_STRING_COUNT                          = 3
 
     # --- STRING alias (modbus_handler: STRING{N}_CURRENT 형식) ---
@@ -232,7 +236,7 @@ class RegisterMap:
     # --- RTU modbus_handler / simulator 필수 alias ---
     INNER_TEMP                               = TEMPERATURE
     INVERTER_MODE                            = INVERTER_STATUS
-    TOTAL_ENERGY                             = CUMULATIVE_ENERGY
+    # TOTAL_ENERGY은 하단 CUMULATIVE_ENERGY 재정의 후 alias
     ERROR_CODE1                              = INVERTER_CURRENT_OVER
     DER_POWER_FACTOR_SET                     = 0x07D0
     DER_ACTION_MODE                          = 0x07D1
@@ -240,8 +244,10 @@ class RegisterMap:
     DER_ACTIVE_POWER_PCT                     = 0x07D3
     INVERTER_ON_OFF                          = 0x0834
     MPPT_NUMBER                              = 0x1A4A  # default MPPT count register
-    MPPT1_VOLTAGE                            = PV_VOLTAGE
-    CUMULATIVE_ENERGY_LOW                    = CUMULATIVE_ENERGY
+    CUMULATIVE_ENERGY                        = 0x0BDE  # PDF Kstar CUMULATIVE_PRODUCTION_L
+    CUMULATIVE_ENERGY_LOW                    = 0x0BDE
+    TOTAL_ENERGY                             = 0x0BDE
+    FREQUENCY                                = 0x0C1A  # PDF Kstar GRID_FREQUENCY
     DER_AVM_DIGITAL_METERCONNECT_STATUS      = 0x1210
 
     # =========================================================================
