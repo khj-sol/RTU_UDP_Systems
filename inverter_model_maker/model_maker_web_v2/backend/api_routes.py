@@ -482,6 +482,9 @@ async def stage2_run(body: dict):
                 'der_total': result['der_total'],
                 'review_count': result['review_count'],
                 'review_items': result.get('review_items', []),
+                'stage2_validation': result.get('stage2_validation', {}),
+                'mppt_count': result.get('mppt_count', 0),
+                'total_strings': result.get('total_strings', 0),
             })
         except Exception as e:
             await ws_manager.send_json(sid, {

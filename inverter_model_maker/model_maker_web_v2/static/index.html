@@ -589,15 +589,18 @@
     }
     appendLog('s1', `카테고리: ${Object.entries(msg.counts||{}).filter(([k,v])=>v>0).map(([k,v])=>`${k}:${v}`).join(' ')}`, 'ok');
 
-    // INFO 매칭 상태 표시 — Model 매칭되면 OK (SN 없어도 메타데이터로 대체 가능)
+    // Stage 1 검증: 인버터 모델명 + SN 레지스터 존재 여부
     const im = msg.info_match || {};
     const modelOk = im.model === true;
     const snOk    = im.sn    === true;
-    if (modelOk) {
-      appendLog('s1', `INFO: OK  (Model ✓${snOk ? '  SN ✓' : ''})`, 'ok');
-    } else {
-      appendLog('s1', 'INFO: Model ✗  (레지스터 미발견)', 'warn');
-    }
+    const modelMark = modelOk ? '✓' : '✗';
+    const snMark    = snOk ? '✓' : '✗';
+    const level = (modelOk && snOk) ? 'ok' : (modelOk ? 'warn' : 'warn');
+    appendLog('s1',
+      `검증: Model ${modelMark}  SN ${snMark}` +
+      (!modelOk ? '  (모델명 레지스터 미발견)' : '') +
+      (modelOk && !snOk ? '  (SN 레지스터 미발견 — 메타데이터 대체 가능)' : ''),
+      level);
 
     if (msg.review_count > 0) {
       appendLog('s1', `REVIEW ${msg.review_count}개 — Stage 2에서 확인`, 'warn');
@@ -810,6 +813,26 @@
     appendLog('s2',
       `H01: ${msg.h01_matched}/${msg.h01_total}  DER: ${msg.der_matched}/${msg.der_total}`,
       h01ok && derOk ? 'ok' : 'warn');
+
+    // Stage 2 검증: MPPT 전압/전류 + String 전압/전류 추출 여부
+    const v = msg.stage2_validation || {};
+    const mppt_v = v.mppt_voltage || {found:0, expected:0};
+    const mppt_i = v.mppt_current || {found:0, expected:0};
+    const str_v  = v.string_voltage || {found:0, expected:0};
+    const str_i  = v.string_current || {found:0, expected:0};
+    const mark = (f, e) => {
+      if (e === 0) return '-';
+      if (f >= e) return '✓';
+      if (f > 0)  return '⚠';
+      return '✗';
+    };
+    const lvl = (mppt_v.found >= mppt_v.expected && mppt_i.found >= mppt_i.expected) ? 'ok' : 'warn';
+    appendLog('s2',
+      `검증: MPPT V ${mark(mppt_v.found, mppt_v.expected)} ${mppt_v.found}/${mppt_v.expected}  `
+      + `MPPT I ${mark(mppt_i.found, mppt_i.expected)} ${mppt_i.found}/${mppt_i.expected}  `
+      + `String V ${mark(str_v.found, str_v.expected)} ${str_v.found}/${str_v.expected}  `
+      + `String I ${mark(str_i.found, str_i.expected)} ${str_i.found}/${str_i.expected}`,
+      lvl);
     if (msg.review_count > 0 && msg.review_items && msg.review_items.length > 0) {
       appendLog('s2', `REVIEW ${msg.review_count}개 — 판정 후 H01 매핑 확인`, 'warn');
       showReview(msg.review_items);
@@ -833,15 +856,15 @@
     document.getElementById('dl-link').href =
       `${API}/download/${sessionId}/${msg.filename}`;
     document.getElementById('dl-link').textContent = `⬇ ${msg.filename} 다운로드`;
-    // 검증 결과
+    // Stage 3 검증: 코드 구조 검증 (class, H01_FIELD_MAP 등)
     const val = msg.validation || {};
     const passed = Object.values(val).filter(v => v).length;
     const total = Object.values(val).length;
-    appendLog('s3', `검증: ${passed}/${total} 통과`, passed === total ? 'ok' : 'warn');
+    appendLog('s3', `코드 검증: ${passed}/${total} 통과`, passed === total ? 'ok' : 'warn');
     if (msg.synonym_added > 0) appendLog('s3', `synonym_db: +${msg.synonym_added}개`, 'ok');
     if (msg.review_recorded > 0) appendLog('s3', `review_history: +${msg.review_recorded}개`, 'ok');
 
-    // Stage 4: RTU 호환성 검증 결과 표시
+    // Stage 3 검증: H01 매칭 + RTU 통신 검증
     const st4 = msg.stage4;
     if (st4) {
       const box = document.getElementById('stage4-result');
@@ -855,20 +878,29 @@
       };
       const [bg, fg, icon] = colors[grade] || ['#475569', '#cbd5e1', '?'];
       box.style.borderColor = bg;
-      gradeEl.innerHTML = `<span style="color:${fg}">${icon} Stage 4: ${grade}</span>` +
-        `  <span style="color:#9ca3af;font-weight:400">RTU 호환성 검증</span>`;
-      const h01 = `H01 매핑 <b style="color:${fg}">${st4.h01_resolved}/${st4.h01_total}</b> (${(st4.h01_pct||0).toFixed(0)}%)`;
-      const addr = `주소 범위 <b>${st4.addr_status||'?'}</b>`;
-      const comm = `통신 시뮬 <b>${st4.comm_status||'?'}</b>`;
+      gradeEl.innerHTML = `<span style="color:${fg}">${icon} Stage 3 검증: ${grade}</span>` +
+        `  <span style="color:#9ca3af;font-weight:400">H01 매칭 · RTU 통신</span>`;
+      // H01 매칭 상태
+      const h01Pct = (st4.h01_pct || 0).toFixed(0);
+      const h01Line = `① H01 매칭 <b style="color:${fg}">${st4.h01_resolved}/${st4.h01_total}</b> (${h01Pct}%)`;
+      // RTU 통신 상태 (주소 + 통신 시뮬)
+      const commOk = (st4.comm_status || '').startsWith('OK');
+      const commColor = commOk ? '#86efac' : '#f87171';
+      const addrOk = (st4.addr_status || '').startsWith('OK');
+      const addrColor = addrOk ? '#86efac' : '#f87171';
+      const rtuLine = `② RTU 통신`
+        + `<br>&nbsp;&nbsp;&nbsp;· 주소 범위 <b style="color:${addrColor}">${st4.addr_status||'?'}</b>`
+        + `<br>&nbsp;&nbsp;&nbsp;· Modbus TCP <b style="color:${commColor}">${st4.comm_status||'?'}</b>`;
       let warnings = '';
       if (st4.warnings && st4.warnings.length > 0) {
         warnings = '<div style="margin-top:6px;color:#fbbf24">⚠ ' +
           st4.warnings.map(w => w).join('<br>⚠ ') + '</div>';
       }
-      detailsEl.innerHTML = `${h01}<br>${addr}<br>${comm}${warnings}`;
+      detailsEl.innerHTML = `${h01Line}<br>${rtuLine}${warnings}`;
       box.style.display = 'block';
-      appendLog('s3', `Stage 4: ${grade} — H01 ${st4.h01_resolved}/${st4.h01_total}`,
-                grade === 'PASS' ? 'ok' : 'warn');
+      appendLog('s3',
+        `검증: H01 ${st4.h01_resolved}/${st4.h01_total}  RTU ${commOk ? '✓' : '✗'}  → ${grade}`,
+        grade === 'PASS' ? 'ok' : 'warn');
     }
   }
 

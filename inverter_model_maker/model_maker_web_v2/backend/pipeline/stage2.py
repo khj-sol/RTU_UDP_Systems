@@ -750,6 +750,93 @@ def run_stage2(
 
     log(f'총 레지스터: {total_regs}개, H01: {h01_matched}/{h01_total}, DER: {der_matched}/{der_total}')
 
+    # ── Stage 2 검증: MPPT 전압/전류 + String 전압/전류 추출 여부 ──
+    import re as _re
+    # 우선 h01_field 기반 매칭 (Stage1이 할당한 의미적 태그)
+    # 보조: 이름 regex (h01_field 없는 경우)
+    _H01_MPPT_V_RE = _re.compile(r'^mppt(\d+)_voltage$', _re.I)
+    _H01_MPPT_I_RE = _re.compile(r'^mppt(\d+)_current$', _re.I)
+    _H01_STR_V_RE  = _re.compile(r'^string(\d+)_voltage$', _re.I)
+    _H01_STR_I_RE  = _re.compile(r'^string(\d+)_current$', _re.I)
+    _NAME_MPPT_V_RE = _re.compile(r'(MPPT|PV|REG|MOD|MODULE|VPV|STRING)\s*_?(\d+)\s*_?(VOLTAGE|VOLT|DCV)|^VDC(\d+)|^V_?DC_?(\d+)', _re.I)
+    _NAME_MPPT_I_RE = _re.compile(r'(MPPT|PV|REG|MOD|MODULE|IPV)\s*_?(\d+)\s*_?(CURRENT|CURR|DCA)|^IDC(\d+)|^I_?DC_?(\d+)', _re.I)
+
+    mppt_v_found = set()
+    mppt_i_found = set()
+    str_v_found = set()
+    str_i_found = set()
+
+    def _add_match(re_pat, name, target_set):
+        m = re_pat.match(name)
+        if m:
+            for g in m.groups():
+                if g and g.isdigit():
+                    target_set.add(int(g))
+                    return
+
+    for reg in s1['monitoring'] + s1['info']:
+        h01 = (getattr(reg, 'h01_field', '') or '').strip().lower()
+        # h01_field 기반 (가장 신뢰 높음 — Stage1이 의미적으로 할당)
+        if h01:
+            m = _H01_MPPT_V_RE.match(h01)
+            if m:
+                mppt_v_found.add(int(m.group(1))); continue
+            m = _H01_MPPT_I_RE.match(h01)
+            if m:
+                mppt_i_found.add(int(m.group(1))); continue
+            m = _H01_STR_V_RE.match(h01)
+            if m:
+                str_v_found.add(int(m.group(1))); continue
+            m = _H01_STR_I_RE.match(h01)
+            if m:
+                str_i_found.add(int(m.group(1))); continue
+        # 보조: 이름 regex
+        name = to_upper_snake(reg.definition) if reg.definition else ''
+        if not name:
+            continue
+        _add_match(_NAME_MPPT_V_RE, name, mppt_v_found)
+        _add_match(_NAME_MPPT_I_RE, name, mppt_i_found)
+        if name.startswith('STRING'):
+            ms = _re.match(r'^STRING\s*_?(\d+)\s*_?(VOLTAGE|CURRENT)', name, _re.I)
+            if ms:
+                idx = int(ms.group(1))
+                if 'VOLT' in ms.group(2).upper():
+                    str_v_found.add(idx)
+                else:
+                    str_i_found.add(idx)
+        # 한글 "태양전지1_전류" 계열
+        km = _re.match(r'태양전지\s*(\d+)\s*_?\s*(전압|전류)', reg.definition or '')
+        if km:
+            idx = int(km.group(1))
+            if km.group(2) == '전압':
+                mppt_v_found.add(idx)
+            else:
+                mppt_i_found.add(idx)
+
+    # 검증 카운트 (expected = mppt_count, total_strings)
+    stage2_validation = {
+        'mppt_voltage': {
+            'found': len([i for i in mppt_v_found if 1 <= i <= mppt_count]),
+            'expected': mppt_count,
+        },
+        'mppt_current': {
+            'found': len([i for i in mppt_i_found if 1 <= i <= mppt_count]),
+            'expected': mppt_count,
+        },
+        'string_voltage': {
+            'found': len([i for i in str_v_found if 1 <= i <= total_strings]),
+            'expected': total_strings,
+        },
+        'string_current': {
+            'found': len([i for i in str_i_found if 1 <= i <= total_strings]),
+            'expected': total_strings,
+        },
+    }
+    log(f'MPPT V: {stage2_validation["mppt_voltage"]["found"]}/{mppt_count}, '
+        f'MPPT I: {stage2_validation["mppt_current"]["found"]}/{mppt_count}, '
+        f'String V: {stage2_validation["string_voltage"]["found"]}/{total_strings}, '
+        f'String I: {stage2_validation["string_current"]["found"]}/{total_strings}')
+
     # ── Step 6: Excel 생성 (3시트) ──
     basename = os.path.splitext(os.path.basename(stage1_path))[0].replace('_stage1', '')
     cap_str = f'_{capacity}' if capacity else ''
@@ -983,4 +1070,7 @@ def run_stage2(
         'review_items': review_items,
         'register_count': total_regs,
         'counts': counts,
+        'stage2_validation': stage2_validation,
+        'mppt_count': mppt_count,
+        'total_strings': total_strings,
     }
