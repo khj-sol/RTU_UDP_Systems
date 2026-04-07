@@ -1466,6 +1466,38 @@ def assign_h01_field(reg: RegisterRow, synonym_db: dict,
         if 'fault' not in defn_lower:
             return 'mppt1_current'
 
+    # 0-2) SMA EDMx 형식: "System voltage: Line conductor LN at PCC"
+    #      "System current: Line conductor LN at PCC"
+    #      한 줄에 'line conductor l1/l2/l3' + 'voltage'/'current' 구분
+    if 'line conductor l' in defn_ns or 'line conductor:' in defn_ns:
+        if 'voltage' in defn_ns or 'volt' in defn_ns:
+            if 'l1' in defn_ns and 'l2' not in defn_ns and 'l3' not in defn_ns:
+                return 'r_voltage'
+            if 'l2' in defn_ns and 'l1' not in defn_ns and 'l3' not in defn_ns:
+                return 's_voltage'
+            if 'l3' in defn_ns and 'l1' not in defn_ns and 'l2' not in defn_ns:
+                return 't_voltage'
+        if 'current' in defn_ns:
+            if 'l1' in defn_ns and 'l2' not in defn_ns and 'l3' not in defn_ns:
+                return 'r_current'
+            if 'l2' in defn_ns and 'l1' not in defn_ns and 'l3' not in defn_ns:
+                return 's_current'
+            if 'l3' in defn_ns and 'l1' not in defn_ns and 'l2' not in defn_ns:
+                return 't_current'
+
+    # 0-3) SMA EDMx: "Active power of system at PCC", "Grid frequency at PCC",
+    #      "Displacement power factor at PCC", "Total energy fed in on all line"
+    if 'pcc' in defn_ns:
+        if 'active power' in defn_ns and 'reactive' not in defn_ns and 'limit' not in defn_ns and 'setpoint' not in defn_ns:
+            return 'ac_power'
+        if 'grid frequency' in defn_ns or 'frequency' in defn_ns:
+            return 'frequency'
+        if 'power factor' in defn_ns:
+            return 'power_factor'
+    if 'total energy fed in' in defn_ns or 'energy fed in on all' in defn_ns:
+        if 'current day' not in defn_ns and 'today' not in defn_ns and 'daily' not in defn_ns:
+            return 'cumulative_energy'
+
     # 1) V2: pv_power / energy 키워드 (synonym/ref보다 먼저 — 정확한 키워드 우선)
     if any(k in defn_lower for k in ['total dc power', 'total pv power', 'dc power',
                                       'pv total power', 'pv_total_input_power',
@@ -2093,19 +2125,25 @@ def _make_pdf_match_row(h01_field: str, reg, miss_note: str = '') -> dict:
 
 def _parse_sunspec_text_registers(pages: list) -> list:
     """
-    SMA SunSpec 텍스트 형식 파싱 — 40001+ 10진수 주소 (테이블 없는 형식)
+    SunSpec/SMA/SAJ 텍스트 형식 파싱 — 표 형태 인식 실패시 fallback
 
-    예시:
-      40200 Active power (W)
-      1
-      int16
-      RO
+    지원 형식:
+      1) SunSpec/SMA SB: 40001+ decimal addresses (4xxxx)
+         40200 Active power (W) / 1 / int16 / RO
+      2) SMA EDMx: 30001+ decimal addresses (3xxxx)
+         30001 Version number / 2 / U32 / RAW / RO
+      3) SAJ: NNNNH hex 주소 (multi-line)
+         0100H / 1 / MPVMode / UInt16 / R / Inverter working mode
     """
-    RE_ADDR = re.compile(r'^(4[0-9]{4})\s+(.+)')
+    # 4xxxx (SunSpec) or 3xxxx (SMA EDMx) decimal address; 또는 NNNNH 형식 hex
+    RE_ADDR = re.compile(r'^([34][0-9]{4})\s+(.+)')
+    RE_ADDR_HEX_H = re.compile(r'^([0-9A-Fa-f]{3,4})H\s*$')
     KNOWN_TYPES = {
         'uint16', 'int16', 'uint32', 'int32', 'string',
         'acc32', 'bitfield32', 'sunssf', 'enum16', 'pad',
         'float32', 'acc64', 'ipaddr', 'eui48', 'ipv6addr',
+        # SMA EDMx 추가 형식
+        'u16', 'u32', 'u64', 's16', 's32', 's64',
     }
     SKIP_TYPES = {'pad', 'sunssf'}
 
@@ -2114,7 +2152,7 @@ def _parse_sunspec_text_registers(pages: list) -> list:
         all_lines.extend(p.get('text', '').split('\n'))
 
     # 독립 주소 행 + 다음 행 설명 병합: "40225\nManufacturer-specific status code (StVnd)..."
-    RE_ADDR_ONLY = re.compile(r'^(4[0-9]{4})\s*$')
+    RE_ADDR_ONLY = re.compile(r'^([34][0-9]{4})\s*$')
     merged = []
     i = 0
     while i < len(all_lines):
@@ -2132,11 +2170,45 @@ def _parse_sunspec_text_registers(pages: list) -> list:
 
     entries = []
     for i, line in enumerate(all_lines):
-        m = RE_ADDR.match(line.strip())
+        ln = line.strip()
+        m = RE_ADDR.match(ln)
         if m:
             reg_no = int(m.group(1))
             desc = m.group(2).strip()
             entries.append((i, reg_no, desc))
+            continue
+        # SAJ 형식: 'NNNNH' 단독 행 + 다음 행에 SIZE + 그 다음 행에 NAME
+        # NAME 행은 KNOWN_TYPES 가 아니어야 함 (Type 행과 구분)
+        m2 = RE_ADDR_HEX_H.match(ln)
+        if m2:
+            try:
+                reg_no = int(m2.group(1), 16)
+            except ValueError:
+                continue
+            # 다음 두 행 검사: SIZE 그리고 NAME
+            j = i + 1
+            saj_size = 1
+            if j < len(all_lines) and all_lines[j].strip().isdigit():
+                try:
+                    saj_size = int(all_lines[j].strip())
+                except ValueError:
+                    saj_size = 1
+                j += 1
+            saj_name = ''
+            while j < len(all_lines):
+                cand = all_lines[j].strip()
+                if not cand:
+                    j += 1
+                    continue
+                if cand.lower() in KNOWN_TYPES:
+                    break
+                # 영문/숫자로 시작하는 이름
+                if cand and (cand[0].isalpha() or cand[0].isdigit()):
+                    saj_name = cand
+                    break
+                j += 1
+            if saj_name:
+                entries.append((i, reg_no, saj_name))
 
     if not entries:
         return []
@@ -2173,8 +2245,16 @@ def _parse_sunspec_text_registers(pages: list) -> list:
 
         if dtype in SKIP_TYPES:
             continue
-        name = abbrev if abbrev else full_desc
-        if name.lower() == 'pad' or (abbrev and abbrev.lower().endswith('sf')):
+        # SMA EDMx (3xxxx) 는 약어가 단위 (Wh/W/VAr) 인 경우가 많음 — 약어 무시
+        # SunSpec (4xxxx) 는 약어가 cell-name (Mn/Md/StVnd) 인 경우가 많음 — 약어 사용
+        is_sma_edmx = (30000 <= reg_no <= 39999)
+        _UNIT_ABBREVS = {'w', 'wh', 'var', 'va', 'a', 'v', 'hz', 'kw', 'kwh',
+                         'kvar', 'kva', 'pf', 'wm2', '%', '°c', 'c', 'k'}
+        if is_sma_edmx or (abbrev and abbrev.lower() in _UNIT_ABBREVS):
+            name = full_desc if full_desc else (abbrev or '')
+        else:
+            name = abbrev if abbrev else full_desc
+        if not name or name.lower() == 'pad' or (abbrev and abbrev.lower().endswith('sf')):
             continue
 
         # 타입별 레지스터 수 결정
@@ -2331,12 +2411,28 @@ def run_stage1(
     registers = extract_registers_from_tables(all_tables, fc_list=fc_list)
     log(f'  {len(registers)}개 레지스터 추출 (원본)')
 
-    # SunSpec 텍스트 형식 폴백 (SMA 등 — 40001+ 10진수 주소 텍스트 형식)
-    if not registers and ext == '.pdf':
-        log('  표준 테이블 없음 → SunSpec 텍스트 형식 시도...')
-        registers = _parse_sunspec_text_registers(pages)
-        if registers:
-            log(f'  SunSpec 텍스트 형식: {len(registers)}개 레지스터 추출')
+    # 텍스트 형식 폴백 (SunSpec/SMA EDMx/SAJ 등 — find_tables() 실패시)
+    # 추출 결과가 적거나(<20) 노이즈만 (BYTE/BIT 같은 protocol-description 키워드)
+    # 있을 때 텍스트 형식 fallback 시도하여 보강
+    def _is_noisy(regs):
+        if not regs:
+            return True
+        noisy_kw = ('BYTE', 'BIT_OF_REGISTER', 'COMMAND', 'CRC', 'INVALID',
+                    'SLAVE_ADDRESS', 'STARTING_ADDRESS', 'SERVER_BUSY')
+        noisy = sum(1 for r in regs if any(kw in (r.definition or '').upper() for kw in noisy_kw))
+        return noisy >= len(regs) * 0.5
+    if ext == '.pdf' and (not registers or len(registers) < 20 or _is_noisy(registers)):
+        log('  표준 테이블 부족/노이즈 → 텍스트 형식 fallback 시도...')
+        text_regs = _parse_sunspec_text_registers(pages)
+        if text_regs:
+            log(f'  텍스트 형식: {len(text_regs)}개 레지스터 추출')
+            # 기존(노이즈) 무시하고 텍스트 결과 사용
+            existing_addrs = {r.address for r in registers if isinstance(r.address, int)}
+            for tr in text_regs:
+                if isinstance(tr.address, int) and tr.address not in existing_addrs:
+                    registers.append(tr)
+                    existing_addrs.add(tr.address)
+            log(f'  병합 후: {len(registers)}개 레지스터')
 
     if not registers:
         raise NotRegisterMapError(

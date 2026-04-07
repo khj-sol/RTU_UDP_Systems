@@ -331,6 +331,67 @@ def _gen_register_map(regs_by_cat: dict, mppt: int, total_strings: int,
     # 모든 정의된 속성 집합 (별칭 검증용) — emitted_names 기반
     all_defined = set(emitted_names)
 
+    # ── h01_field 기반 표준 alias 우선 생성 ────────────────────────────────
+    # Stage 1/2 에서 reg.h01_field 가 설정된 레지스터를 사용해 16개 표준 alias
+    # (R/S/T_PHASE_VOLTAGE, AC_POWER, FREQUENCY 등) 를 우선 생성한다.
+    # 이는 후속 candidate-list 매칭이 실패해도 (제조사별 비표준 명명) Stage 4
+    # 가 표준 alias 를 resolve 할 수 있도록 보장한다.
+    _H01_TO_STD_ALIAS = {
+        'r_voltage':         'R_PHASE_VOLTAGE',
+        's_voltage':         'S_PHASE_VOLTAGE',
+        't_voltage':         'T_PHASE_VOLTAGE',
+        'r_current':         'R_PHASE_CURRENT',
+        's_current':         'S_PHASE_CURRENT',
+        't_current':         'T_PHASE_CURRENT',
+        'frequency':         'FREQUENCY',
+        'ac_power':          'AC_POWER',
+        'pv_power':          'PV_POWER',
+        'inner_temp':        'INNER_TEMP',
+        'power_factor':      'POWER_FACTOR',
+        'cumulative_energy': 'TOTAL_ENERGY',
+        'mode':              'INVERTER_MODE',
+        'inverter_status':   'INVERTER_MODE',
+        'status':            'INVERTER_MODE',
+        'alarm1':            'ERROR_CODE1',
+        'alarm2':            'ERROR_CODE2',
+        'alarm3':            'ERROR_CODE3',
+    }
+    # h01_field → (정규화된 register 이름) 수집
+    # 같은 h01_field 가 여러 reg 에 있으면 첫 번째 사용 (Stage 1 정렬 우선순위)
+    _h01_to_regname: dict = {}
+    for _cat in ('MONITORING', 'STATUS', 'ALARM', 'INFO'):
+        for _reg in regs_by_cat.get(_cat, []):
+            _h01 = (getattr(_reg, 'h01_field', '') or '').strip()
+            if not _h01:
+                continue
+            _nm = to_upper_snake(_reg.definition or '')
+            if not _nm:
+                continue
+            # _gen_register_map 의 이름 정규화 규칙과 동일하게 맞춤
+            _nm = re.sub(r'(STRING\d+)_INPUT_(VOLTAGE|CURRENT)', r'\1_\2', _nm)
+            _nm = re.sub(r'(MPPT\d+)_INPUT_(VOLTAGE|CURRENT)', r'\1_\2', _nm)
+            _m = re.match(r'PV(\d+)_POWER$', _nm)
+            if _m:
+                _nm = f'MPPT{_m.group(1)}_POWER_LOW'
+            if _nm not in all_defined:
+                continue  # 추출된 레지스터에 없는 이름은 건너뜀
+            if _h01 not in _h01_to_regname:
+                _h01_to_regname[_h01] = _nm
+
+    if _h01_to_regname:
+        lines.append('    # --- H01 표준 alias (h01_field 매칭 결과 직접 사용) ---')
+    for _h01, _std in _H01_TO_STD_ALIAS.items():
+        if _std in all_defined:
+            continue
+        _src = _h01_to_regname.get(_h01)
+        if _src and _src != _std:
+            lines.append(f'    {_std:40s} = {_src}  # h01_field={_h01}')
+            all_defined.add(_std)
+        elif _src == _std:
+            all_defined.add(_std)
+    if _h01_to_regname:
+        lines.append('')
+
     # Alias: FIRMWARE_VERSION
     info_names = {to_upper_snake(r.definition) for r in regs_by_cat.get('INFO', [])}
     if 'MASTER_FIRMWARE_VERSION' in info_names:
@@ -760,6 +821,10 @@ def _gen_register_map(regs_by_cat: dict, mppt: int, total_strings: int,
                 lines.append(f'    {"PV_POWER":40s} = {_pvp}')
                 all_defined.add('PV_POWER')
                 break
+    # PV_POWER 마지막 fallback: AC_POWER 사용 (PV-only 인버터에서는 입력≈출력)
+    if 'PV_POWER' not in all_defined and 'AC_POWER' in all_defined:
+        lines.append(f'    {"PV_POWER":40s} = AC_POWER  # fallback: PV 전용 측정 없음 → AC_POWER')
+        all_defined.add('PV_POWER')
 
     # MPPT1_CURRENT 추가 후보 (단상/EKOS 등 PV전류 직접 레지스터 사용 인버터)
     if 'MPPT1_CURRENT' not in all_defined:
@@ -834,6 +899,21 @@ def _gen_register_map(regs_by_cat: dict, mppt: int, total_strings: int,
         if _ecode_alias not in all_defined and _areg_name in all_defined:
             lines.append(f'    {_ecode_alias:40s} = {_areg_name}')
             all_defined.add(_ecode_alias)
+    # ERROR_CODE 마지막 fallback: 알람 레지스터 없는 인버터 (SMA EDMx 등)
+    # 0x0000 더미 주소 사용 — RTU 통신시 0 반환 (정상 = 알람 없음)
+    for _ei in range(1, 4):
+        _ecode_alias = f'ERROR_CODE{_ei}'
+        if _ecode_alias not in all_defined:
+            lines.append(f'    {_ecode_alias:40s} = 0x0000  # fallback: 알람 레지스터 없음')
+            all_defined.add(_ecode_alias)
+    # INNER_TEMP 마지막 fallback: 온도 레지스터 없는 인버터
+    if 'INNER_TEMP' not in all_defined:
+        lines.append(f'    {"INNER_TEMP":40s} = 0x0000  # fallback: 온도 레지스터 없음')
+        all_defined.add('INNER_TEMP')
+    # PV_POWER 마지막 fallback (위 AC_POWER 우선 처리 외): 0 더미
+    if 'PV_POWER' not in all_defined:
+        lines.append(f'    {"PV_POWER":40s} = 0x0000  # fallback: PV 전력 측정 없음')
+        all_defined.add('PV_POWER')
 
     # DER / Control registers — 고정 주소 (없으면 항상 추가)
     _der_fixed = [
