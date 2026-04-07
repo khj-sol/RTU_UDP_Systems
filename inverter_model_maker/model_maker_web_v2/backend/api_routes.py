@@ -582,16 +582,15 @@ def get_h01_mapping(session_id: str):
         ws = wb['H01_MAPPING']
         DATA_START = 4
 
-        # H열 전체에서 사용 가능한 레지스터 목록 수집 (드롭다운용)
-        available_registers = []
+        # H열 전체에서 사용 가능한 레지스터 목록 수집 (드롭다운용) — 알파벳 정렬
         seen = set()
         for row_idx in range(DATA_START, ws.max_row + 1):
             val = ws.cell(row=row_idx, column=8).value  # H열
             if val:
                 v = str(val).strip()
-                if v and v not in seen:
-                    available_registers.append(v)
+                if v:
                     seen.add(v)
+        available_registers = sorted(seen)
 
         # H01 필드 데이터 (B열에 값이 있는 행만 동적으로 읽기)
         fields = []

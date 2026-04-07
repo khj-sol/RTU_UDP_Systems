@@ -529,14 +529,13 @@ def _add_h01_mapping_sheet(wb, s1: dict, openpyxl_module) -> None:
             if fc and h01 not in h01_fc:
                 h01_fc[h01] = fc
 
-    # 전체 레지스터 목록 (H열, 드롭다운용) — 이름만
-    avail_entries: list = []
+    # 전체 레지스터 목록 (H열, 드롭다운용) — 이름만, 알파벳 정렬
     seen_avail: set = set()
     for reg in all_cats:
         name = to_upper_snake(reg.definition)
         if name and name not in seen_avail:
-            avail_entries.append(name)
             seen_avail.add(name)
+    avail_entries: list = sorted(seen_avail)
 
     DATA_START = 4
     n_fields = len(_H01_MAPPING_FIELDS)
