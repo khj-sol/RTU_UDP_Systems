@@ -1147,7 +1147,11 @@
         "Month 2 energy",
         "G99-TYPEB-HV-MV480",
         "G99-TYPEB-HV-MV800",
-        "总PV Voltage"
+        "总PV Voltage",
+        "MPPT 2 voltage",
+        "MPPT2 Voltage",
+        "PV2Voltage",
+        "PV2 input voltage"
       ]
     },
     "mppt3_voltage": {
@@ -1165,7 +1169,11 @@
         "MPPT_3_VOLTAGE",
         "Faultcode L",
         "LVFRT HV1_",
-        "HMI Major Version"
+        "HMI Major Version",
+        "MPPT 3 voltage",
+        "MPPT3 Voltage",
+        "PV3Voltage",
+        "PV3 input voltage"
       ]
     }
   }

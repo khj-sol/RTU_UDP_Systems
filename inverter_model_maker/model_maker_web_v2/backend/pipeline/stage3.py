@@ -1136,6 +1136,80 @@ def _gen_data_parser(all_regs: List[RegisterRow], mppt_count: int, total_strings
     return '\n'.join(lines)
 
 
+# H01 필드별 변환기 키 — modbus_handler._H01_CONVERTERS/_H01_FLOAT_CONVERTERS와 일치해야 함
+_H01_CONV_KEYS = {
+    'r_voltage':         'voltage_to_V',
+    's_voltage':         'voltage_to_V',
+    't_voltage':         'voltage_to_V',
+    'r_current':         'current_to_01A',
+    's_current':         'current_to_01A',
+    't_current':         'current_to_01A',
+    'frequency':         'frequency_to_01Hz',
+    'ac_power':          'power_to_W',
+    'pv_power':          'power_to_W',
+    'inner_temp':        'raw',
+    'power_factor':      'pf_raw',
+    'cumulative_energy': 'energy_kwh_to_Wh',
+    'daily_energy':      'energy_kwh_to_Wh',
+    'mode':              'raw',
+    'alarm1':            'raw',
+    'alarm2':            'raw',
+    'alarm3':            'raw',
+}
+
+
+def _gen_h01_field_map(all_regs: List[RegisterRow], mppt_count: int, total_strings: int,
+                       h01_manual_mapping: dict = None) -> str:
+    """H01_FIELD_MAP 생성 — modbus_handler._read_inverter_data_dynamic()이 직접 사용.
+
+    DATA_PARSER (문자열)와 달리 (레지스터명, 변환키) 튜플 형식으로 생성.
+    use_dynamic_read=True가 되려면 이 dict가 반드시 필요.
+    """
+    h01_to_reg: dict = {}
+    for reg in all_regs:
+        h01 = getattr(reg, 'h01_field', '') or ''
+        if h01 and h01 not in h01_to_reg:
+            name = to_upper_snake(reg.definition)
+            if name:
+                h01_to_reg[h01] = name
+    if h01_manual_mapping:
+        for field, reg_name in h01_manual_mapping.items():
+            if reg_name and reg_name.strip():
+                h01_to_reg[field] = reg_name.strip()
+
+    lines = ['\n', '# H01 스칼라 필드 → (RegisterMap 속성명, 변환기 키)',
+             '# modbus_handler._read_inverter_data_dynamic()이 이 매핑을 사용한다.',
+             'H01_FIELD_MAP = {']
+
+    # 표준 alias 12개: H01_FIELD_MAP은 RegisterMap의 표준 alias를 사용
+    # Stage2 자동 매칭은 품질이 불안정할 수 있으므로 H01_FIELD_MAP에서는 표준 alias 고정
+    # (DATA_PARSER는 Stage2 매칭 우선, H01_FIELD_MAP은 표준 alias 고정)
+    _STANDARD_FIELDS = [
+        ('mode',              'INVERTER_MODE',     'raw'),
+        ('r_voltage',         'R_PHASE_VOLTAGE',   'voltage_to_V'),
+        ('s_voltage',         'S_PHASE_VOLTAGE',   'voltage_to_V'),
+        ('t_voltage',         'T_PHASE_VOLTAGE',   'voltage_to_V'),
+        ('r_current',         'R_PHASE_CURRENT',   'current_to_01A'),
+        ('s_current',         'S_PHASE_CURRENT',   'current_to_01A'),
+        ('t_current',         'T_PHASE_CURRENT',   'current_to_01A'),
+        ('frequency',         'FREQUENCY',         'frequency_to_01Hz'),
+        ('ac_power',          'AC_POWER',          'power_to_W'),
+        ('pv_power',          'PV_POWER',          'power_to_W'),
+        ('inner_temp',        'INNER_TEMP',        'raw'),
+        ('power_factor',      'POWER_FACTOR',      'pf_raw'),
+        ('cumulative_energy', 'TOTAL_ENERGY',      'energy_kwh_to_Wh'),
+        ('alarm1',            'ERROR_CODE1',       'raw'),
+        ('alarm2',            'ERROR_CODE2',       'raw'),
+        ('alarm3',            'ERROR_CODE3',       'raw'),
+    ]
+    for h01, std_alias, conv in _STANDARD_FIELDS:
+        lines.append(f"    '{h01:20s}': ('{std_alias}', '{conv}'),")
+
+    lines.append('}')
+    lines.append('')
+    return '\n'.join(lines)
+
+
 def _gen_data_types(all_regs: List[RegisterRow]) -> str:
     """DATA_TYPES dict 생성"""
     lines = ['\n', 'DATA_TYPES = {']
@@ -1366,6 +1440,7 @@ def validate_code(code: str, mppt: int, total_strings: int,
     checks['alias_MPPT1_VOLTAGE'] = 'MPPT1_VOLTAGE' in code
     checks['alias_PV_VOLTAGE'] = 'PV_VOLTAGE' in code
     checks['alias_PV_STRING_COUNT'] = 'PV_STRING_COUNT' in code
+    checks['H01_FIELD_MAP'] = 'H01_FIELD_MAP = {' in code
     checks['get_string_registers'] = 'def get_string_registers' in code
     checks['get_mppt_registers'] = 'def get_mppt_registers' in code
     checks['DATA_TYPES'] = 'DATA_TYPES' in code
@@ -1572,13 +1647,27 @@ def run_stage3(
     # ── MONITORING 필터: RTU가 실제 사용하는 레지스터만 유지 ──────────────────────
     # Stage2 H01 매칭(h01_field 설정) 또는 MPPT/String/PV 채널 패턴에 해당하는
     # 레지스터만 RegisterMap에 포함하고, 설정·네트워크·라이선스 등 불필요 레지스터 제거.
+    # AC측 전압/전류/온도 관련 레지스터도 alias 생성에 필요하므로 유지.
     _MPPT_STR_PAT = re.compile(r'^(MPPT|STRING|PV)\d+', re.IGNORECASE)
+    # L1/L2/L3, R/S/T Phase, 선간전압, 온도, 주파수, 전력, 에너지 — alias 체인에 필요
+    _AC_ALIAS_PAT = re.compile(
+        r'^(L[123]_|R_PHASE|S_PHASE|T_PHASE|'
+        r'A_B_|B_C_|C_A_|AB_LINE|BC_LINE|CA_LINE|'
+        r'A_PHASE|B_PHASE|C_PHASE|'
+        r'GRID_TOTAL|PV_TOTAL|TOTAL_ENERGY|CUMULATIVE_ENERGY|'
+        r'INNER_TEMP|TEMPERATURE|HEAT_SINK|CABINET_TEMP|INVERTER_TEMP|'
+        r'FREQUENCY|POWER_FACTOR|AC_POWER|PV_POWER|'
+        r'WORK_STATE|RUNNING_STATE|DEVICE_STATUS|SYSTEM_STATUS|'
+        r'ERROR_CODE|ALARM)',
+        re.IGNORECASE
+    )
     mon_regs = regs_by_cat.get('MONITORING', [])
     if len(mon_regs) > 50:  # 레지스터가 많을 때만 필터 적용 (소규모 PDF는 그대로)
         essential_mon = [
             r for r in mon_regs
             if (getattr(r, 'h01_field', '') or
-                _MPPT_STR_PAT.match(to_upper_snake(r.definition or '')))
+                _MPPT_STR_PAT.match(to_upper_snake(r.definition or '')) or
+                _AC_ALIAS_PAT.match(to_upper_snake(r.definition or '')))
         ]
         if essential_mon:  # 필터 결과가 비어있지 않을 때만 교체
             log(f'  MONITORING 필터: {len(mon_regs)} → {len(essential_mon)} '
@@ -1681,6 +1770,7 @@ def run_stage3(
         _gen_string_current_monitor(all_regs),
         _gen_read_blocks(all_regs),
         _gen_data_parser(all_regs, mppt_count, total_strings, h01_manual_mapping),
+        _gen_h01_field_map(all_regs, mppt_count, total_strings, h01_manual_mapping),
     ]
     code = '\n'.join(p for p in code_parts if p)
 

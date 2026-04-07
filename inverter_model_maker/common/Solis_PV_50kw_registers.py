@@ -84,6 +84,8 @@ class RegisterMap:
     ERROR_CODE3                              = 0x0BD4  # U16, scale V 0.1
     DC_CURRENT_4                             = 0x0BD5  # U16, scale A 0.1
     ALARM_CODE_DATA                          = 0x0BD6  # U16
+    AB_LINE_VOLTAGE_A_PHASEVOLTAGE           = 0x0BDA  # U16, scale A 0.1
+    BC_LINE_VOLTAGE_B_PHASEVOLTAGE           = 0x0BDB  # U16, scale V 0.1
     L1_CURRENT                               = 0x0BDD  # U16, scale A 0.1
     L2_CURRENT                               = 0x0BDE  # U16, scale A 0.1
     L3_CURRENT                               = 0x0BDF  # U16, scale A 0.1
@@ -92,10 +94,18 @@ class RegisterMap:
     INTERNAL_EPM_SWITCH_EPM_SOFT_SWITCH_FOR_AU2020_CODE = 0x0C27  # U16
     REG_07_81_S2F_FREQUENCY                  = 0x0C3F  # U16, scale Hz 0.01
     AC_POWER                                 = 0x0C4E  # U16
+    POWER_FACTOR_CONTROL_MODE                = 0x0C7B  # U16
     PV1_CURRENT                              = 0x0CE5  # S16, scale A 0.1
     PV2_CURRENT                              = 0x0CE6  # S16, scale A 0.1
     PV3_CURRENT                              = 0x0CE7  # S16, scale A 0.1
     PV4_CURRENT                              = 0x0CE8  # S16, scale A 0.1
+    FREQUENCY_DERATING_MODE                  = 0x0D48  # U16
+    A_PHASE_MODULE_NTCTEMPERATURE            = 0x0DF2  # U16, scale A 0.1
+    B_PHASE_MODULE_NTCTEMPERATURE            = 0x0DF3  # U16, scale ℃ 0.1
+    C_PHASE_MODULE_NTCTEMPERATURE            = 0x0DF4  # U16, scale ℃ 0.1
+    PV_TOTAL_ACTIVE_POWERCONTROL_SWITCH      = 0x0E20  # U16
+    PV_TOTAL_REACTIVE_POWERCONTROL_SWITCH    = 0x0E21  # U16
+    PV_TOTAL_VOLTAGE_CONTROLSWITCH           = 0x0E22  # U16
     L3_VOLTAGE                               = 0x0E4E  # U16, scale Hz 0.01
     REG_81_S2F_TIME_B_PHASE                  = 0x0E4F  # U16
     REG_81_S2F_TIME_C_PHASE                  = 0x0E63  # U16
@@ -1130,6 +1140,8 @@ DATA_TYPES = {
     'ERROR_CODE3': 'U16',
     'DC_CURRENT_4': 'U16',
     'ALARM_CODE_DATA': 'U16',
+    'AB_LINE_VOLTAGE_A_PHASEVOLTAGE': 'U16',
+    'BC_LINE_VOLTAGE_B_PHASEVOLTAGE': 'U16',
     'CA_LINE_VOLTAGE_C_PHASEVOLTAGE': 'U16',
     'L1_CURRENT': 'U16',
     'L2_CURRENT': 'U16',
@@ -1153,6 +1165,7 @@ DATA_TYPES = {
     'STANDARD_OPERATING_MODE_STATUS': 'U16',
     'EXTERNAL_PID_STATUS_HARDWARE_DEVICE': 'U16',
     'G100_CLEAR_ALARM_TYPE_SELECT': 'U16',
+    'POWER_FACTOR_CONTROL_MODE': 'U16',
     'OVERFREQUENCY_LOADSHEDDING_SPECIAL_FUNCTIONSETTINGS': 'U16',
     'FSM_POWER_CHANGE_LIMITPERCENTAGE': 'U16',
     'DROOP_SETTINGS_FOR_FSM': 'U16',
@@ -1171,6 +1184,7 @@ DATA_TYPES = {
     'PV3_CURRENT': 'S16',
     'PV4_CURRENT': 'S16',
     'PVSTR13_VOLTAGE': 'U16',
+    'FREQUENCY_DERATING_MODE': 'U16',
     'REG_1_0_01HZ_RANGE47_0_49_0HZDEFAULT48_0HZ_ACCURACY0_05HZ': 'U16',
     'REG_100_1HZ_RANGE50_2_52_0HZDEFAULT50_20HZ_ACCURACY0_01HZ': 'U16',
     'REG_0_DROOP_MODE1_STEP_MODEDEFAULT_0': 'U16',
@@ -1178,6 +1192,12 @@ DATA_TYPES = {
     'REG_1_1S_RANGE0_600SDEFAULT_30SACCURACY_1S': 'U16',
     'REG_100_1_0RANGE2_12DEFAULT_5ACCURACY0_1': 'U16',
     'REG_100_1S_RANGE0_2SDEFAULT_0SACCURACY0_1S': 'U16',
+    'A_PHASE_MODULE_NTCTEMPERATURE': 'U16',
+    'B_PHASE_MODULE_NTCTEMPERATURE': 'U16',
+    'C_PHASE_MODULE_NTCTEMPERATURE': 'U16',
+    'PV_TOTAL_ACTIVE_POWERCONTROL_SWITCH': 'U16',
+    'PV_TOTAL_REACTIVE_POWERCONTROL_SWITCH': 'U16',
+    'PV_TOTAL_VOLTAGE_CONTROLSWITCH': 'U16',
     'ACTIVE_POWER_CONTROLSTATUS': 'U16',
     'REACTIVE_POWER_CONTROLSTATUS': 'U16',
     'VOLTAGE_CONTROL_STATUS': 'U16',
@@ -1242,14 +1262,13 @@ READ_BLOCKS = [
     {'start': 0x0055, 'count':   1, 'fc': 3},
     {'start': 0x00A5, 'count':   1, 'fc': 3},
     {'start': 0x0BBA, 'count':  56, 'fc': 3},
-    {'start': 0x0C15, 'count':  75, 'fc': 3},
-    {'start': 0x0C81, 'count':  64, 'fc': 3},
+    {'start': 0x0C15, 'count': 125, 'fc': 3},
+    {'start': 0x0C92, 'count':  47, 'fc': 3},
     {'start': 0x0CE3, 'count':   6, 'fc': 3},
     {'start': 0x0D0B, 'count':   1, 'fc': 3},
-    {'start': 0x0D4B, 'count':  16, 'fc': 3},
-    {'start': 0x0DBB, 'count':  33, 'fc': 3},
-    {'start': 0x0DFD, 'count':   1, 'fc': 3},
-    {'start': 0x0E24, 'count':  70, 'fc': 3},
+    {'start': 0x0D48, 'count':  19, 'fc': 3},
+    {'start': 0x0DBB, 'count':  67, 'fc': 3},
+    {'start': 0x0E20, 'count':  74, 'fc': 3},
     {'start': 0x838F, 'count':  27, 'fc': 3},
     {'start': 0x8EA0, 'count':   1, 'fc': 3},
     {'start': 0xA9F2, 'count':   2, 'fc': 3},
@@ -1279,4 +1298,27 @@ DATA_PARSER = {
     'mppt3_current'        : 'MPPT3_CURRENT',
     'mppt4_voltage'        : 'ERROR_CODE3',
     'mppt4_current'        : 'DC_CURRENT_4',
+}
+
+
+
+# H01 스칼라 필드 → (RegisterMap 속성명, 변환기 키)
+# modbus_handler._read_inverter_data_dynamic()이 이 매핑을 사용한다.
+H01_FIELD_MAP = {
+    'mode                ': ('INVERTER_MODE', 'raw'),
+    'r_voltage           ': ('R_PHASE_VOLTAGE', 'voltage_to_V'),
+    's_voltage           ': ('S_PHASE_VOLTAGE', 'voltage_to_V'),
+    't_voltage           ': ('T_PHASE_VOLTAGE', 'voltage_to_V'),
+    'r_current           ': ('R_PHASE_CURRENT', 'current_to_01A'),
+    's_current           ': ('S_PHASE_CURRENT', 'current_to_01A'),
+    't_current           ': ('T_PHASE_CURRENT', 'current_to_01A'),
+    'frequency           ': ('FREQUENCY', 'frequency_to_01Hz'),
+    'ac_power            ': ('AC_POWER', 'power_to_W'),
+    'pv_power            ': ('PV_POWER', 'power_to_W'),
+    'inner_temp          ': ('INNER_TEMP', 'raw'),
+    'power_factor        ': ('POWER_FACTOR', 'pf_raw'),
+    'cumulative_energy   ': ('TOTAL_ENERGY', 'energy_kwh_to_Wh'),
+    'alarm1              ': ('ERROR_CODE1', 'raw'),
+    'alarm2              ': ('ERROR_CODE2', 'raw'),
+    'alarm3              ': ('ERROR_CODE3', 'raw'),
 }
