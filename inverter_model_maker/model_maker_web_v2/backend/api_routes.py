@@ -421,7 +421,8 @@ async def stage2_upload(
 @router.post('/stage2/run')
 async def stage2_run(body: dict):
     """
-    body: {session_id, mppt, strings_per_mppt, capacity}
+    body: {session_id, mppt, total_strings, capacity, iv_data_points}
+    backward-compat: strings_per_mppt = total_strings // mppt 형식도 허용
     """
     sid = body.get('session_id')
     s = SessionStore.get(sid)
@@ -433,7 +434,13 @@ async def stage2_run(body: dict):
         raise HTTPException(400, 'Stage 1 not completed')
 
     mppt = int(body.get('mppt', 4))
-    strings_per_mppt = int(body.get('strings_per_mppt', 2))
+    # 신규: total_strings (사용자가 직접 총 스트링 수 입력 — Growatt 등 비대칭 지원)
+    # 구버전 호환: strings_per_mppt가 들어오면 mppt × spm 으로 계산
+    if 'total_strings' in body:
+        total_strings = int(body.get('total_strings', 0))
+    else:
+        spm = int(body.get('strings_per_mppt', 2))
+        total_strings = mppt * spm
     capacity = body.get('capacity', '')
     iv_data_points = int(body.get('iv_data_points', 64))
     work_dir = SessionStore.get_work_dir(sid)
@@ -445,7 +452,7 @@ async def stage2_run(body: dict):
             progress = _make_progress_callback(sid, 's2', asyncio.get_running_loop())
             result = await _run_in_thread(
                 run_stage2, stage1_excel, work_dir,
-                mppt, strings_per_mppt, capacity, progress)
+                mppt, total_strings, capacity, progress)
 
             SessionStore.update(sid,
                                 stage=2,

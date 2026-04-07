@@ -276,8 +276,8 @@
       </div>
       <label>MPPT 채널 수</label>
       <input type="number" id="s2-mppt" min="1" max="12" value="4" />
-      <label>MPPT당 String 수</label>
-      <input type="number" id="s2-str" min="1" max="8" value="2" />
+      <label>총 String 수 <span style="color:#94a3b8;font-size:10px">(MPPT와 독립, Growatt 등 비대칭 인버터 지원)</span></label>
+      <input type="number" id="s2-str" min="0" max="32" value="8" />
       <label>용량 (파일명용, 예: 50kW)</label>
       <input type="text" id="s2-cap" placeholder="50kW" />
       <label>IV 데이터 포인트 수 (0=미지원)</label>
@@ -499,7 +499,7 @@
       body: JSON.stringify({
         session_id: sessionId,
         mppt: parseInt(document.getElementById('s2-mppt').value),
-        strings_per_mppt: parseInt(document.getElementById('s2-str').value),
+        total_strings: parseInt(document.getElementById('s2-str').value),
         capacity: document.getElementById('s2-cap').value,
         iv_data_points: parseInt(document.getElementById('s2-iv-points').value),
       }),
@@ -839,14 +839,12 @@
       + `String I ${mark(str_i.found, str_i.expected)} ${str_i.found}/${str_i.expected}`,
       lvl);
 
-    // 추출 카운트 vs 사용자 입력 비교
+    // 추출 카운트 vs 사용자 입력 비교 (총 String 수 직접 입력 모드)
     // 주의: 자동으로 입력 필드를 덮어쓰지 않는다 (사용자 의도 보존)
-    //       — 추출이 부족하면 사용자가 PDF에 정의된 값으로 직접 조정
     const mppt_actual = Math.max(mppt_v.found, mppt_i.found);
     const str_actual = Math.max(str_v.found, str_i.found);
     const mppt_input = parseInt(document.getElementById('s2-mppt').value) || 0;
-    const str_input = parseInt(document.getElementById('s2-str').value) || 0;
-    const total_str_input = mppt_input * str_input;
+    const total_str_input = parseInt(document.getElementById('s2-str').value) || 0;
 
     let needsRerun = false;
     let suggestion = '';
@@ -855,8 +853,6 @@
       needsRerun = true;
     }
     if (str_actual !== total_str_input) {
-      // 부족(actual < expected): under-extraction — 입력은 그대로 두고 사용자에게 알림만
-      // 초과(actual > expected): 입력이 너무 작음 — 마찬가지로 알림
       suggestion += `String 총수: 입력 ${total_str_input} → 실제 추출 <b style="color:#86efac">${str_actual}</b>  `;
       needsRerun = true;
     }

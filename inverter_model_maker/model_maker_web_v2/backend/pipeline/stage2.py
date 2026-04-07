@@ -722,11 +722,16 @@ def run_stage2(
     stage1_path: str,
     output_dir: str,
     mppt_count: int,
-    strings_per_mppt: int,
+    total_strings: int,
     capacity: str = '',
     progress: ProgressCallback = None,
 ) -> dict:
-    """Stage 2: Stage 1 Excel + 파라미터 → Stage 2 Excel (3시트)"""
+    """Stage 2: Stage 1 Excel + 파라미터 → Stage 2 Excel (3시트)
+
+    total_strings: 인버터 전체의 총 String 개수 (MPPT 수와 독립).
+                   Growatt 처럼 MPPT × N ≠ Total String 인 비대칭 인버터 지원.
+                   균등 분배가 가능하면 strings_per_mppt = total // mppt 로 파생.
+    """
     def log(msg, level='info'):
         if progress:
             progress(msg, level)
@@ -734,8 +739,10 @@ def run_stage2(
     openpyxl = get_openpyxl()
     from openpyxl.styles import Font, PatternFill, Border, Side
 
-    total_strings = mppt_count * strings_per_mppt
-    log(f'MPPT: {mppt_count}, Strings/MPPT: {strings_per_mppt}, Total: {total_strings}')
+    # MPPT당 String 수는 균등 분배 가정으로 파생 (코드 생성용 — 비대칭이면 0 가능)
+    strings_per_mppt = (total_strings // mppt_count) if mppt_count > 0 else 0
+    log(f'MPPT: {mppt_count}, Total Strings: {total_strings} '
+        f'({strings_per_mppt}/MPPT 균등분배 가정)')
 
     # ── Step 1: Stage 1 Excel 읽기 (V2 4시트) ──
     log('Stage 1 Excel 읽기...')
@@ -1037,8 +1044,9 @@ def run_stage2(
     ws['A1'].font = title_font
     meta_items = [
         ('제조사', manufacturer), ('용량', capacity or '-'),
-        ('MPPT', mppt_count), ('String/MPPT', strings_per_mppt),
+        ('MPPT', mppt_count),
         ('Total Strings', total_strings),
+        ('String/MPPT (파생)', strings_per_mppt),
         ('H01 매칭', f'{h01_matched}/{h01_total}'),
         ('DER 매칭', f'{der_matched}/{der_total}'),
         ('총 레지스터', total_regs), ('REVIEW', len(remaining_review)),
@@ -1147,7 +1155,7 @@ def run_stage2(
     summary_items = [
         ('제조사', manufacturer), ('용량', capacity or '-'),
         ('MPPT', f'{mppt_count} (PDF max {meta.get("max_mppt", "?")}개)'),
-        ('String', f'{total_strings} ({strings_per_mppt}/MPPT)'),
+        ('String', f'총 {total_strings}개 (파생 {strings_per_mppt}/MPPT)'),
         ('H01 매칭', f'{h01_matched}/{h01_total}'),
         ('DER 매칭', f'{der_matched}/{der_total}'),
         ('총 레지스터', total_regs),
