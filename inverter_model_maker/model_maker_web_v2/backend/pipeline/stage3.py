@@ -605,7 +605,9 @@ def _gen_register_map(regs_by_cat: dict, mppt: int, total_strings: int,
         for _fq in ['HZ', 'GRID_FREQUENCY', 'GRID_FREQ', 'AC_FREQUENCY',
                     'OUTPUT_FREQUENCY', 'F_AC', 'FREQ', 'FRQ',
                     'L1_FREQUENCY', 'PHASE_FREQUENCY', 'GRIDFREQUENCY',
-                    'OUTFREQ', 'OUTPUTFREQ', '주파수']:
+                    'OUTFREQ', 'OUTPUTFREQ', '주파수',
+                    # Solarize DEA 가상 주소 — Growatt 등 1018(0x03FA) 물리 매핑
+                    'DEA_FREQUENCY_LOW', 'DEA_FREQUENCY']:
             if _fq in all_defined:
                 lines.append(f'    {"FREQUENCY":40s} = {_fq}')
                 all_defined.add('FREQUENCY')
@@ -1905,6 +1907,27 @@ def run_stage3(
     for reg in all_regs:
         cat = reg.category or 'MONITORING'
         regs_by_cat.setdefault(cat, []).append(reg)
+
+    # DER_MONITOR_REGS (DEA_*) 항상 주입 — RTU DER-AVM 표준 가상 주소
+    # 0x03E8~0x03FD 범위는 Solarize RTU의 DEA 고정 주소로,
+    # Growatt 같은 인버터는 물리 주소가 여기에 매핑됨 (Frequency @ 0x03FA = 1018)
+    # Stage1/2가 4_DER 시트에서 전달 안 할 수 있으므로 여기서 보장
+    if device_type == 'inverter':
+        from . import DER_MONITOR_REGS
+        existing_der_addrs = {
+            r.address for r in regs_by_cat.get('DER_MONITOR', [])
+            if isinstance(r.address, int)
+        }
+        der_mon_list = regs_by_cat.setdefault('DER_MONITOR', [])
+        for dr in DER_MONITOR_REGS:
+            if dr['addr'] in existing_der_addrs:
+                continue
+            der_mon_list.append(RegisterRow(
+                definition=dr['name'], address=dr['addr'],
+                data_type=dr['type'], scale=dr.get('scale', ''),
+                unit=dr.get('unit', ''), rw='RO',
+                comment=dr.get('desc', ''), category='DER_MONITOR'))
+            all_regs.append(der_mon_list[-1])
 
     # ── MONITORING 필터: RTU가 실제 사용하는 레지스터만 유지 ──────────────────────
     # Stage2 H01 매칭(h01_field 설정) 또는 MPPT/String/PV 채널 패턴에 해당하는
