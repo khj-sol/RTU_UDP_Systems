@@ -567,12 +567,28 @@ def _add_h01_mapping_sheet(wb, s1: dict, openpyxl_module) -> None:
                 h01_fc[h01] = fc
 
     # 전체 레지스터 목록 (H열, 드롭다운용) — 이름만, 알파벳 정렬
-    seen_avail: set = set()
+    # 동시에 name → {fc} 맵 수집 (FC3/FC4 구분용)
+    def _norm_fc(v) -> str:
+        s = str(v or '').strip()
+        if not s:
+            return ''
+        if s in ('3', '03', 'FC03', 'fc03', 'Fc03'):
+            return '3'
+        if s in ('4', '04', 'FC04', 'fc04', 'Fc04'):
+            return '4'
+        return ''
+
+    name_to_fcs: Dict[str, set] = {}
     for reg in all_cats:
         name = to_upper_snake(reg.definition)
-        if name and name not in seen_avail:
-            seen_avail.add(name)
-    avail_entries: list = sorted(seen_avail)
+        if not name:
+            continue
+        fc_n = _norm_fc(getattr(reg, 'fc', ''))
+        if fc_n:
+            name_to_fcs.setdefault(name, set()).add(fc_n)
+        else:
+            name_to_fcs.setdefault(name, set())
+    avail_entries: list = sorted(name_to_fcs.keys())
 
     DATA_START = 4
     n_fields = len(_H01_MAPPING_FIELDS)
@@ -628,8 +644,12 @@ def _add_h01_mapping_sheet(wb, s1: dict, openpyxl_module) -> None:
             cell.fill = suggest_fill
 
     # H열: 전체 레지스터 목록 (드롭다운 소스)
+    # J/K열(숨김): 레지스터 → FC 맵 (J=name, K="3"/"4"/"3,4") — API에서 읽음
     for i, name in enumerate(avail_entries):
         ws.cell(row=DATA_START + i, column=8, value=name).fill = ref_fill
+        ws.cell(row=DATA_START + i, column=10, value=name)
+        fcs = sorted(name_to_fcs.get(name, set()))
+        ws.cell(row=DATA_START + i, column=11, value=','.join(fcs) if fcs else '')
 
     # I열: FC 코드 (기본값 자동, 사용자 수정 가능)
     # 기본 FC 감지 (MONITORING 다수파)
@@ -640,10 +660,21 @@ def _add_h01_mapping_sheet(wb, s1: dict, openpyxl_module) -> None:
     else:
         default_fc = '3'
 
+    # 매칭된 레지스터의 FC를 우선 사용 (단일 FC만 갖는 레지스터면 자동확정)
     for i, (field, desc) in enumerate(_H01_MAPPING_FIELDS):
         row = DATA_START + i
-        fc_val = h01_fc.get(field, default_fc)
-        cell_fc = ws.cell(row=row, column=9, value=int(fc_val) if fc_val else 3)
+        fc_val = h01_fc.get(field, '')
+        if not fc_val:
+            # D열의 첫 매칭 레지스터로부터 FC 자동 추론
+            matched_list = h01_auto.get(field, [])
+            for nm, _addr in matched_list:
+                fcs = name_to_fcs.get(nm, set())
+                if len(fcs) == 1:
+                    fc_val = next(iter(fcs))
+                    break
+        if not fc_val:
+            fc_val = default_fc
+        cell_fc = ws.cell(row=row, column=9, value=int(fc_val))
         cell_fc.border = thin
 
     # DataValidation — D열에 H열 범위 드롭다운
@@ -680,6 +711,9 @@ def _add_h01_mapping_sheet(wb, s1: dict, openpyxl_module) -> None:
     ws.column_dimensions['G'].width = 35
     ws.column_dimensions['H'].width = 35
     ws.column_dimensions['I'].width = 5
+    # J/K: 숨김 메타데이터 (FC 맵)
+    ws.column_dimensions['J'].hidden = True
+    ws.column_dimensions['K'].hidden = True
 
 
 # ─── Stage 2 메인 함수 ───────────────────────────────────────────────────────

@@ -586,14 +586,33 @@ def get_h01_mapping(session_id: str):
         DATA_START = 4
 
         # H열 전체에서 사용 가능한 레지스터 목록 수집 (드롭다운용) — 알파벳 정렬
+        # J/K열(숨김 메타데이터)에서 레지스터별 FC 맵을 읽음 (J=name, K="3"/"4"/"3,4")
         seen = set()
+        name_to_fcs: dict[str, list[int]] = {}
         for row_idx in range(DATA_START, ws.max_row + 1):
             val = ws.cell(row=row_idx, column=8).value  # H열
             if val:
                 v = str(val).strip()
                 if v:
                     seen.add(v)
+            jname = ws.cell(row=row_idx, column=10).value  # J열
+            kfcs = ws.cell(row=row_idx, column=11).value   # K열
+            if jname:
+                nm = str(jname).strip()
+                fcs: list[int] = []
+                if kfcs:
+                    for tok in str(kfcs).split(','):
+                        t = tok.strip()
+                        if t in ('3', '4'):
+                            fcs.append(int(t))
+                if nm and nm not in name_to_fcs:
+                    name_to_fcs[nm] = sorted(set(fcs))
         available_registers = sorted(seen)
+        # 드롭다운에서 사용할 풍부한 형태 (FC 정보 포함)
+        available_with_fc = [
+            {'name': nm, 'fcs': name_to_fcs.get(nm, [])}
+            for nm in available_registers
+        ]
 
         # H01 필드 데이터 (B열에 값이 있는 행만 동적으로 읽기)
         fields = []
@@ -621,6 +640,14 @@ def get_h01_mapping(session_id: str):
             fc_val = ws.cell(row=row, column=9).value
             fc = int(fc_val) if fc_val else 3
 
+            # 현재 매칭된 레지스터의 FC 정보로 lock/ambiguous 판단
+            cur_fcs = name_to_fcs.get(current_clean, []) if current_clean else []
+            fc_locked = len(cur_fcs) == 1
+            fc_ambiguous = len(cur_fcs) >= 2
+            if fc_locked:
+                # 단일 FC만 갖는 레지스터면 그 값으로 강제
+                fc = cur_fcs[0]
+
             fields.append({
                 'h01_field': h01_field,
                 'description': description,
@@ -629,10 +656,17 @@ def get_h01_mapping(session_id: str):
                 'is_matched': is_matched,
                 'suggestions': suggestions,
                 'fc': fc,
+                'fc_locked': fc_locked,
+                'fc_ambiguous': fc_ambiguous,
+                'current_fcs': cur_fcs,
             })
 
         wb.close()
-        return {'fields': fields, 'available_registers': available_registers}
+        return {
+            'fields': fields,
+            'available_registers': available_registers,
+            'available_with_fc': available_with_fc,
+        }
 
     except HTTPException:
         raise

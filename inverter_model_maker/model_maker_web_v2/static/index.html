@@ -1064,6 +1064,16 @@
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const data = await r.json();
       const avail = data.available_registers || [];
+      const availWithFc = data.available_with_fc || avail.map(n => ({name: n, fcs: []}));
+
+      // FC가 분리된 인버터인지 감지: FC3과 FC4 둘 다 존재하면 분리형
+      const allFcs = new Set();
+      availWithFc.forEach(r => (r.fcs || []).forEach(fc => allFcs.add(fc)));
+      const hasFcSplit = allFcs.has(3) && allFcs.has(4);
+
+      // window 전역에 보관 — onChange 핸들러에서 사용
+      window._h01AvailWithFc = availWithFc;
+      window._h01HasFcSplit = hasFcSplit;
 
       table.innerHTML = '';
       data.fields.forEach(f => {
@@ -1075,36 +1085,35 @@
 
         // current_register는 backend에서 이미 정리된 깨끗한 NAME
         const curName = f.current_register || '';
-
-        // 드롭다운: (없음) → 추천 후보 → 구분선 → 전체 목록
-        let opts = '<option value="">(없음)</option>';
-        if (sugg.length > 0) {
-          opts += '<optgroup label="── 추천 후보 ──">';
-          sugg.forEach(s => {
-            const sel = s === curName ? ' selected' : '';
-            opts += `<option value="${s}"${sel}>${s}</option>`;
-          });
-          opts += '</optgroup>';
-        }
-        opts += '<optgroup label="── 전체 추출 레지스터 ──">';
-        avail.forEach(reg => {
-          const sel = reg === curName ? ' selected' : '';
-          opts += `<option value="${reg}"${sel}>${reg}</option>`;
-        });
-        opts += '</optgroup>';
-
         const fc = f.fc || 3;
+
         const fcSel3 = fc === 3 ? ' selected' : '';
         const fcSel4 = fc === 4 ? ' selected' : '';
 
+        // FC dropdown 색상: ambiguous면 빨강, FC 분리형인데 매칭없음도 빨강 강조
+        const fcAmbig = !!f.fc_ambiguous;
+        const fcStyle = (fcAmbig || (hasFcSplit && !curName))
+          ? 'border:1px solid #f87171;background:#fee2e2;color:#b91c1c;font-weight:700'
+          : '';
+        const fcTitle = fcAmbig
+          ? '이 레지스터는 FC3/FC4 양쪽에 존재합니다 — 어느 쪽인지 선택하세요'
+          : (hasFcSplit ? 'FC3=Holding, FC04=Input' : 'FC');
+
         row.innerHTML = `
           <div class="${cls}" title="${f.description}">${icon} ${f.h01_field}</div>
-          <select class="h01-select" data-field="${f.h01_field}" onchange="updateH01Counter()"
-                  style="padding:3px 6px;font-size:11px;flex:1">${opts}</select>
-          <select class="h01-fc" data-field="${f.h01_field}" style="padding:3px 4px;font-size:11px;width:42px" title="FC">
+          <select class="h01-select" data-field="${f.h01_field}"
+                  onchange="onH01RegisterChange(this)"
+                  style="padding:3px 6px;font-size:11px;flex:1"></select>
+          <select class="h01-fc" data-field="${f.h01_field}"
+                  onchange="onH01FcChange(this)"
+                  style="padding:3px 4px;font-size:11px;width:42px;${fcStyle}" title="${fcTitle}">
             <option value="3"${fcSel3}>F3</option><option value="4"${fcSel4}>F4</option>
           </select>`;
         table.appendChild(row);
+
+        // 레지스터 옵션 채우기 (FC 필터 적용)
+        const sel = row.querySelector('.h01-select');
+        rebuildH01RegisterOptions(sel, fc, curName, sugg);
       });
 
       updateH01Counter();
@@ -1115,6 +1124,89 @@
     } catch (err) {
       table.innerHTML = `<span style="color:#f87171">H01 매핑 로드 오류: ${err.message}</span>`;
     }
+  }
+
+  // 레지스터 드롭다운 옵션 재구성 (FC 필터 적용)
+  function rebuildH01RegisterOptions(sel, fc, curName, suggestions) {
+    const availWithFc = window._h01AvailWithFc || [];
+    const hasFcSplit = window._h01HasFcSplit;
+    const sugg = suggestions || [];
+
+    // FC 분리형이면 선택된 FC를 갖는 레지스터만 표시
+    // 비분리형이면 모두 표시
+    const matchesFc = (fcs) => {
+      if (!hasFcSplit) return true;
+      if (!fcs || fcs.length === 0) return true; // FC 정보 없는 항목은 항상 표시
+      return fcs.includes(fc);
+    };
+
+    let opts = '<option value="">(없음)</option>';
+    const filteredSugg = sugg.filter(s => {
+      const info = availWithFc.find(r => r.name === s);
+      return info ? matchesFc(info.fcs) : true;
+    });
+    if (filteredSugg.length > 0) {
+      opts += '<optgroup label="── 추천 후보 ──">';
+      filteredSugg.forEach(s => {
+        const selAttr = s === curName ? ' selected' : '';
+        opts += `<option value="${s}"${selAttr}>${s}</option>`;
+      });
+      opts += '</optgroup>';
+    }
+    opts += `<optgroup label="── 전체 추출 레지스터${hasFcSplit ? ' (FC' + fc + ')' : ''} ──">`;
+    availWithFc.forEach(r => {
+      if (!matchesFc(r.fcs)) return;
+      const selAttr = r.name === curName ? ' selected' : '';
+      const fcLabel = (r.fcs && r.fcs.length === 2) ? ' ⚠' : '';
+      opts += `<option value="${r.name}"${selAttr}>${r.name}${fcLabel}</option>`;
+    });
+    opts += '</optgroup>';
+    sel.innerHTML = opts;
+
+    // 옵션을 채운 뒤 저장한 값 복원 (필터에서 사라졌으면 빈값)
+    if (curName && [...sel.options].some(o => o.value === curName)) {
+      sel.value = curName;
+    } else {
+      sel.value = '';
+    }
+    // suggestions를 다음 렌더에서 다시 사용할 수 있도록 보관
+    sel.dataset.suggestions = JSON.stringify(sugg);
+  }
+
+  // 사용자가 레지스터를 변경 → 그 레지스터의 FC가 단일이면 FC 자동확정
+  function onH01RegisterChange(sel) {
+    const field = sel.dataset.field;
+    const fcSel = document.querySelector(`.h01-fc[data-field="${field}"]`);
+    const availWithFc = window._h01AvailWithFc || [];
+    const info = availWithFc.find(r => r.name === sel.value);
+    if (fcSel && info && info.fcs && info.fcs.length === 1) {
+      fcSel.value = String(info.fcs[0]);
+      // 단일 FC로 확정 → 빨강 해제
+      fcSel.style.cssText = 'padding:3px 4px;font-size:11px;width:42px';
+      fcSel.title = 'FC';
+    } else if (fcSel && info && info.fcs && info.fcs.length === 2) {
+      // 양쪽 모두 가능 → ambiguous, 빨강
+      fcSel.style.cssText = 'padding:3px 4px;font-size:11px;width:42px;border:1px solid #f87171;background:#fee2e2;color:#b91c1c;font-weight:700';
+      fcSel.title = '이 레지스터는 FC3/FC4 양쪽에 존재합니다 — 어느 쪽인지 선택하세요';
+    } else if (fcSel) {
+      fcSel.style.cssText = 'padding:3px 4px;font-size:11px;width:42px';
+      fcSel.title = 'FC';
+    }
+    updateH01Counter();
+  }
+
+  // 사용자가 FC를 변경 → 레지스터 드롭다운을 새 FC로 필터링
+  function onH01FcChange(fcSel) {
+    const field = fcSel.dataset.field;
+    const regSel = document.querySelector(`.h01-select[data-field="${field}"]`);
+    if (!regSel) return;
+    const fc = parseInt(fcSel.value);
+    const sugg = JSON.parse(regSel.dataset.suggestions || '[]');
+    rebuildH01RegisterOptions(regSel, fc, regSel.value, sugg);
+    // 사용자가 직접 FC를 골랐으면 빨강 해제
+    fcSel.style.cssText = 'padding:3px 4px;font-size:11px;width:42px';
+    fcSel.title = 'FC';
+    updateH01Counter();
   }
 
   function updateH01Counter() {
