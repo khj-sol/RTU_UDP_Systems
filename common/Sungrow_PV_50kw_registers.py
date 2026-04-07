@@ -16,8 +16,16 @@ class RegisterMap:
     # =========================================================================
     # Device Information
     # =========================================================================
-    SERIAL_NUMBER                            = 0x137E  # U16
-    DEVICE_MODEL                             = 0x1388  # U16
+    # Standard model-info aliases at safe 0x1A* range (used by RTU read_model_info())
+    DEVICE_MODEL                             = 0x1A00  # 16 regs ASCII
+    SERIAL_NUMBER                            = 0x1A10  # 8 regs ASCII
+    MPPT_COUNT                               = 0x1A3B  # U16
+    NOMINAL_POWER_LOW                        = 0x1A46  # U16 (low word)
+    NOMINAL_POWER_HIGH                       = 0x1A4E  # U16 (high word)
+
+    # Sungrow PDF-specific (single-register codes, not used by read_model_info)
+    SUNGROW_SERIAL_NUMBER                    = 0x137E  # U16
+    SUNGROW_DEVICE_MODEL                     = 0x1388  # U16
     TOTAL_RUNNING_TIME                       = 0x138E  # U32
     TOTAL_RUNNING_TIME_HIGH                  = 0x138F
     INTERNALTEMPERATURE                      = 0x1390  # S16, scale ℃ 0.1
