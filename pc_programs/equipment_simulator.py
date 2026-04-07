@@ -74,7 +74,7 @@ from collections import deque
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 try:
-    from pymodbus.server import StartSerialServer
+    from pymodbus.server import StartSerialServer, StartTcpServer
     from pymodbus.datastore import ModbusServerContext, ModbusSequentialDataBlock
     from pymodbus import ModbusDeviceIdentification
     # pymodbus 3.7+ renamed ModbusSlaveContext to ModbusDeviceContext
@@ -1504,16 +1504,25 @@ class EquipmentSimulator:
             identity.ModelName = 'Multi-Device'
             identity.MajorMinorRevision = self.VERSION
 
-            StartSerialServer(
-                context=self.context,
-                identity=identity,
-                port=self.port,
-                baudrate=self.baudrate,
-                bytesize=8,
-                parity='N',
-                stopbits=1,
-                timeout=1
-            )
+            tcp_port = getattr(self, 'tcp_port', None)
+            if tcp_port:
+                self.logger.info(f"[TEST] Starting Modbus TCP server on 127.0.0.1:{tcp_port}")
+                StartTcpServer(
+                    context=self.context,
+                    identity=identity,
+                    address=('127.0.0.1', tcp_port),
+                )
+            else:
+                StartSerialServer(
+                    context=self.context,
+                    identity=identity,
+                    port=self.port,
+                    baudrate=self.baudrate,
+                    bytesize=8,
+                    parity='N',
+                    stopbits=1,
+                    timeout=1
+                )
         except KeyboardInterrupt:
             print("\n\nShutting down...")
         except Exception as e:
@@ -1912,6 +1921,8 @@ def main():
                         help='Baudrate (overrides config)')
     parser.add_argument('--config', type=str, default=None,
                         help='Load config JSON (backward compat, overrides INI)')
+    parser.add_argument('--tcp-port', type=int, default=None,
+                        help='Test mode: start Modbus TCP server on 127.0.0.1:PORT (bypasses serial)')
     # Legacy args for backward compatibility
     parser.add_argument('--inverter-id', type=int, default=None)
     parser.add_argument('--relay-id', type=int, default=None)
@@ -2012,6 +2023,8 @@ def main():
         print(f"  COM Port: {config['port']}")
 
     simulator = EquipmentSimulator(config)
+    if args.tcp_port:
+        simulator.tcp_port = args.tcp_port
     simulator.start()
 
 
