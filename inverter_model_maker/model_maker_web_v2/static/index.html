@@ -307,7 +307,10 @@
       </div>
       <div id="h01-mapping-area" style="display:none">
         <div class="h01-mapping-section">
-          <h4>🔗 H01 매핑 확인/수정</h4>
+          <h4 style="display:flex;justify-content:space-between;align-items:center">
+            <span>🔗 H01 매핑 확인/수정</span>
+            <span id="h01-mapping-status" style="font-size:12px">-/-</span>
+          </h4>
           <div style="font-size:11px;color:#9ca3af;margin-bottom:8px">
             자동매칭 결과를 확인하고 필요시 드롭다운으로 수정하세요.
             <span style="color:#4ade80">✓ 초록</span>=매칭됨&nbsp;
@@ -319,6 +322,10 @@
             💾 매핑 저장 후 Stage 3 활성화
           </button>
         </div>
+      </div>
+      <div id="stage4-result" style="display:none; margin-top:12px; padding:10px; background:#0d1b2a; border:1px solid #1e40af; border-radius:6px; font-size:12px">
+        <div id="stage4-grade" style="font-size:13px; font-weight:700; margin-bottom:6px"></div>
+        <div id="stage4-details" style="color:#cbd5e1; line-height:1.6"></div>
       </div>
       <button class="run-btn" id="btn-s3" disabled onclick="runStage3()">Stage 3 실행 — registers.py 생성</button>
       <div class="log-box" id="log-s3"><span style="color:#ffffff">-- Stage 2 완료 후 활성화 --</span></div>
@@ -833,6 +840,36 @@
     appendLog('s3', `검증: ${passed}/${total} 통과`, passed === total ? 'ok' : 'warn');
     if (msg.synonym_added > 0) appendLog('s3', `synonym_db: +${msg.synonym_added}개`, 'ok');
     if (msg.review_recorded > 0) appendLog('s3', `review_history: +${msg.review_recorded}개`, 'ok');
+
+    // Stage 4: RTU 호환성 검증 결과 표시
+    const st4 = msg.stage4;
+    if (st4) {
+      const box = document.getElementById('stage4-result');
+      const gradeEl = document.getElementById('stage4-grade');
+      const detailsEl = document.getElementById('stage4-details');
+      const grade = st4.grade || '?';
+      const colors = {
+        PASS: ['#16a34a', '#86efac', '✅'],
+        WARN: ['#d97706', '#fbbf24', '⚠️'],
+        FAIL: ['#dc2626', '#f87171', '❌'],
+      };
+      const [bg, fg, icon] = colors[grade] || ['#475569', '#cbd5e1', '?'];
+      box.style.borderColor = bg;
+      gradeEl.innerHTML = `<span style="color:${fg}">${icon} Stage 4: ${grade}</span>` +
+        `  <span style="color:#9ca3af;font-weight:400">RTU 호환성 검증</span>`;
+      const h01 = `H01 매핑 <b style="color:${fg}">${st4.h01_resolved}/${st4.h01_total}</b> (${(st4.h01_pct||0).toFixed(0)}%)`;
+      const addr = `주소 범위 <b>${st4.addr_status||'?'}</b>`;
+      const comm = `통신 시뮬 <b>${st4.comm_status||'?'}</b>`;
+      let warnings = '';
+      if (st4.warnings && st4.warnings.length > 0) {
+        warnings = '<div style="margin-top:6px;color:#fbbf24">⚠ ' +
+          st4.warnings.map(w => w).join('<br>⚠ ') + '</div>';
+      }
+      detailsEl.innerHTML = `${h01}<br>${addr}<br>${comm}${warnings}`;
+      box.style.display = 'block';
+      appendLog('s3', `Stage 4: ${grade} — H01 ${st4.h01_resolved}/${st4.h01_total}`,
+                grade === 'PASS' ? 'ok' : 'warn');
+    }
   }
 
   function showReview(items) {
@@ -906,6 +943,7 @@
   async function loadH01Mapping() {
     const area = document.getElementById('h01-mapping-area');
     const table = document.getElementById('h01-mapping-table');
+    const status = document.getElementById('h01-mapping-status');
     table.innerHTML = '<span style="color:#9ca3af;font-size:11px">불러오는 중...</span>';
     area.style.display = 'block';
 
@@ -923,21 +961,20 @@
         const icon = f.is_matched ? '✓' : '✗';
         const sugg = f.suggestions || [];
 
-        // 현재 매칭에서 이름만 추출 (주소 제거: "NAME (0xXXXX)" → "NAME")
-        const curName = f.current_register.replace(/\s*\(0x[0-9A-Fa-f]+\)/, '').trim();
+        // current_register는 backend에서 이미 정리된 깨끗한 NAME
+        const curName = f.current_register || '';
 
-        // 드롭다운: 추천 후보 → 구분선 → 전체 목록
+        // 드롭다운: (없음) → 추천 후보 → 구분선 → 전체 목록
         let opts = '<option value="">(없음)</option>';
         if (sugg.length > 0) {
           opts += '<optgroup label="── 추천 후보 ──">';
           sugg.forEach(s => {
-            const sName = s.replace(/\s*\(0x[0-9A-Fa-f]+\)/, '').trim();
-            const sel = sName === curName ? ' selected' : '';
-            opts += `<option value="${sName}"${sel}>${s}</option>`;
+            const sel = s === curName ? ' selected' : '';
+            opts += `<option value="${s}"${sel}>${s}</option>`;
           });
           opts += '</optgroup>';
         }
-        opts += '<optgroup label="── 전체 목록 ──">';
+        opts += '<optgroup label="── 전체 추출 레지스터 ──">';
         avail.forEach(reg => {
           const sel = reg === curName ? ' selected' : '';
           opts += `<option value="${reg}"${sel}>${reg}</option>`;
@@ -950,18 +987,33 @@
 
         row.innerHTML = `
           <div class="${cls}" title="${f.description}">${icon} ${f.h01_field}</div>
-          <select class="h01-select" data-field="${f.h01_field}" style="padding:3px 6px;font-size:11px;flex:1">${opts}</select>
+          <select class="h01-select" data-field="${f.h01_field}" onchange="updateH01Counter()"
+                  style="padding:3px 6px;font-size:11px;flex:1">${opts}</select>
           <select class="h01-fc" data-field="${f.h01_field}" style="padding:3px 4px;font-size:11px;width:42px" title="FC">
             <option value="3"${fcSel3}>F3</option><option value="4"${fcSel4}>F4</option>
           </select>`;
         table.appendChild(row);
       });
 
+      updateH01Counter();
       const matched = data.fields.filter(f => f.is_matched).length;
       const total = data.fields.length;
-      appendLog('s3', `H01 매핑 로드: ${matched}/${total} 자동매칭`, matched === total ? 'ok' : 'warn');
+      appendLog('s3', `H01 매핑 로드: ${matched}/${total} 자동매칭 — 미매칭 ${total - matched}개 수동 매핑 가능`,
+                matched === total ? 'ok' : 'warn');
     } catch (err) {
       table.innerHTML = `<span style="color:#f87171">H01 매핑 로드 오류: ${err.message}</span>`;
+    }
+  }
+
+  function updateH01Counter() {
+    const selects = document.querySelectorAll('.h01-select[data-field]');
+    let mapped = 0;
+    selects.forEach(s => { if (s.value) mapped++; });
+    const total = selects.length;
+    const status = document.getElementById('h01-mapping-status');
+    if (status) {
+      const color = mapped === total ? '#4ade80' : (mapped >= total*0.75 ? '#fbbf24' : '#f87171');
+      status.innerHTML = `<span style="color:${color};font-weight:700">${mapped}/${total}</span> 매핑됨`;
     }
   }
 

@@ -532,6 +532,7 @@ async def stage3_run(body: dict):
                 'level': 'ok',
                 'filename': result['filename'],
                 'validation': result['validation'],
+                'stage4': result.get('stage4'),
                 'synonym_added': result['synonym_added'],
                 'review_recorded': result['review_recorded'],
             })
@@ -548,6 +549,18 @@ async def stage3_run(body: dict):
 
 
 # ─── H01 매핑 ────────────────────────────────────────────────────────────────
+
+_RE_CLEAN_REG = __import__('re').compile(r'^([A-Za-z0-9_가-힣]+)')
+
+
+def _parse_reg_display(s: str) -> str:
+    """'NAME (0x0123); NAME2 (0x0456)' → 'NAME' (첫 항목의 깨끗한 이름)"""
+    if not s:
+        return ''
+    first = s.split(';')[0].strip()
+    m = _RE_CLEAN_REG.match(first)
+    return m.group(1) if m else ''
+
 
 @router.get('/h01-mapping/{session_id}')
 def get_h01_mapping(session_id: str):
@@ -587,14 +600,20 @@ def get_h01_mapping(session_id: str):
             if not h01_field:
                 break
             description = str(ws.cell(row=row, column=3).value or '').strip()
-            current_register = str(ws.cell(row=row, column=4).value or '').strip()
+            current_raw = str(ws.cell(row=row, column=4).value or '').strip()
+            # 깨끗한 register name 추출 (auto-fill 형식 "NAME (addr); ..." → NAME만)
+            current_clean = _parse_reg_display(current_raw)
+            # 매칭 판정: clean name이 available 목록에 실제 존재해야 진짜 매칭
+            is_matched = bool(current_clean) and current_clean in available_registers
 
-            # 추천 후보 (E~G열)
+            # 추천 후보 (E~G열) — 동일하게 정리
             suggestions = []
             for col in (5, 6, 7):
                 sv = ws.cell(row=row, column=col).value
                 if sv:
-                    suggestions.append(str(sv).strip())
+                    clean = _parse_reg_display(str(sv).strip())
+                    if clean and clean in available_registers and clean not in suggestions:
+                        suggestions.append(clean)
 
             # FC 코드 (I열, col 9)
             fc_val = ws.cell(row=row, column=9).value
@@ -603,8 +622,9 @@ def get_h01_mapping(session_id: str):
             fields.append({
                 'h01_field': h01_field,
                 'description': description,
-                'current_register': current_register,
-                'is_matched': bool(current_register),
+                'current_register': current_clean,  # 깨끗한 이름만
+                'current_raw': current_raw,  # 원본 (디버깅용)
+                'is_matched': is_matched,
                 'suggestions': suggestions,
                 'fc': fc,
             })
