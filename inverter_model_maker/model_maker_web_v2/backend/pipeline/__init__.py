@@ -349,7 +349,11 @@ def detect_channel_number(definition: str) -> Optional[tuple]:
     if 'test' in dl or 'threshold' in dl:
         return None
     # V2: alarm/fault/error 레지스터는 MPPT 채널이 아님 (Solis Fault Code 03 등 오감지 방지)
-    if any(k in dl for k in ['fault', 'error', 'alarm', 'warning']):
+    if any(k in dl for k in ['fault', 'error', 'alarm', 'warning', 'abnormal']):
+        return None
+    # 제어/설정 키워드 제외 (PV3_VOLT_SET, PV3_POWER_LIMIT 등)
+    if any(k in dl for k in ['_set', ' set', 'setpoint', '_limit', ' limit',
+                              'enable', 'disable', 'reset', 'control']):
         return None
 
     # Kstar: PV{n} String current {m} → STRING
@@ -403,6 +407,26 @@ def detect_channel_number(definition: str) -> Optional[tuple]:
 
     # ABB TRIO: "Voltage on DC Input #1", "Current on DC Input #2", "Active Power on DC Input #3"
     m = re.search(r'\bDC\s+Input\s+#(\d+)', definition, re.I)
+    if m:
+        return ('MPPT', int(m.group(1)))
+
+    # Deye / others: "PV1 input power", "PV2 input voltage", "PV3 input current"
+    # 'PV{N}[_ ]*(input[_ ]*)?(voltage|current|power|watt|volt|curr)'
+    # 언더스코어/공백 모두 separator 로 허용
+    # 끝 경계는 (?![a-z]) — _POWER_PV3 처럼 _ 가 따라와도 OK
+    m = re.search(
+        r'\bPV(\d+)[_\s]*(?:input[_\s]*)?(voltage|current|power|watt|volt|curr)(?![a-z])',
+        definition, re.I)
+    if m:
+        return ('MPPT', int(m.group(1)))
+
+    # Deye 압축 형식: 'PV1_V', 'PV1_I', 'PV1V', 'PV1I', 'PV1 V_', 'PV1 I_'
+    # PV{N}_V/PV{N}V → voltage, PV{N}_I/PV{N}I → current
+    # 단어 경계 처리: 끝이 영문자가 아니어야 함 (PV1_V vs PV1_VOLTAGE 구분)
+    m = re.search(r'\bPV(\d+)[_\s]*V(?![A-Za-z])', definition, re.I)
+    if m:
+        return ('MPPT', int(m.group(1)))
+    m = re.search(r'\bPV(\d+)[_\s]*I(?![A-Za-z])', definition, re.I)
     if m:
         return ('MPPT', int(m.group(1)))
 
