@@ -614,11 +614,23 @@ def _gen_register_map(regs_by_cat: dict, mppt: int, total_strings: int,
     # POWER_FACTOR — 역률 (이름이 짧아 별도)
     if 'POWER_FACTOR' not in all_defined:
         for _pf in ['PF', 'POWERFACTOR', 'GRID_POWER_FACTOR', 'OUT_PF',
-                    'COS_PHI', 'COSPHI', '역률']:
+                    'COS_PHI', 'COSPHI', '역률',
+                    # 한글 인버터 "종합" 접미/접두 패턴 (Ekos 등)
+                    '역률종합_PF', '역률종합', '역률_종합', '종합역률',
+                    '출력역률', '총역률']:
             if _pf in all_defined:
                 lines.append(f'    {"POWER_FACTOR":40s} = {_pf}')
                 all_defined.add('POWER_FACTOR')
                 break
+    # POWER_FACTOR 마지막 수단: '역률' 포함 substring (L1/L2/L3 제외)
+    if 'POWER_FACTOR' not in all_defined:
+        _cand = next((n for n in sorted(all_defined)
+                      if '역률' in n
+                      and not any(p in n for p in ('L1', 'L2', 'L3', 'SET', 'DER_'))),
+                     None)
+        if _cand:
+            lines.append(f'    {"POWER_FACTOR":40s} = {_cand}')
+            all_defined.add('POWER_FACTOR')
 
     # AC_POWER — 유효전력 레지스터 다양한 후보명 지원 (한글/영문/제조사별)
     if 'AC_POWER' not in all_defined:
