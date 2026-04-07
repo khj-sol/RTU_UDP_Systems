@@ -271,6 +271,8 @@ async def stage1_run(body: dict):
                 'iv_data_points': result['meta'].get('iv_data_points', 0),
                 'info_match': result.get('info_match', {'model': False, 'sn': False}),
                 'suggestions': result.get('suggestions', {}),
+                'max_mppt': result['meta'].get('max_mppt', 0),
+                'max_string': result['meta'].get('max_string', 0),
             })
         except asyncio.CancelledError:
             pass  # 새 파일 업로드로 인해 취소됨 — 정상
@@ -369,6 +371,8 @@ async def apply_suggestion(body: dict):
                 'iv_data_points': result['meta'].get('iv_data_points', 0),
                 'info_match': result.get('info_match', {'model': False, 'sn': False}),
                 'suggestions': result.get('suggestions', {}),
+                'max_mppt': result['meta'].get('max_mppt', 0),
+                'max_string': result['meta'].get('max_string', 0),
             })
         except NotRegisterMapError as e:
             await ws_manager.send_json(sid, {

@@ -587,6 +587,29 @@
     } else {
       ivField.value = String(msg.iv_data_points || 64);
     }
+
+    // Stage 1 자동 감지값으로 Stage 2 MPPT/총 String 입력 미리 채움
+    // (사용자가 인버터에 따라 직접 수정 가능)
+    const detMppt = parseInt(msg.max_mppt) || 0;
+    const detStr  = parseInt(msg.max_string) || 0;
+    if (detMppt > 0) {
+      const mEl = document.getElementById('s2-mppt');
+      mEl.value = detMppt;
+      mEl.style.background = '#1e3a2a';
+      mEl.style.borderColor = '#86efac';
+    }
+    if (detStr > 0) {
+      const sEl = document.getElementById('s2-str');
+      sEl.value = detStr;
+      sEl.style.background = '#1e3a2a';
+      sEl.style.borderColor = '#86efac';
+    }
+    if (detMppt > 0 || detStr > 0) {
+      appendLog('s1',
+        `Stage 1 자동 감지: MPPT ${detMppt} / 총 String ${detStr} — Stage 2 입력란에 미리 채움 (필요시 수정)`,
+        'info');
+    }
+
     appendLog('s1', `카테고리: ${Object.entries(msg.counts||{}).filter(([k,v])=>v>0).map(([k,v])=>`${k}:${v}`).join(' ')}`, 'ok');
 
     // Stage 1 검증: 인버터 모델명 + SN 레지스터 존재 여부
