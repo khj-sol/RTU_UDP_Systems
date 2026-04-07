@@ -414,7 +414,7 @@ DATA_TYPES = {
     'L2_VOLTAGE': 'U16',
     'FLT_INV_OHR': 'U16',
     'PWM_이상': 'U16',
-    'PV_POWER': 'U16',
+    'PV_POWER': 'U32',
     'L3_VOLTAGE': 'U16',
     '시리얼번호': 'ASCII',
     'INVERTER_STATUS_상태': 'U16',
