@@ -792,6 +792,35 @@ def _gen_register_map(regs_by_cat: dict, mppt: int, total_strings: int,
                     all_defined.add(_salias)
                     break
 
+    # STRING{N}_VOLTAGE aliases — 명시적 String 전압 레지스터가 있으면 사용,
+    # 없으면 해당 String이 속한 MPPT 의 전압을 fallback (Growatt 등 일부 인버터는
+    # String 전류만 제공하고 String 전압은 MPPT 전압과 같다고 가정)
+    # MPPT-String 매핑: ceil(N / strings_per_mppt) — 균등 분배 가정
+    _spm_for_str = strings_per_mppt if strings_per_mppt > 0 else 1
+    for _si in range(1, total_strings + 1):
+        _salias_v = f'STRING{_si}_VOLTAGE'
+        if _salias_v in all_defined:
+            continue
+        # 1) 명시적 String 전압 레지스터 후보
+        _matched = False
+        for _sv_cand in [f'STRING_{_si}_VOLTAGE',
+                         f'PV_STRING{_si}_VOLTAGE', f'PVSTRING{_si}_VOLTAGE',
+                         f'태양전지{_si}_전압_STRING_{_si}_VOLTAGE']:
+            if _sv_cand in all_defined:
+                lines.append(f'    {_salias_v:40s} = {_sv_cand}')
+                all_defined.add(_salias_v)
+                _matched = True
+                break
+        if _matched:
+            continue
+        # 2) Fallback: MPPT 전압 사용 (균등 분배 가정)
+        _mppt_idx = ((_si - 1) // _spm_for_str) + 1
+        _mppt_v = f'MPPT{_mppt_idx}_VOLTAGE'
+        if _mppt_v in all_defined and 1 <= _mppt_idx <= mppt:
+            lines.append(f'    {_salias_v:40s} = {_mppt_v}'
+                         f'  # fallback: STRING{_si} 전압 = MPPT{_mppt_idx} 전압')
+            all_defined.add(_salias_v)
+
     # ERROR_CODE{N} aliases — ALARM 카테고리 첫 3개 레지스터에서 자동 생성
     _alarm_regs_sorted = sorted(
         [r for r in regs_by_cat.get('ALARM', []) if isinstance(r.address, int)],
@@ -1312,10 +1341,14 @@ def _gen_data_parser(all_regs: List[RegisterRow], mppt_count: int, total_strings
         lines.append(f"    'mppt{n}_voltage'        : '{alias_v}',")
         lines.append(f"    'mppt{n}_current'        : '{alias_c}',")
 
-    # String 전류 동적 필드
+    # String 전압/전류 동적 필드
+    # STRING{n}_VOLTAGE 는 _gen_register_map 의 alias 생성기에 의해
+    # 명시적 레지스터 또는 MPPT 전압 fallback 으로 항상 보장됨
     for n in range(1, total_strings + 1):
-        alias = h01_to_reg.get(f'string{n}_current', f'STRING{n}_CURRENT')
-        lines.append(f"    'string{n}_current'      : '{alias}',")
+        alias_v = h01_to_reg.get(f'string{n}_voltage', f'STRING{n}_VOLTAGE')
+        alias_c = h01_to_reg.get(f'string{n}_current', f'STRING{n}_CURRENT')
+        lines.append(f"    'string{n}_voltage'      : '{alias_v}',")
+        lines.append(f"    'string{n}_current'      : '{alias_c}',")
 
     lines.append('}')
     lines.append('')
@@ -2006,11 +2039,16 @@ def run_stage3(
         except (ValueError, IndexError):
             pass
     if total_strings == 0:
-        try:
-            s = meta.get('String', '0')
-            total_strings = int(s.split()[0])
-        except (ValueError, IndexError):
-            pass
+        # Stage 2 V2: 'Total Strings' 키 우선, 구버전 'String' fallback
+        for _key in ('Total Strings', 'String'):
+            try:
+                s = meta.get(_key, '')
+                if s:
+                    total_strings = int(str(s).split()[0])
+                    if total_strings > 0:
+                        break
+            except (ValueError, IndexError):
+                continue
 
     strings_per_mppt = total_strings // max(1, mppt_count) if mppt_count > 0 else 0
 
