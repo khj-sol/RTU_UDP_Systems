@@ -16,7 +16,15 @@ class RegisterMap:
     # =========================================================================
     # Device Information
     # =========================================================================
-    DEVICE_MODEL                             = 0x0BB8  # U16
+    # Standard model-info aliases at safe 0x1A* range (used by RTU read_model_info())
+    DEVICE_MODEL                             = 0x1A00  # 16 regs ASCII
+    SERIAL_NUMBER                            = 0x1A10  # 8 regs ASCII
+    MPPT_COUNT                               = 0x1A3B  # U16
+    NOMINAL_POWER_LOW                        = 0x1A46  # U16 (low word)
+    NOMINAL_POWER_HIGH                       = 0x1A4E  # U16 (high word)
+
+    # Solis PDF-specific (single-register code, not used by read_model_info)
+    SOLIS_DEVICE_MODEL                       = 0x0BB8  # U16
     AC_OUTPUT_TYPE                           = 0x0BBB  # U16
     PV_POWER                                 = 0x0BC4  # U16, scale Hz 0.01
     ENERGY_LAST_MONTH                        = 0x0BC5  # U32, scale kWh 1

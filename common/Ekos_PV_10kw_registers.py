@@ -16,6 +16,13 @@ class RegisterMap:
     # =========================================================================
     # Device Information
     # =========================================================================
+    # Standard model-info aliases (used by RTU read_model_info())
+    DEVICE_MODEL                             = 0x1A00  # 16 regs ASCII
+    SERIAL_NUMBER                            = 0x1A10  # 8 regs ASCII
+    MPPT_COUNT                               = 0x1A3B  # U16
+    NOMINAL_POWER_LOW                        = 0x1A46  # U16 (low word)
+    NOMINAL_POWER_HIGH                       = 0x1A4E  # U16 (high word)
+
     DEVICE_MODEL_PDF                         = 0x0000  # TEXT
     FREQUENCY                                = 0x000F  # U16
     시리얼번호                                    = 0x7539  # ASCII

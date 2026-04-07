@@ -399,9 +399,22 @@ def test_info(rtu_id):
                 log(f"      missing field: {f}", 'FAIL')
                 fail += 1
 
-    # 7.2 Inverter Info — trigger requests for several inverters
-    log(f"  7.2 Triggering H03 CTRL_INV_MODEL for INV_1, INV_3, INV_4, INV_9")
-    for dn in (1, 3, 4, 9):
+    # 7.2 Inverter Info — trigger requests for ALL 11 inverters
+    expected_models = {
+        1:  'SRPV',     # solarize
+        2:  'SG50CX',   # sungrow
+        3:  'KSG',      # kstar
+        4:  'SUN2000',  # huawei
+        5:  'EKOS',     # ekos
+        6:  'SE-50K',   # senergy
+        7:  'SOFAR',    # sofar
+        8:  'SOLIS',    # solis
+        9:  'MOD',      # growatt
+        10: 'CPS',      # cps
+        11: 'STT',      # sunways
+    }
+    log(f"  7.2 Triggering H03 CTRL_INV_MODEL for INV_1..INV_11")
+    for dn in expected_models.keys():
         r = post_api('/api/control/model_info', {
             'rtu_id': rtu_id, 'device_num': dn, 'value': 0
         })
@@ -410,20 +423,14 @@ def test_info(rtu_id):
         else:
             log(f"      INV_{dn} FAIL: {r}", 'FAIL')
             fail += 1
-        time.sleep(0.5)
-    time.sleep(4)
+        time.sleep(0.3)
+    time.sleep(5)
 
     data = fetch_api(f'/api/rtus/{rtu_id}/devices')
     if not data:
         log(f"      Cannot fetch devices", 'FAIL')
         return False
     devs = data.get('devices', {})
-    expected_models = {
-        1: 'SRPV',     # solarize
-        3: 'KSG',      # kstar
-        4: 'SUN2000',  # huawei
-        9: 'MOD',      # growatt
-    }
     for dn, expected_prefix in expected_models.items():
         key = f'INV_{dn}'
         dev = devs.get(key, {})
