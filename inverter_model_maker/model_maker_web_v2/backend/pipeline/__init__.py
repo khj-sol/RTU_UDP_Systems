@@ -312,6 +312,11 @@ MPPT_CURRENT_RE = re.compile(r'MPPT[_\s]*(\d+)[_\s]*(?:INPUT[_\s]*)?CURRENT', re
 MPPT_POWER_RE   = re.compile(r'MPPT[_\s]*(\d+)[_\s]*(?:INPUT[_\s]*)?POWER', re.I)
 STRING_VOLTAGE_RE = re.compile(r'STRING[_\s]*(\d+)[_\s]*(?:INPUT[_\s]*)?VOLTAGE', re.I)
 STRING_CURRENT_RE = re.compile(r'STRING[_\s]*(\d+)[_\s]*(?:INPUT[_\s]*)?CURRENT', re.I)
+# Growatt: "V_String1", "V String1_", "Vstring1" (전압 prefix가 STRING 앞에)
+# 끝에 \b 대신 (?!\d) — 숫자가 더 이어지지 않는 끝점만 매칭 (트레일링 _ 허용)
+V_STRING_N_RE   = re.compile(r'\bV[_\s]*STRING[_\s]*(\d+)(?!\d)', re.I)
+# Growatt: "Curr_String1", "Curr String8_", "I_String1", "Istring1"
+I_STRING_N_RE   = re.compile(r'\b(?:Curr|I)[_\s]*STRING[_\s]*(\d+)(?!\d)', re.I)
 PV_VOLTAGE_RE = re.compile(r'PV[_\s]*(\d+)[_\s]*(?:INPUT[_\s]*)?VOLTAGE', re.I)
 PV_CURRENT_RE = re.compile(r'PV[_\s]*(\d+)[_\s]*(?:INPUT[_\s]*)?CURRENT', re.I)
 # Kstar: PV{n} String current {m} → String 번호 = (n-1)*strings_per_mppt + m
@@ -400,6 +405,14 @@ def detect_channel_number(definition: str) -> Optional[tuple]:
     m = re.search(r'\bDC\s+Input\s+#(\d+)', definition, re.I)
     if m:
         return ('MPPT', int(m.group(1)))
+
+    # Growatt: "V_String1", "Curr_String1" (V/Curr 가 STRING 앞에 위치)
+    m = V_STRING_N_RE.search(definition)
+    if m:
+        return ('STRING', int(m.group(1)))
+    m = I_STRING_N_RE.search(definition)
+    if m:
+        return ('STRING', int(m.group(1)))
 
     for pat, prefix in [(MPPT_VOLTAGE_RE, 'MPPT'), (MPPT_CURRENT_RE, 'MPPT'),
                          (MPPT_POWER_RE, 'MPPT'), (PV_VOLTAGE_RE, 'MPPT'),
