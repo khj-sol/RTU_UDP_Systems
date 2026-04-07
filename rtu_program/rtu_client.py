@@ -47,7 +47,7 @@ DEFAULT_UDP_PORT    = 9100
 DEFAULT_SERVER_PORT = 9100
 DEVICE_SEND_INTERVAL = 0.1   # seconds between H01 sends (batch)
 BATCH_ACK_TIMEOUT   = 30     # seconds to wait for batch ACKs
-FIRST_CONN_WAIT     = 20     # seconds to wait after first connection / recovery
+FIRST_CONN_WAIT     = int(os.environ.get('RTU_FIRST_WAIT', '20'))  # seconds to wait after first connection / recovery
 MODBUS_POLL_INTERVAL = 10    # seconds between Modbus polling cycles
 
 # ─── Platform Detection ───────────────────────────────────────────────────────
@@ -163,7 +163,8 @@ class RTUClient:
 
     VERSION = "1.1.0"
 
-    def __init__(self, config: SimpleConfig = None, simulation_mode: bool = False):
+    def __init__(self, config: SimpleConfig = None, simulation_mode: bool = False,
+                 tcp_host: str = None, tcp_port: int = None):
 
         if config:
             self.rtu_id      = config.rtu_id
@@ -203,12 +204,14 @@ class RTUClient:
 
         self.protocol = ProtocolHandler(self.rtu_id)
         self.modbus = MultiDeviceHandler(
-            use_hat=use_hat,
+            use_hat=use_hat and not tcp_host,
             channel=1,
             baudrate=rs485_baudrate,
             simulation_mode=simulation_mode,
-            use_cm4=use_cm4_hw,
+            use_cm4=use_cm4_hw and not tcp_host,
             serial_port=rs485_serial,
+            tcp_host=tcp_host,
+            tcp_port=tcp_port,
         )
         self.backup = BackupManager(self.rtu_id)
 
@@ -1558,7 +1561,19 @@ def main():
                         help='Run in simulation mode')
     parser.add_argument('-d', '--debug', action='store_true',
                         help='Enable debug logging')
+    parser.add_argument('--modbus-tcp', type=str, default=None,
+                        help='Test mode: connect to Modbus TCP simulator (HOST:PORT)')
     args = parser.parse_args()
+
+    # Parse --modbus-tcp HOST:PORT
+    tcp_host, tcp_port = None, None
+    if args.modbus_tcp:
+        try:
+            tcp_host, p = args.modbus_tcp.split(':')
+            tcp_port = int(p)
+        except ValueError:
+            print(f"Invalid --modbus-tcp format: {args.modbus_tcp} (expected HOST:PORT)")
+            sys.exit(1)
 
     log_level = logging.DEBUG if args.debug else logging.INFO
 
@@ -1593,7 +1608,8 @@ def main():
 
     # Load device config from rs485_ch1.ini
     rs485_cfg_path = os.path.join(config_dir, 'rs485_ch1.ini')
-    client = RTUClient(config=config, simulation_mode=args.simulation)
+    client = RTUClient(config=config, simulation_mode=args.simulation,
+                       tcp_host=tcp_host, tcp_port=tcp_port)
 
     if os.path.exists(rs485_cfg_path):
         dev_cfg = _configparser.ConfigParser()

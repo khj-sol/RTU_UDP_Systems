@@ -175,7 +175,7 @@ except (ImportError, FileNotFoundError, OSError, Exception) as e:
 
 # Check for pymodbus (PC or standard serial)
 try:
-    from pymodbus.client import ModbusSerialClient
+    from pymodbus.client import ModbusSerialClient, ModbusTcpClient
     PYMODBUS_AVAILABLE = True
 except ImportError:
     PYMODBUS_AVAILABLE = False
@@ -2447,6 +2447,47 @@ class PymodbusAdapter:
         return s
 
 
+class ModbusHandlerTcp(ModbusHandlerSerial):
+    """Modbus TCP master — 테스트 모드 전용.
+
+    시뮬레이터(equipment_simulator.py --tcp-port)와 TCP 통신.
+    ModbusHandlerSerial을 상속하여 read/write 메서드 재사용,
+    connect()만 오버라이드하여 TcpClient 사용.
+    """
+
+    def __init__(self, host: str = '127.0.0.1', port: int = 5020, slave_id: int = 1,
+                 reg_module=None, shared_client=None):
+        # ModbusHandlerSerial init: fake port/baudrate
+        super().__init__(port=f'tcp://{host}:{port}', baudrate=9600, slave_id=slave_id,
+                         reg_module=reg_module, shared_client=shared_client)
+        self._tcp_host = host
+        self._tcp_port = port
+
+    def connect(self):
+        """TCP 연결 후 PymodbusAdapter로 self.master 설정."""
+        if self._shared_client is not None:
+            self.client = self._shared_client
+            self.master = PymodbusAdapter(self.client)
+            self.connected = True
+            self.logger.info(f"TCP: reusing shared client (slave={self.slave_id})")
+            return True
+        if not PYMODBUS_AVAILABLE:
+            self.logger.error("TCP: pymodbus not available")
+            return False
+        try:
+            self.client = ModbusTcpClient(self._tcp_host, port=self._tcp_port, timeout=2)
+            if self.client.connect():
+                self.master = PymodbusAdapter(self.client)
+                self.connected = True
+                self.logger.info(f"TCP: connected to {self._tcp_host}:{self._tcp_port} (slave={self.slave_id})")
+                return True
+            self.logger.error(f"TCP: failed to connect {self._tcp_host}:{self._tcp_port}")
+            return False
+        except Exception as e:
+            self.logger.error(f"TCP connect error: {e}")
+            return False
+
+
 class ModbusHandlerSimulation:
     """Simulation mode - no hardware"""
     
@@ -2897,13 +2938,18 @@ class MultiDeviceHandler:
 
     def __init__(self, use_hat: bool = True, use_cm4: bool = False,
                  channel: int = 1, serial_port: str = '/dev/ttyUSB0',
-                 baudrate: int = 9600, simulation_mode: bool = False):
+                 baudrate: int = 9600, simulation_mode: bool = False,
+                 tcp_host: str = None, tcp_port: int = None):
         self.use_hat = use_hat
         self.use_cm4 = use_cm4
         self.channel = channel
         self.serial_port = serial_port
         self.baudrate = baudrate
         self.simulation_mode = simulation_mode
+        # Modbus TCP test mode
+        self.tcp_host = tcp_host
+        self.tcp_port = tcp_port
+        self.use_tcp = bool(tcp_host and tcp_port)
         self.handlers = {}
         self.logger = logging.getLogger(__name__)
         # PC serial 모드에서 첫 번째로 연결된 ModbusSerialClient 를 공유
@@ -3065,6 +3111,10 @@ class MultiDeviceHandler:
                 slave_id, reg_module=reg_mod,
                 protocol=protocol, string_count=string_count,
                 iv_scan_data_points=iv_scan_data_points)
+        elif self.use_tcp:
+            handler = ModbusHandlerTcp(self.tcp_host, self.tcp_port, slave_id,
+                                        reg_module=reg_mod,
+                                        shared_client=self._shared_pc_client)
         elif self.use_cm4:
             handler = ModbusHandlerCM4(channel, baudrate, slave_id, reg_module=reg_mod)
         elif self.use_hat:
@@ -3076,7 +3126,7 @@ class MultiDeviceHandler:
 
         if handler.connect():
             self._save_shared_pc_client(handler)   # PC 모드: 첫 연결 클라이언트 저장
-            mode = "SIM" if use_simulation else ("CM4" if self.use_cm4 else ("HAT" if self.use_hat else "Serial"))
+            mode = "SIM" if use_simulation else ("TCP" if self.use_tcp else ("CM4" if self.use_cm4 else ("HAT" if self.use_hat else "Serial")))
             self.logger.info(f"add_device: {device_type}/{protocol} slave={slave_id}, mode={mode}")
 
             # Register handler in handlers dict for read_monitor_data etc.
