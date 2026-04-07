@@ -219,15 +219,32 @@ def load_reference_patterns() -> Dict[str, Dict[int, str]]:
                                    for p in alias_prefixes)
                     addr_to_names.setdefault(val, []).append((is_alias, attr))
             # 충돌 검사: 한 주소에 non-alias 이름이 2개 이상이면 의미 충돌 → 제외
+            # 우선순위: 표준 alias(L1/L2/L3_VOLTAGE/CURRENT 등) > 원본 이름
+            # → 레퍼런스 enrichment에서 H01 호환 이름을 우선 사용
+            _STANDARD_NAMES = {
+                'L1_VOLTAGE', 'L2_VOLTAGE', 'L3_VOLTAGE',
+                'L1_CURRENT', 'L2_CURRENT', 'L3_CURRENT',
+                'R_PHASE_VOLTAGE', 'S_PHASE_VOLTAGE', 'T_PHASE_VOLTAGE',
+                'R_PHASE_CURRENT', 'S_PHASE_CURRENT', 'T_PHASE_CURRENT',
+                'FREQUENCY', 'AC_POWER', 'PV_POWER', 'POWER_FACTOR',
+                'INNER_TEMP', 'INVERTER_MODE', 'CUMULATIVE_ENERGY',
+                'MPPT1_VOLTAGE', 'MPPT1_CURRENT', 'MPPT2_VOLTAGE', 'MPPT2_CURRENT',
+            }
             addr_map = {}
             for addr, names in addr_to_names.items():
                 non_aliases = [n for a, n in names if not a]
                 aliases = [n for a, n in names if a]
                 if len(non_aliases) >= 2:
-                    # 서로 다른 의미가 한 주소에 → 신뢰 불가, 매핑 제외
+                    # 서로 다른 원본 이름 → 신뢰 불가, 매핑 제외
                     continue
-                if non_aliases:
+                # 1순위: 표준 이름 (aliases 중 L1_CURRENT 등)
+                standard = [n for n in aliases if n in _STANDARD_NAMES]
+                if standard:
+                    addr_map[addr] = standard[0]
+                # 2순위: non-alias (원본 PDF 이름)
+                elif non_aliases:
                     addr_map[addr] = non_aliases[0]
+                # 3순위: 기타 alias
                 elif aliases:
                     addr_map[addr] = aliases[0]
             patterns[proto] = addr_map

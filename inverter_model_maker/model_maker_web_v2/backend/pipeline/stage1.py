@@ -1279,15 +1279,69 @@ _H01_REQUIRED_KEYWORDS = {
 }
 
 
+# Phase-specific 필드는 타입 + phase 식별자 둘 다 필요
+# 예: s_current → 'curr' 만으로는 부족, 'l2'/'phase b'/'ib' 등 phase 식별자도 필수
+_PHASE_SPECIFIC_REQUIRED = {
+    'r_voltage': {
+        'type': ['volt', '전압', 'vac', 'uac', 'uab'],
+        'phase': [' l1 ', ' r ', 'phase a', ' ph a', ' a phase', 'van',
+                  ' u1 ', ' v1 ', ' ua ', 'uab', ' u a ', 'aphv', 'vpha',
+                  '1상', 'r상', 'a상', ' ab '],
+    },
+    's_voltage': {
+        'type': ['volt', '전압', 'vac', 'uac', 'ubc'],
+        'phase': [' l2 ', ' s ', 'phase b', ' ph b', ' b phase', 'vbn',
+                  ' u2 ', ' v2 ', ' ub ', 'ubc', ' u b ', 'bphv', 'vphb',
+                  '2상', 's상', 'b상', ' bc '],
+    },
+    't_voltage': {
+        'type': ['volt', '전압', 'vac', 'uac', 'uca'],
+        'phase': [' l3 ', ' t ', 'phase c', ' ph c', ' c phase', 'vcn',
+                  ' u3 ', ' v3 ', ' uc ', 'uca', ' u c ', 'cphv', 'vphc',
+                  '3상', 't상', 'c상', ' ca '],
+    },
+    'r_current': {
+        'type': ['curr', '전류', 'iac', 'amp'],
+        'phase': [' l1 ', ' r ', 'phase a', ' ph a', ' a phase',
+                  ' i1 ', ' ia ', ' ia', 'ia_', 'iph a', 'aph a',
+                  '1상', 'r상', 'a상'],
+    },
+    's_current': {
+        'type': ['curr', '전류', 'iac', 'amp'],
+        'phase': [' l2 ', ' s ', 'phase b', ' ph b', ' b phase',
+                  ' i2 ', ' ib ', ' ib', 'ib_', 'iph b', 'aph b',
+                  '2상', 's상', 'b상'],
+    },
+    't_current': {
+        'type': ['curr', '전류', 'iac', 'amp'],
+        'phase': [' l3 ', ' t ', 'phase c', ' ph c', ' c phase',
+                  ' i3 ', ' ic ', ' ic', 'ic_', 'iph c', 'aph c',
+                  '3상', 't상', 'c상'],
+    },
+}
+
+
 def _h01_semantic_valid(h01_field: str, reg_name_or_defn: str) -> bool:
     """H01 필드와 레지스터 이름이 의미상 호환되는지.
-    예: alarm1 → DAILY_ENERGY 는 False (에너지는 알람 아님)."""
+    예: alarm1 → DAILY_ENERGY 는 False (에너지는 알람 아님).
+    Phase 특정 필드(r/s/t_voltage/current)는 타입 + phase ID 둘 다 필요."""
     if not h01_field or not reg_name_or_defn:
         return False
+    name_lower = ' ' + str(reg_name_or_defn).lower().replace('_', ' ') + ' '
+
+    # Phase-specific: 타입 키워드 AND phase 식별자 모두 필요
+    phase_req = _PHASE_SPECIFIC_REQUIRED.get(h01_field)
+    if phase_req:
+        has_type = any(t in name_lower for t in phase_req['type'])
+        if not has_type:
+            return False
+        has_phase = any(p in name_lower for p in phase_req['phase'])
+        return has_phase
+
+    # 그 외 필드: 단순 키워드 매칭
     required = _H01_REQUIRED_KEYWORDS.get(h01_field)
     if not required:
         return True  # 제약 없는 필드
-    name_lower = ' ' + str(reg_name_or_defn).lower().replace('_', ' ') + ' '
     return any(kw in name_lower for kw in required)
 
 
@@ -2314,8 +2368,20 @@ def run_stage1(
             return ''
 
         def _ref_type_hint(ref: str) -> str:
-            """레퍼런스 이름에서 측정 타입 추정."""
+            """레퍼런스 이름에서 측정 타입 추정.
+            LOW/HIGH/SET/FAULT 등 임계치/설정 레지스터는 'threshold'로 분류해서
+            측정 필드 치환 대상에서 제외."""
             u = ref.upper()
+            # 설정/임계치 — 측정값 아님
+            if any(k in u for k in ('_LOW', '_HIGH', '_SET', '_MAX', '_MIN',
+                                     '_LIMIT', '_FAULT', '_TRIP', '_TIME',
+                                     '_DELAY', 'FAULT_VALUE', 'VAC_LOW',
+                                     'VAC_HIGH', 'FAC_LOW', 'FAC_HIGH',
+                                     'IAC_LOW', 'IAC_HIGH', 'WMAX',
+                                     'V_REF', 'I_REF')):
+                return 'threshold'
+            if 'POWER_FACTOR' in u or u.endswith('_PF'):
+                return 'power_factor'
             if 'VOLTAGE' in u or u.endswith('_V') or 'VOLT' in u:
                 return 'voltage'
             if 'CURRENT' in u or u.endswith('_A') or 'AMP' in u:
@@ -2328,8 +2394,6 @@ def run_stage1(
                 return 'energy'
             if 'TEMP' in u or 'TMP' in u:
                 return 'temperature'
-            if 'POWER_FACTOR' in u or u.endswith('_PF'):
-                return 'power_factor'
             return ''
 
         if matched_ref:
