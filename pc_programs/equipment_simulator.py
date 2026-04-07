@@ -811,13 +811,30 @@ class GenericInverterSimulator:
     """
 
     VERSION = "1.0.0"
-    NOMINAL_POWER = 50000  # 50kW default
+    NOMINAL_POWER = 50000  # 50kW default (overridden per protocol)
+
+    # Protocol → nominal power in W
+    _NOMINAL_BY_PROTOCOL = {
+        'solarize': 50000,
+        'senergy':  50000,
+        'sungrow':  50000,
+        'huawei':   50000,
+        'kstar':    60000,
+        'ekos':     10000,
+        'sofar':    70000,
+        'solis':    50000,
+        'growatt':  30000,
+        'cps':      50000,
+        'sunways':  30000,
+    }
 
     def __init__(self, protocol_name, logger=None, env=None):
         self.protocol_name = protocol_name
         self.logger = logger or logging.getLogger(f"Generic-{protocol_name}")
         self.running = False
         self.env = env or _get_shared_env()
+        # Per-protocol nominal power
+        self.NOMINAL_POWER = self._NOMINAL_BY_PROTOCOL.get(protocol_name.lower(), 50000)
 
         # Load register module dynamically
         self._module = self._load_module(protocol_name)

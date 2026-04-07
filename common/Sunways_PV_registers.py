@@ -73,33 +73,42 @@ class RegisterMap:
     MPPT1_CURRENT                            = PV1_CURRENT
     PV_STRING_COUNT                          = 6
 
-    # --- RTU modbus_handler / simulator 필수 alias ---
-    INVERTER_MODE                            = 0x2779  # U16, Working state (0=wait,2=normal,3=fault)
+    # --- PDF Sunways 정정 (Stage3 오류 override) ---
+    # reg N → addr = hex(N): 11000 = 0x2AF8
+    INVERTER_MODE                            = 0x2779  # 10105 Working state
+    R_PHASE_VOLTAGE                          = 0x2B01  # 11009 Grid A V (gain 10)
+    R_PHASE_CURRENT                          = 0x2B02  # 11010 Grid A I
+    S_PHASE_VOLTAGE                          = 0x2B03  # 11011 Grid B V
+    S_PHASE_CURRENT                          = 0x2B04  # 11012 Grid B I
+    T_PHASE_VOLTAGE                          = 0x2B05  # 11013 Grid C V
+    T_PHASE_CURRENT                          = 0x2B06  # 11014 Grid C I
+    FREQUENCY                                = 0x2B07  # 11015 Grid freq (gain 100)
+    AC_POWER                                 = 0x2B08  # 11016 P_AC U32 kW (gain 1000)
+    CUMULATIVE_ENERGY                        = 0x2B0C  # 11020 Total gen U32 0.1kWh
+    CUMULATIVE_ENERGY_LOW                    = 0x2B0C
+    TOTAL_ENERGY                             = 0x2B0C
+    PV_POWER                                 = 0x2B14  # 11028 Total power input U32 kW
+    POWER_FACTOR                             = 0x2B16  # 11030 Power factor I16 (gain 1000)
+    MPPT1_VOLTAGE                            = 0x2B1E  # 11038 PV1 V
+    MPPT1_CURRENT                            = 0x2B1F  # 11039 PV1 I
+    MPPT2_VOLTAGE                            = 0x2B20  # 11040 PV2 V
+    MPPT2_CURRENT                            = 0x2B21  # 11041 PV2 I
+    MPPT3_VOLTAGE                            = 0x2B22  # 11042 PV3 V
+    MPPT3_CURRENT                            = 0x2B23  # 11043 PV3 I
+    # STRING 1~6: 11050~11055 = 0x2B2A~0x2B2F
+    STRING1_CURRENT                          = 0x2B2A
+    STRING2_CURRENT                          = 0x2B2B
+    STRING3_CURRENT                          = 0x2B2C
+    STRING4_CURRENT                          = 0x2B2D
+    STRING5_CURRENT                          = 0x2B2E
+    STRING6_CURRENT                          = 0x2B2F
     INNER_TEMP                               = TEMPERATURE
-    AC_POWER                                 = PV_POWER
-    T_PHASE_VOLTAGE                          = S_PHASE_VOLTAGE  # L3 없음 → 단상 대체
-    TOTAL_ENERGY                             = CUMULATIVE_ENERGY
-    STRING1_CURRENT                          = STRING_1_CURRENT
-    STRING2_CURRENT                          = STRING_2_CURRENT
-    STRING3_CURRENT                          = STRING_3_CURRENT
-    STRING4_CURRENT                          = STRING_4_CURRENT
-    STRING5_CURRENT                          = STRING_5_CURRENT
-    STRING6_CURRENT                          = STRING_6_CURRENT
-    ERROR_CODE1                              = L2_VOLTAGE
-    ERROR_CODE2                              = L1_VOLTAGE
-    ERROR_CODE3                              = GFCI_FAULT
     DER_POWER_FACTOR_SET                     = 0x07D0
     DER_ACTION_MODE                          = 0x07D1
     DER_REACTIVE_POWER_PCT                   = 0x07D2
     DER_ACTIVE_POWER_PCT                     = 0x07D3
     INVERTER_ON_OFF                          = 0x0834
-    MPPT_NUMBER                              = 0x1A4A  # default MPPT count register
-    MPPT1_VOLTAGE                            = PV_VOLTAGE
-    MPPT2_VOLTAGE                            = PV2_VOLTAGE
-    MPPT2_CURRENT                            = PV2_CURRENT
-    MPPT3_VOLTAGE                            = PV3_VOLTAGE
-    MPPT3_CURRENT                            = PV3_CURRENT
-    CUMULATIVE_ENERGY_LOW                    = CUMULATIVE_ENERGY
+    MPPT_NUMBER                              = 0x1A4A
     DER_AVM_DIGITAL_METERCONNECT_STATUS      = 0x1210
 
 
@@ -282,11 +291,11 @@ StatusConverter = SunwaysStatusConverter
 
 # Scale factors
 SCALE = {
-    'voltage':            0.1,
-    'current':            0.01,
-    'power':              0.1,
-    'frequency':          0.01,
-    'power_factor':       0.001,
+    'voltage':            0.1,    # PDF Sunways gain=10
+    'current':            0.1,    # PDF Sunways gain=10 (0.1A)
+    'power':              1.0,    # PDF Sunways gain=1000 kW = 1W
+    'frequency':          0.01,   # PDF Sunways gain=100
+    'power_factor':       0.001,  # PDF Sunways gain=1000
     'dea_current':        0.1,
     'dea_voltage':        0.1,
     'dea_active_power':   0.1,
@@ -399,7 +408,7 @@ def generate_iv_current_data(isc, voc, v_min, data_points=64):
 
 
 DATA_TYPES = {
-    'POWER_FACTOR': 'S32',
+    'POWER_FACTOR': 'S16',
     'TEMPERATURE': 'U16',
     'FREQUENCY': 'U16',
     'REACTIVE_POWER': 'U16',
@@ -429,6 +438,27 @@ DATA_TYPES = {
     'STRING_4_CURRENT': 'STRINGING',
     'STRING_5_CURRENT': 'STRINGING',
     'STRING_6_CURRENT': 'STRINGING',
+    'AC_POWER': 'U32',
+    'R_PHASE_VOLTAGE': 'U16',
+    'S_PHASE_VOLTAGE': 'U16',
+    'T_PHASE_VOLTAGE': 'U16',
+    'R_PHASE_CURRENT': 'U16',
+    'S_PHASE_CURRENT': 'U16',
+    'T_PHASE_CURRENT': 'U16',
+    'INVERTER_MODE': 'U16',
+    'TOTAL_ENERGY': 'U32',
+    'MPPT1_VOLTAGE': 'U16',
+    'MPPT1_CURRENT': 'U16',
+    'MPPT2_VOLTAGE': 'U16',
+    'MPPT2_CURRENT': 'U16',
+    'MPPT3_VOLTAGE': 'U16',
+    'MPPT3_CURRENT': 'U16',
+    'STRING1_CURRENT': 'U16',
+    'STRING2_CURRENT': 'U16',
+    'STRING3_CURRENT': 'U16',
+    'STRING4_CURRENT': 'U16',
+    'STRING5_CURRENT': 'U16',
+    'STRING6_CURRENT': 'U16',
 }
 
 FLOAT32_FIELDS: set = set()
@@ -445,7 +475,7 @@ STRING_CURRENT_MONITOR = True
 READ_BLOCKS = [
     {'start': 0x0000, 'count':  33, 'fc': 3},
     {'start': 0x2779, 'count':  11, 'fc': 3},
-    {'start': 0x2B07, 'count':  83, 'fc': 3},
+    {'start': 0x2B01, 'count':  89, 'fc': 3},
     {'start': 0x03E8, 'count':  22, 'fc': 3},
 ]
 
