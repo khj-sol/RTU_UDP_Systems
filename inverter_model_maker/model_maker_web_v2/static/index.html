@@ -1112,11 +1112,16 @@
           ? '이 레지스터는 FC3/FC4 양쪽에 존재합니다 — 어느 쪽인지 선택하세요'
           : (hasFcSplit ? 'FC3=Holding, FC04=Input' : 'FC');
 
+        // 현재 선택된 레지스터의 주소 (FC별로 다를 수 있음)
+        const curAddr = f.current_addr || '';
+        const addrLabel = curAddr ? `<span class="h01-addr" data-field="${f.h01_field}" style="font-size:10px;color:#94a3b8;margin-left:4px;font-family:monospace">${curAddr}</span>` : `<span class="h01-addr" data-field="${f.h01_field}" style="font-size:10px;color:#94a3b8;margin-left:4px;font-family:monospace"></span>`;
+
         row.innerHTML = `
           <div class="${cls}" title="${f.description}">${icon} ${f.h01_field}</div>
           <select class="h01-select" data-field="${f.h01_field}"
                   onchange="onH01RegisterChange(this)"
                   style="padding:3px 6px;font-size:11px;flex:1"></select>
+          ${addrLabel}
           <select class="h01-fc" data-field="${f.h01_field}"
                   onchange="onH01FcChange(this)"
                   style="padding:3px 4px;font-size:11px;width:42px;${fcStyle}" title="${fcTitle}">
@@ -1153,6 +1158,23 @@
       return fcs.includes(fc);
     };
 
+    // 옵션 라벨에 주소 + FC 정보 포함
+    // - 단일 FC: "POWERFACTOR (FC3 @ 0x0091)"
+    // - 양쪽 FC + 현재 선택된 FC만: "POWERFACTOR (FC3/4 @ 0x0091) ⚠"
+    const optLabel = (info) => {
+      const name = info.name;
+      const fcs = info.fcs || [];
+      const addrs = info.addrs || {};
+      if (fcs.length === 0) return name;
+      if (fcs.length === 1) {
+        const a = addrs[fcs[0]] || '';
+        return a ? `${name} (FC${fcs[0]} @ ${a})` : `${name} (FC${fcs[0]})`;
+      }
+      // 양쪽 FC: 현재 필터된 FC의 주소를 우선 표기
+      const a = addrs[fc] || addrs[fcs[0]] || '';
+      return a ? `${name} (FC${fcs.join('/')} @ ${a}) ⚠` : `${name} (FC${fcs.join('/')}) ⚠`;
+    };
+
     let opts = '<option value="">(없음)</option>';
     const filteredSugg = sugg.filter(s => {
       const info = availWithFc.find(r => r.name === s);
@@ -1161,8 +1183,9 @@
     if (filteredSugg.length > 0) {
       opts += '<optgroup label="── 추천 후보 ──">';
       filteredSugg.forEach(s => {
+        const info = availWithFc.find(r => r.name === s) || {name: s, fcs: [], addrs: {}};
         const selAttr = s === curName ? ' selected' : '';
-        opts += `<option value="${s}"${selAttr}>${s}</option>`;
+        opts += `<option value="${s}"${selAttr}>${optLabel(info)}</option>`;
       });
       opts += '</optgroup>';
     }
@@ -1170,8 +1193,7 @@
     availWithFc.forEach(r => {
       if (!matchesFc(r.fcs)) return;
       const selAttr = r.name === curName ? ' selected' : '';
-      const fcLabel = (r.fcs && r.fcs.length === 2) ? ' ⚠' : '';
-      opts += `<option value="${r.name}"${selAttr}>${r.name}${fcLabel}</option>`;
+      opts += `<option value="${r.name}"${selAttr}>${optLabel(r)}</option>`;
     });
     opts += '</optgroup>';
     sel.innerHTML = opts;
@@ -1184,6 +1206,25 @@
     }
     // suggestions를 다음 렌더에서 다시 사용할 수 있도록 보관
     sel.dataset.suggestions = JSON.stringify(sugg);
+  }
+
+  // 주소 라벨 업데이트 헬퍼
+  function updateH01AddrLabel(field, regName, fc) {
+    const addrEl = document.querySelector(`.h01-addr[data-field="${field}"]`);
+    if (!addrEl) return;
+    const availWithFc = window._h01AvailWithFc || [];
+    const info = availWithFc.find(r => r.name === regName);
+    if (info && info.addrs && info.addrs[fc]) {
+      addrEl.textContent = info.addrs[fc];
+      addrEl.style.color = '#94a3b8';
+    } else if (info && info.fcs && info.fcs.length > 0) {
+      // fc 가 안 맞으면 첫 fc 주소 표시
+      const f0 = info.fcs[0];
+      addrEl.textContent = (info.addrs && info.addrs[f0]) || '';
+      addrEl.style.color = '#94a3b8';
+    } else {
+      addrEl.textContent = '';
+    }
   }
 
   // 사용자가 레지스터를 변경 → 그 레지스터의 FC가 단일이면 FC 자동확정
@@ -1205,6 +1246,9 @@
       fcSel.style.cssText = 'padding:3px 4px;font-size:11px;width:42px';
       fcSel.title = 'FC';
     }
+    // 주소 라벨 갱신
+    const fcNow = fcSel ? parseInt(fcSel.value) : 3;
+    updateH01AddrLabel(field, sel.value, fcNow);
     updateH01Counter();
   }
 
@@ -1219,6 +1263,8 @@
     // 사용자가 직접 FC를 골랐으면 빨강 해제
     fcSel.style.cssText = 'padding:3px 4px;font-size:11px;width:42px';
     fcSel.title = 'FC';
+    // 주소 라벨 갱신
+    updateH01AddrLabel(field, regSel.value, fc);
     updateH01Counter();
   }
 

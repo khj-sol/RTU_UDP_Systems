@@ -597,9 +597,11 @@ def get_h01_mapping(session_id: str):
         DATA_START = 4
 
         # H열 전체에서 사용 가능한 레지스터 목록 수집 (드롭다운용) — 알파벳 정렬
-        # J/K열(숨김 메타데이터)에서 레지스터별 FC 맵을 읽음 (J=name, K="3"/"4"/"3,4")
+        # J/K/L열(숨김 메타데이터)에서 레지스터별 FC + 주소 맵을 읽음
+        #   J=name, K="3"/"4"/"3,4", L="0x0091|0x0091" (fcs 순서와 동일)
         seen = set()
         name_to_fcs: dict[str, list[int]] = {}
+        name_fc_to_addr: dict[tuple, str] = {}
         for row_idx in range(DATA_START, ws.max_row + 1):
             val = ws.cell(row=row_idx, column=8).value  # H열
             if val:
@@ -608,6 +610,7 @@ def get_h01_mapping(session_id: str):
                     seen.add(v)
             jname = ws.cell(row=row_idx, column=10).value  # J열
             kfcs = ws.cell(row=row_idx, column=11).value   # K열
+            laddr = ws.cell(row=row_idx, column=12).value  # L열
             if jname:
                 nm = str(jname).strip()
                 fcs: list[int] = []
@@ -616,14 +619,22 @@ def get_h01_mapping(session_id: str):
                         t = tok.strip()
                         if t in ('3', '4'):
                             fcs.append(int(t))
+                fcs = sorted(set(fcs))
                 if nm and nm not in name_to_fcs:
-                    name_to_fcs[nm] = sorted(set(fcs))
+                    name_to_fcs[nm] = fcs
+                # 주소 매핑 — fcs 순서와 같은 길이의 '|' 구분 문자열
+                if nm and laddr:
+                    addrs = str(laddr).split('|')
+                    for fc, addr in zip(fcs, addrs):
+                        if addr:
+                            name_fc_to_addr[(nm, fc)] = addr.strip()
         available_registers = sorted(seen)
-        # 드롭다운에서 사용할 풍부한 형태 (FC 정보 포함)
-        available_with_fc = [
-            {'name': nm, 'fcs': name_to_fcs.get(nm, [])}
-            for nm in available_registers
-        ]
+        # 드롭다운에서 사용할 풍부한 형태 (FC + 주소 정보 포함)
+        available_with_fc = []
+        for nm in available_registers:
+            fcs = name_to_fcs.get(nm, [])
+            addrs = {fc: name_fc_to_addr.get((nm, fc), '') for fc in fcs}
+            available_with_fc.append({'name': nm, 'fcs': fcs, 'addrs': addrs})
 
         # H01 필드 데이터 (B열에 값이 있는 행만 동적으로 읽기)
         fields = []
@@ -658,6 +669,8 @@ def get_h01_mapping(session_id: str):
             if fc_locked:
                 # 단일 FC만 갖는 레지스터면 그 값으로 강제
                 fc = cur_fcs[0]
+            # 현재 선택된 (name, fc) 조합의 실제 주소 — 사용자 검증용
+            current_addr = name_fc_to_addr.get((current_clean, fc), '') if current_clean else ''
 
             fields.append({
                 'h01_field': h01_field,
@@ -670,6 +683,7 @@ def get_h01_mapping(session_id: str):
                 'fc_locked': fc_locked,
                 'fc_ambiguous': fc_ambiguous,
                 'current_fcs': cur_fcs,
+                'current_addr': current_addr,
             })
 
         wb.close()

@@ -293,6 +293,9 @@ def _parse_section_row(cells: list, header: list, category: str) -> Optional[Reg
             col_map['definition'] = i
         elif 'address' in hl:
             col_map['address'] = i
+        elif hl == 'fc':
+            # Modbus Function Code (3=Holding, 4=Input)
+            col_map['fc'] = i
         elif 'type' in hl and 'data' not in hl:
             col_map['type'] = i
         elif 'unit' in hl or 'scale' in hl:
@@ -314,6 +317,7 @@ def _parse_section_row(cells: list, header: list, category: str) -> Optional[Reg
 
     addr_raw = cells[col_map['address']] if 'address' in col_map else ''
     addr = parse_address(addr_raw)
+    fc_val = cells[col_map['fc']] if 'fc' in col_map and col_map['fc'] < len(cells) else ''
 
     return RegisterRow(
         definition=defn,
@@ -322,6 +326,7 @@ def _parse_section_row(cells: list, header: list, category: str) -> Optional[Reg
         data_type=cells[col_map.get('type', 99)] if col_map.get('type', 99) < len(cells) else 'U16',
         scale=cells[col_map.get('scale', 99)] if col_map.get('scale', 99) < len(cells) else '',
         rw=cells[col_map.get('rw', 99)] if col_map.get('rw', 99) < len(cells) else 'RO',
+        fc=fc_val,
         h01_field=cells[col_map.get('h01_field', 99)] if col_map.get('h01_field', 99) < len(cells) else '',
         comment=cells[col_map.get('comment', 99)] if col_map.get('comment', 99) < len(cells) else '',
         category=category,
@@ -579,13 +584,19 @@ def _add_h01_mapping_sheet(wb, s1: dict, openpyxl_module) -> None:
         return ''
 
     name_to_fcs: Dict[str, set] = {}
+    # (name, fc) → address (Hex 문자열) 매핑 — 같은 이름이 FC3/FC4 양쪽에 있을 때
+    # 사용자가 어느 FC인지 검증할 수 있도록 주소도 함께 노출
+    name_fc_to_addr: Dict[tuple, str] = {}
     for reg in all_cats:
         name = to_upper_snake(reg.definition)
         if not name:
             continue
         fc_n = _norm_fc(getattr(reg, 'fc', ''))
+        addr_hex = getattr(reg, 'address_hex', '') or ''
         if fc_n:
             name_to_fcs.setdefault(name, set()).add(fc_n)
+            if (name, fc_n) not in name_fc_to_addr and addr_hex:
+                name_fc_to_addr[(name, fc_n)] = addr_hex
         else:
             name_to_fcs.setdefault(name, set())
     avail_entries: list = sorted(name_to_fcs.keys())
@@ -644,12 +655,18 @@ def _add_h01_mapping_sheet(wb, s1: dict, openpyxl_module) -> None:
             cell.fill = suggest_fill
 
     # H열: 전체 레지스터 목록 (드롭다운 소스)
-    # J/K열(숨김): 레지스터 → FC 맵 (J=name, K="3"/"4"/"3,4") — API에서 읽음
+    # J/K/L열(숨김): 레지스터 → FC + 주소 맵 — API에서 읽음
+    #   J = name
+    #   K = "3" / "4" / "3,4"
+    #   L = "0x0091" (FC3 주소) / "|0x0091" (FC4 주소) / "0x0091|0x0091" (양쪽)
+    #       — fcs 리스트 순서와 동일하게 '|' 구분
     for i, name in enumerate(avail_entries):
         ws.cell(row=DATA_START + i, column=8, value=name).fill = ref_fill
         ws.cell(row=DATA_START + i, column=10, value=name)
         fcs = sorted(name_to_fcs.get(name, set()))
         ws.cell(row=DATA_START + i, column=11, value=','.join(fcs) if fcs else '')
+        addr_parts = [name_fc_to_addr.get((name, fc), '') for fc in fcs]
+        ws.cell(row=DATA_START + i, column=12, value='|'.join(addr_parts) if addr_parts else '')
 
     # I열: FC 코드 (기본값 자동, 사용자 수정 가능)
     # 기본 FC 감지 (MONITORING 다수파)
@@ -711,9 +728,10 @@ def _add_h01_mapping_sheet(wb, s1: dict, openpyxl_module) -> None:
     ws.column_dimensions['G'].width = 35
     ws.column_dimensions['H'].width = 35
     ws.column_dimensions['I'].width = 5
-    # J/K: 숨김 메타데이터 (FC 맵)
+    # J/K/L: 숨김 메타데이터 (FC + 주소 맵)
     ws.column_dimensions['J'].hidden = True
     ws.column_dimensions['K'].hidden = True
+    ws.column_dimensions['L'].hidden = True
 
 
 # ─── Stage 2 메인 함수 ───────────────────────────────────────────────────────
