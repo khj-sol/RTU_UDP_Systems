@@ -2356,7 +2356,7 @@ READ_BLOCKS = [
     {'start': 0x007D, 'count':  87, 'fc': 3},
     {'start': 0x00F8, 'count':  23, 'fc': 3},
     {'start': 0x07F2, 'count':  55, 'fc': 3},
-    {'start': 0x7D00, 'count':  56, 'fc': 3},
+    {'start': 0x7D00, 'count': 109, 'fc': 3},
     {'start': 0x7D97, 'count':   4, 'fc': 3},
     {'start': 0x7DBE, 'count': 118, 'fc': 3},
     {'start': 0x84D0, 'count':   2, 'fc': 3},

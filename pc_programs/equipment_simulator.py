@@ -1019,6 +1019,27 @@ class GenericInverterSimulator:
             self._set_reg(low_addr, [lo_word])
             self._set_reg(low_addr + 1, [hi_word])
 
+    def _smart_write(self, field_name, addr, value):
+        """DATA_TYPES를 보고 U16/U32/S32에 맞춰 자동 쓰기.
+
+        field_name: RegisterMap 속성명 (DATA_TYPES 키)
+        addr: 시작 주소
+        value: 정수 값 (raw)
+        """
+        if addr is None:
+            return
+        dtypes = getattr(self._module, 'DATA_TYPES', {}) or {}
+        dt = dtypes.get(field_name, 'U16').upper()
+        if dt in ('U32', 'S32', 'FLOAT32'):
+            self._write_u32(addr, value)
+        elif dt == 'S16':
+            v = int(value)
+            if v < 0:
+                v = v + 65536
+            self._set_reg(addr, [v & 0xFFFF])
+        else:  # U16
+            self._set_reg(addr, [int(value) & 0xFFFF])
+
     def _update_registers(self):
         """Update all register values — called every ~1s by EquipmentSimulator."""
         env = self.env
@@ -1063,14 +1084,16 @@ class GenericInverterSimulator:
             else:
                 # Scan RegisterMap for MPPTn_VOLTAGE/CURRENT/POWER
                 n = i + 1
-                v_addr = self._find_addr(f'MPPT{n}_VOLTAGE', f'PV{n}_VOLTAGE')
-                c_addr = self._find_addr(f'MPPT{n}_CURRENT', f'PV{n}_CURRENT')
-                p_addr = self._find_addr(f'MPPT{n}_POWER')
-                self._set_reg(v_addr, [mppt_v_raw])
-                self._set_reg(c_addr, [mppt_c_raw])
+                v_field = f'MPPT{n}_VOLTAGE'
+                c_field = f'MPPT{n}_CURRENT'
+                p_field = f'MPPT{n}_POWER'
+                v_addr = self._find_addr(v_field, f'PV{n}_VOLTAGE')
+                c_addr = self._find_addr(c_field, f'PV{n}_CURRENT')
+                p_addr = self._find_addr(p_field)
+                self._smart_write(v_field, v_addr, mppt_v_raw)
+                self._smart_write(c_field, c_addr, mppt_c_raw)
                 if p_addr is not None:
-                    self._set_reg(p_addr, [mppt_p_raw & 0xFFFF])
-                    self._set_reg(p_addr + 1, [(mppt_p_raw >> 16) & 0xFFFF])
+                    self._smart_write(p_field, p_addr, mppt_p_raw)
 
         # --- String data ---
         for i in range(self.string_channels):
@@ -1093,10 +1116,12 @@ class GenericInverterSimulator:
                     pass
             else:
                 n = i + 1
-                v_addr = self._find_addr(f'STRING{n}_VOLTAGE')
-                c_addr = self._find_addr(f'STRING{n}_CURRENT')
-                self._set_reg(v_addr, [str_v_raw])
-                self._set_reg(c_addr, [str_c_raw])
+                v_field = f'STRING{n}_VOLTAGE'
+                c_field = f'STRING{n}_CURRENT'
+                v_addr = self._find_addr(v_field)
+                c_addr = self._find_addr(c_field)
+                self._smart_write(v_field, v_addr, str_v_raw)
+                self._smart_write(c_field, c_addr, str_c_raw)
 
         # --- AC phase data ---
         ac_voltage_raw = int(380.0 / self._s_voltage) if ac_power_w > 0 else 0
@@ -1104,35 +1129,35 @@ class GenericInverterSimulator:
         ac_power_raw = int(ac_power_w / self._s_power)
         pv_power_raw = int(pv_total_w / self._s_power)
 
-        # Phase voltages (try multiple naming conventions)
-        for names in [('L1_VOLTAGE', 'R_PHASE_VOLTAGE', 'A_PHASE_VOLTAGE'),
-                      ('L2_VOLTAGE', 'S_PHASE_VOLTAGE', 'B_PHASE_VOLTAGE'),
-                      ('L3_VOLTAGE', 'T_PHASE_VOLTAGE', 'C_PHASE_VOLTAGE')]:
-            addr = self._find_addr(*names)
-            self._set_reg(addr, [ac_voltage_raw])
+        # Phase voltages (try multiple naming conventions, DATA_TYPES-aware)
+        for fields in [('R_PHASE_VOLTAGE', 'L1_VOLTAGE', 'A_PHASE_VOLTAGE'),
+                       ('S_PHASE_VOLTAGE', 'L2_VOLTAGE', 'B_PHASE_VOLTAGE'),
+                       ('T_PHASE_VOLTAGE', 'L3_VOLTAGE', 'C_PHASE_VOLTAGE')]:
+            addr = self._find_addr(*fields)
+            self._smart_write(fields[0], addr, ac_voltage_raw)
 
         # Phase currents
         apparent_w = math.sqrt(ac_power_w**2) if ac_power_w > 0 else 0
         phase_current_raw = int(apparent_w / 3 / 380.0 / self._s_current) if apparent_w > 0 else 0
-        for names in [('L1_CURRENT', 'R_PHASE_CURRENT'),
-                      ('L2_CURRENT', 'S_PHASE_CURRENT'),
-                      ('L3_CURRENT', 'T_PHASE_CURRENT')]:
-            addr = self._find_addr(*names)
-            self._set_reg(addr, [phase_current_raw])
+        for fields in [('R_PHASE_CURRENT', 'L1_CURRENT'),
+                       ('S_PHASE_CURRENT', 'L2_CURRENT'),
+                       ('T_PHASE_CURRENT', 'L3_CURRENT')]:
+            addr = self._find_addr(*fields)
+            self._smart_write(fields[0], addr, phase_current_raw)
 
         # Frequency
         addr = self._find_addr('FREQUENCY')
-        self._set_reg(addr, [ac_freq_raw])
+        self._smart_write('FREQUENCY', addr, ac_freq_raw)
 
-        # AC Power (U32)
+        # AC Power
         addr = self._find_addr('AC_POWER', 'ACTIVE_POWER')
         if addr is not None:
-            self._write_u32(addr, ac_power_raw)
+            self._smart_write('AC_POWER', addr, ac_power_raw)
 
-        # PV Power (U32)
+        # PV Power
         addr = self._find_addr('PV_POWER')
         if addr is not None:
-            self._write_u32(addr, pv_power_raw)
+            self._smart_write('PV_POWER', addr, pv_power_raw)
 
         # Power factor
         pf = self.power_factor_set / 1000.0
@@ -1140,7 +1165,7 @@ class GenericInverterSimulator:
         pf_raw = int(pf * 1000)
         addr = self._find_addr('POWER_FACTOR')
         if addr is not None:
-            self._write_u32(addr, pf_raw)  # S32 at DEA_POWER_FACTOR or native PF
+            self._smart_write('POWER_FACTOR', addr, pf_raw)
 
         # --- DER-AVM Real-time Monitoring (0x03E8~0x03FD, S32) ---
         dea_pf = pf_raw

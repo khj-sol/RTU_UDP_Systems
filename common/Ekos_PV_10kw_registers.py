@@ -102,13 +102,11 @@ class RegisterMap:
 
     # --- Simulator compatibility aliases ---
     MPPT1_CURRENT                            = 0x0041  # U16, MPPT1 current
-    MPPT2_VOLTAGE                            = 0x0042  # U16, MPPT2 voltage
-    MPPT2_CURRENT                            = 0x0043  # U16, MPPT2 current
+    # Ekos has only 1 MPPT — MPPT2 removed (Stage3 placeholder)
     R_PHASE_CURRENT                          = 0x0073  # U16, R phase current
     S_PHASE_CURRENT                          = 0x0074  # U16, S phase current
     T_PHASE_CURRENT                          = 0x0075  # U16, T phase current
-    STRING3_CURRENT                          = 0x0062  # S16, string 3 current
-    STRING4_CURRENT                          = 0x0063  # S16, string 4 current
+    # Ekos has only 2 strings — STRING3/4 removed (Stage3 placeholder)
 
 
     # --- DER-AVM Real-time Monitoring Registers (0x03E8~0x03FD, S32) ---

@@ -18,7 +18,7 @@ class RegisterMap:
     # =========================================================================
     DEVICE_MODEL_PDF                         = 0x0000  # TEXT
     INVERTER_MODE                            = 0x0000  # U16, Operating State (0=wait,2=normal,3=fault)
-    FREQUENCY                                = 0x000F  # U16, scale A
+    FREQUENCY                                = 0x000E  # U16, 0.01Hz (PDF Sofar Grid frequency)
     TOTAL_GENERATIONTIME_HIGH_BYTE           = 0x0017  # U16
     INVERTER_MODULETEMPERATURE               = 0x001B  # U16
     INVERTER_INNERTEMPERATURE                = 0x001C  # U16
@@ -35,7 +35,7 @@ class RegisterMap:
     REACTIVE_POWER                           = 0x0003  # U16
     PV2_CURRENT                              = 0x0009  # U16
     PV_POWER                                 = 0x000B  # U16
-    PV_VOLTAGE                               = 0x000C  # U16
+    PV_VOLTAGE                               = 0x0006  # U16, 0.1V (PDF Sofar PV1 voltage)
     L2_VOLTAGE                               = 0x000D  # U16
     B_PHASE_VOLTAGE                          = 0x0011  # U16
     B_PHASE_CURRENT                          = 0x0012  # U16
@@ -100,29 +100,41 @@ class RegisterMap:
     AC_POWER                                 = PV_POWER
     TOTAL_ENERGY                             = CUMULATIVE_ENERGY
     ERROR_CODE1                              = FAULT_5
-    ERROR_CODE3                              = FREQUENCY
+    # ERROR_CODE3 placeholder removed - was overwriting FREQUENCY (0x000E conflict)
     DER_POWER_FACTOR_SET                     = 0x07D0
     DER_ACTION_MODE                          = 0x07D1
     DER_REACTIVE_POWER_PCT                   = 0x07D2
     DER_ACTIVE_POWER_PCT                     = 0x07D3
     INVERTER_ON_OFF                          = 0x0834
     MPPT_NUMBER                              = 0x1A4A  # default MPPT count register
-    MPPT1_VOLTAGE                            = PV_VOLTAGE
-    MPPT1_CURRENT                            = REG_1PV1_CURRENT
-    MPPT2_VOLTAGE                            = PV2_VOLTAGE
-    MPPT2_CURRENT                            = PV2_CURRENT
-    MPPT3_VOLTAGE                            = REG_3PV3_VOLTAGE
-    MPPT3_CURRENT                            = PV3_CURRENT
-    MPPT4_VOLTAGE                            = PV4_VOLTAGE
-    MPPT4_CURRENT                            = PV4_CURRENT
-    CUMULATIVE_ENERGY_LOW                    = CUMULATIVE_ENERGY
+    # PDF Sofar PV Inverter (1-70KTL G1-G2) 정정
+    MPPT1_VOLTAGE                            = 0x0006  # PV1 voltage 0.1V
+    MPPT1_CURRENT                            = 0x0007  # PV1 current 0.01A
+    MPPT2_VOLTAGE                            = 0x0008  # PV2 voltage 0.1V
+    MPPT2_CURRENT                            = 0x0009  # PV2 current 0.01A
+    # MPPT3/4: Sofar 1-70KTL only has 2 MPPTs in main; combiner regs at 0x0105+
+    MPPT3_VOLTAGE                            = 0x0109  # combiner PV3
+    MPPT3_CURRENT                            = 0x010A
+    MPPT4_VOLTAGE                            = 0x010B
+    MPPT4_CURRENT                            = 0x010C
+    AC_POWER                                 = 0x000C  # Active power 0.01kW
+    PV_POWER                                 = 0x000A  # PV1 power (sum needed but use PV1 as proxy)
+    R_PHASE_VOLTAGE                          = 0x000F  # A-phase voltage 0.1V
+    R_PHASE_CURRENT                          = 0x0010  # A-phase current 0.01A
+    S_PHASE_VOLTAGE                          = 0x0011
+    S_PHASE_CURRENT                          = 0x0012
+    T_PHASE_VOLTAGE                          = 0x0013
+    T_PHASE_CURRENT                          = 0x0014
+    CUMULATIVE_ENERGY                        = 0x0015  # Total production U32 1kWh
+    CUMULATIVE_ENERGY_LOW                    = 0x0015
+    TOTAL_ENERGY                             = 0x0015
     DER_AVM_DIGITAL_METERCONNECT_STATUS      = 0x1210
 
-    # --- STRING alias (Built-in Combiner: MPPT = String, 1:1 매핑) ---
-    STRING1_CURRENT                          = MPPT1_CURRENT
-    STRING2_CURRENT                          = 0x0108  # PV2 Current (combiner)
-    STRING3_CURRENT                          = MPPT3_CURRENT
-    STRING4_CURRENT                          = MPPT4_CURRENT
+    # --- STRING alias (Built-in Combiner 0x0105~0x0114) ---
+    STRING1_CURRENT                          = 0x0106  # PV1 string current
+    STRING2_CURRENT                          = 0x0108  # PV2 string current
+    STRING3_CURRENT                          = 0x010A  # PV3 string current
+    STRING4_CURRENT                          = 0x010C  # PV4 string current
 
 
 
@@ -346,10 +358,10 @@ StatusConverter = SofarStatusConverter
 
 # Scale factors
 SCALE = {
-    'voltage':            0.1,
-    'current':            0.01,
-    'power':              0.1,
-    'frequency':          0.01,
+    'voltage':            0.1,    # PDF Sofar: 0.1V
+    'current':            0.01,   # PDF Sofar: 0.01A
+    'power':              10.0,   # PDF Sofar: 0.01kW = 10W
+    'frequency':          0.01,   # PDF Sofar: 0.01Hz
     'power_factor':       0.001,
     'dea_current':        0.1,
     'dea_voltage':        0.1,

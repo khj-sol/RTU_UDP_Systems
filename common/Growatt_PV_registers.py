@@ -204,6 +204,28 @@ class RegisterMap:
     CUMULATIVE_ENERGY_LOW                    = CUMULATIVE_ENERGY
     DER_AVM_DIGITAL_METERCONNECT_STATUS      = 0x1210
 
+    # --- PDF Growatt v3.14 정정 (Stage3 오류 override) ---
+    # Reg 0=Status, 1-2=Ppv H/L (U32), 3=Vpv1, 4=PV1Curr, 5-6=PV1Watt H/L
+    # 11-12=Pac H/L (U32), 13=Fac, 14=Vac1, 15=Iac1
+    # 18=Vac2, 19=Iac2, 22=Vac3, 23=Iac3
+    INVERTER_MODE                            = 0x0000
+    PV_POWER                                 = 0x0001  # U32 Ppv (0.1W)
+    MPPT1_VOLTAGE                            = 0x0003  # 0.1V
+    MPPT1_CURRENT                            = 0x0004  # 0.1A
+    MPPT2_VOLTAGE                            = 0x0007  # 0.1V
+    MPPT2_CURRENT                            = 0x0008  # 0.1A
+    AC_POWER                                 = 0x000B  # U32 Pac (0.1W)
+    FREQUENCY                                = 0x000D  # 0.01Hz
+    R_PHASE_VOLTAGE                          = 0x000E  # Vac1 0.1V
+    R_PHASE_CURRENT                          = 0x000F  # Iac1 0.1A
+    S_PHASE_VOLTAGE                          = 0x0012  # Vac2 0.1V
+    S_PHASE_CURRENT                          = 0x0013  # Iac2 0.1A
+    T_PHASE_VOLTAGE                          = 0x0016  # Vac3 0.1V
+    T_PHASE_CURRENT                          = 0x0017  # Iac3 0.1A
+    CUMULATIVE_ENERGY                        = 0x001C  # Energy total H/L (U32 0.1kWh)
+    TOTAL_ENERGY                             = 0x001C
+    POWER_FACTOR                             = 0x002D  # IPF (0-20000, 1.0 = 10000)
+
     # --- STRING registers (PDF Input Reg 70~85: 8 strings) ---
     V_STRING1                                = 0x0046  # 0.1V
     # CURR_STRING1 = 0x0047 already defined
@@ -1006,11 +1028,11 @@ StatusConverter = GrowattStatusConverter
 
 # Scale factors
 SCALE = {
-    'voltage':            0.1,
-    'current':            0.01,
-    'power':              0.1,
-    'frequency':          0.01,
-    'power_factor':       0.001,
+    'voltage':            0.1,    # Growatt PDF: 0.1V
+    'current':            0.1,    # Growatt PDF: 0.1A
+    'power':              0.1,    # Growatt PDF: 0.1W
+    'frequency':          0.01,   # Growatt PDF: 0.01Hz
+    'power_factor':       0.0001, # Growatt PDF: IPF 0-20000 (10000=1.0)
     'dea_current':        0.1,
     'dea_voltage':        0.1,
     'dea_active_power':   0.1,
@@ -1290,8 +1312,6 @@ READ_BLOCKS = [
     {'start': 0x1000, 'count':   1, 'fc': 3},
     {'start': 0x2710, 'count':   1, 'fc': 3},
     {'start': 0x4000, 'count':   1, 'fc': 3},
-    {'start': 0x20000, 'count':   1, 'fc': 3},
-    {'start': 0x200000, 'count':   1, 'fc': 3},
     {'start': 0x03E8, 'count':  22, 'fc': 3},
 ]
 

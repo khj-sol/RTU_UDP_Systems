@@ -91,11 +91,12 @@ def start_simulator():
     """Start equipment_simulator.py in TCP mode."""
     log(f"Starting simulator (TCP port {TEST_MODBUS_PORT})...")
     env = os.environ.copy()
+    env['PYTHONUNBUFFERED'] = '1'
     proc = subprocess.Popen(
-        [sys.executable, 'pc_programs/equipment_simulator.py',
+        [sys.executable, '-u', 'pc_programs/equipment_simulator.py',
          '--tcp-port', str(TEST_MODBUS_PORT)],
         cwd=PROJECT_ROOT,
-        stdout=subprocess.PIPE,
+        stdout=open(os.path.join(PROJECT_ROOT, '.test_sim.log'), 'w'),
         stderr=subprocess.STDOUT,
         env=env,
     )
@@ -106,13 +107,14 @@ def start_dashboard():
     """Start dashboard with isolated ports and DB."""
     log(f"Starting dashboard (web:{TEST_WEB_PORT}, udp:{TEST_UDP_PORT})...")
     env = os.environ.copy()
+    env['PYTHONUNBUFFERED'] = '1'
     env['RTU_WEB_PORT'] = str(TEST_WEB_PORT)
     env['RTU_UDP_PORT'] = str(TEST_UDP_PORT)
     env['RTU_DB_PATH'] = TEST_DB_PATH
     proc = subprocess.Popen(
-        [sys.executable, '-m', 'web_server_prod.main'],
+        [sys.executable, '-u', '-m', 'web_server_prod.main'],
         cwd=PROJECT_ROOT,
-        stdout=subprocess.PIPE,
+        stdout=open(os.path.join(PROJECT_ROOT, '.test_dash.log'), 'w'),
         stderr=subprocess.STDOUT,
         env=env,
     )
@@ -123,18 +125,32 @@ def start_rtu():
     """Start RTU in TCP master mode, pointing at test simulator and dashboard."""
     log(f"Starting RTU (tcp master → 127.0.0.1:{TEST_MODBUS_PORT})...")
     env = os.environ.copy()
+    env['PYTHONUNBUFFERED'] = '1'
     env['RTU_FIRST_WAIT'] = '5'   # fast startup for tests
     # rtu_client.py imports are relative, so run from rtu_program/
     proc = subprocess.Popen(
-        [sys.executable, 'rtu_client.py',
+        [sys.executable, '-u', 'rtu_client.py',
          '-c', os.path.abspath(TEST_CONFIG_DIR),
-         '--modbus-tcp', f'127.0.0.1:{TEST_MODBUS_PORT}'],
+         '--modbus-tcp', f'127.0.0.1:{TEST_MODBUS_PORT}',
+         '-d'],   # debug logging
         cwd=os.path.join(PROJECT_ROOT, 'rtu_program'),
-        stdout=subprocess.PIPE,
+        stdout=open(os.path.join(PROJECT_ROOT, '.test_rtu.log'), 'w'),
         stderr=subprocess.STDOUT,
         env=env,
     )
     return proc
+
+
+def read_log(name):
+    """Read a log file."""
+    p = os.path.join(PROJECT_ROOT, f'.test_{name}.log')
+    if os.path.exists(p):
+        try:
+            with open(p, 'r', encoding='utf-8', errors='ignore') as f:
+                return f.read()
+        except Exception:
+            pass
+    return ''
 
 
 def fetch_api(path):
@@ -173,10 +189,10 @@ def validate_devices(data, expected):
                 issues.append(f"ac={ac}W")
             if freq < 50 or freq > 65:
                 issues.append(f"freq={freq}")
-            # MPPT voltage sanity (raw 0.1V units → ≥1000 = 100V)
+            # MPPT voltage sanity (API returns V already, expect ≥100V when ac>0)
             for i, m in enumerate(mppt):
                 v = m.get('voltage', 0)
-                if v < 1000 and ac > 0:
+                if v < 100 and ac > 0:
                     issues.append(f"MPPT{i+1}_V={v}")
                     break  # one is enough
             status = 'OK' if not issues else 'FAIL'
@@ -230,15 +246,24 @@ def main():
         log(f"Waiting {args.wait}s for H01 packets to reach dashboard...")
         time.sleep(args.wait)
 
-        # 5. Query API
+        # 5. Query API — try both /api/rtus and /api/rtus/ID/devices
+        log(f"Fetching API /api/rtus...")
+        rtus_list = fetch_api('/api/rtus')
+        if rtus_list:
+            log(f"API /api/rtus returned: {len(rtus_list.get('rtus', []))} RTUs")
+            for r in rtus_list.get('rtus', []):
+                log(f"  RTU {r.get('rtu_id')}: status={r.get('status')} devices={r.get('device_count')}")
+
         log(f"Fetching API /api/rtus/{TEST_RTU_ID}/devices...")
         data = fetch_api(f'/api/rtus/{TEST_RTU_ID}/devices')
         if not data:
-            log("API did not return data. Dumping RTU log:", 'FAIL')
-            rtu.terminate()
-            time.sleep(1)
-            out = rtu.stdout.read().decode('utf-8', errors='ignore')
-            print(out[-3000:])
+            log("API did not return data.", 'FAIL')
+            log("=== RTU LOG (last 60 lines) ===", 'WARN')
+            print('\n'.join(read_log('rtu').split('\n')[-60:]))
+            log("=== SIMULATOR LOG (last 30 lines) ===", 'WARN')
+            print('\n'.join(read_log('sim').split('\n')[-30:]))
+            log("=== DASHBOARD LOG (last 30 lines) ===", 'WARN')
+            print('\n'.join(read_log('dash').split('\n')[-30:]))
             return 1
 
         # 6. Validate
