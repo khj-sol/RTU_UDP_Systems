@@ -246,6 +246,7 @@ class RTUClient:
 
         # Heartbeat
         self.last_heartbeat_time = time.time()
+        self._last_rtu_info_time = 0.0   # force first H05 RTU Info at startup
 
         # DER-AVM
         self.der_avm_enabled = False
@@ -1388,13 +1389,22 @@ class RTUClient:
                     sent_packets.append((seq, packet))
             time.sleep(DEVICE_SEND_INTERVAL)
 
-        # ── Phase 1.5: H05 Control/Monitor for all inverters ─────────────
-        for inv in self.inverters:
-            dev_num = inv['device_number']
-            handler = inv.get('handler')
-            if handler:
-                self._send_h05_control_sequence(handler, dev_num, inv['model'])
-            time.sleep(DEVICE_SEND_INTERVAL)
+        # ── Phase 1.5: H05 RTU Info (Body Type 1) — 1분 간격 ──────────
+        now = time.time()
+        if now - self._last_rtu_info_time >= 60.0:
+            try:
+                rtu_info = {
+                    'model': get_rtu_model_name(),
+                    'phone': str(self.rtu_id),
+                    'serial': str(self.rtu_id),
+                    'firmware': RTUClient.VERSION,
+                }
+                pkt, s = self.protocol.create_h05_rtu_info(rtu_info)
+                self._send_udp_no_ack(pkt)
+                self.logger.info(f"H05 RTU Info sent (seq={s}) [periodic 60s]")
+                self._last_rtu_info_time = now
+            except Exception as e:
+                self.logger.error(f"H05 RTU Info error: {e}")
 
         # ── Phase 2: Backup packets (recovery mode only) ────────────────────
         if self.recovery_mode:
