@@ -128,13 +128,29 @@ class RegisterMap:
 
 
 
-    # --- Simulator compatibility aliases ---
-    MPPT3_VOLTAGE                            = MPPT_3_VOLTAGE
-    MPPT3_CURRENT                            = MPPT_3_CURRENT
-    MPPT4_VOLTAGE                            = MPPT_3_VOLTAGE  # MPPT4 전압 레지스터 없음
-    MPPT4_CURRENT                            = MPPT_4_CURRENT
-    PV_POWER                                 = 0x0011  # U16, PV power
-    INVERTER_MODE                            = 0x13AE  # U16, running state
+    # --- PDF Sungrow Protocol v1137 정정 (Stage3 오류 override) ---
+    # Input Register 5011~: MPPT1_V=5011, MPPT1_I=5012, ... MPPT4_I=5016
+    MPPT1_VOLTAGE                            = 0x1393  # 5011
+    MPPT1_CURRENT                            = 0x1394  # 5012
+    MPPT2_VOLTAGE                            = 0x1395  # 5013
+    MPPT2_CURRENT                            = 0x1396  # 5014
+    MPPT3_VOLTAGE                            = 0x1397  # 5015
+    MPPT3_CURRENT                            = 0x1398  # 5016
+    MPPT4_VOLTAGE                            = 0x1397  # 없음 → MPPT3로 대체
+    MPPT4_CURRENT                            = 0x13FC  # 5116, MPPT4 current
+    PV_POWER                                 = 0x1399  # 5017 U32 Total DC power
+    AC_POWER                                 = 0x13A7  # 5031 U32 Total active power
+    FREQUENCY                                = 0x13AD  # 5035 U16 Grid frequency
+    INVERTER_MODE                            = 0x13AE  # 5038 U16 running state
+    # STRING 1~8 = 6965~6972 = 0x1B35~0x1B3C
+    STRING1_CURRENT                          = 0x1B35
+    STRING2_CURRENT                          = 0x1B36
+    STRING3_CURRENT                          = 0x1B37
+    STRING4_CURRENT                          = 0x1B38
+    STRING5_CURRENT                          = 0x1B39
+    STRING6_CURRENT                          = 0x1B3A
+    STRING7_CURRENT                          = 0x1B3B
+    STRING8_CURRENT                          = 0x1B3C
 
 
     # --- DER-AVM Real-time Monitoring Registers (0x03E8~0x03FD, S32) ---

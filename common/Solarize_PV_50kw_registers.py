@@ -45,7 +45,7 @@ class RegisterMap:
     TEMPERATURE                              = 0x0001  # U16
     REACTIVE_POWER                           = 0x0003  # U16
     L1_VOLTAGE                               = 0x0004  # U16
-    PV_POWER                                 = 0x000B  # U16
+    PV_POWER                                 = 0x1048  # U32 (Solarize Protocol)
     INTERNAL_STORAGE_ERROR                   = 0x000C  # U16
     L2_VOLTAGE                               = 0x000D  # U16
     L1_CURRENT                               = 0x1002  # U16, scale A 0.01
@@ -503,7 +503,7 @@ DATA_TYPES = {
     'L1_VOLTAGE': 'U16',
     'L2_VOLTAGE': 'STRINGING',
     'INTERNAL_COMMUNICATION_ERROR': 'U16',
-    'PV_POWER': 'U16',
+    'PV_POWER': 'U32',
     'INTERNAL_STORAGE_ERROR': 'U16',
     'L3_VOLTAGE': 'U16',
     'L1_CURRENT': 'U16',
