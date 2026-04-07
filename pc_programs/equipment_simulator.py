@@ -884,9 +884,69 @@ class GenericInverterSimulator:
         self._current_lock = threading.Lock()
         self.store = self._create_datastore()
         self._init_iv_scan_data()
+        self._init_static_info()
 
         self.logger.info(f"[GENERIC] Loaded protocol '{protocol_name}' | "
                          f"MPPT={self.mppt_channels} STR={self.string_channels} FC={self.fc_code:02d}")
+
+    # Per-protocol display name + nominal power for read_model_info() registers
+    _PROTO_MODEL_NAME = {
+        'solarize':  'SRPV-3-50-KS-SIM',
+        'huawei':    'SUN2000-50KTL-SIM',
+        'kstar':     'KSG-60K-DM-SIM',
+        'sungrow':   'SG50CX-SIM',
+        'ekos':      'EKOS-10K-SIM',
+        'senergy':   'SE-50K-SIM',
+        'sofar':     'SOFAR-70KTL-SIM',
+        'solis':     'SOLIS-50K-SIM',
+        'growatt':   'MOD-30KTL3-SIM',
+        'cps':       'CPS-50KTL-SIM',
+        'sunways':   'STT-30KTL-SIM',
+    }
+
+    def _write_string_regs(self, base_addr, text, n_regs):
+        """Pack ASCII text big-endian into n_regs 16-bit registers (zero-padded)."""
+        if base_addr is None:
+            return
+        data = text.encode('utf-8')[:n_regs * 2]
+        data = data.ljust(n_regs * 2, b'\x00')
+        regs = []
+        for i in range(n_regs):
+            hi, lo = data[2 * i], data[2 * i + 1]
+            regs.append((hi << 8) | lo)
+        for i, v in enumerate(regs):
+            self._set_reg(base_addr + i, [v])
+
+    def _init_static_info(self):
+        """Pre-populate DEVICE_MODEL/SERIAL_NUMBER/MPPT_COUNT/NOMINAL_POWER_*
+        so RTU read_model_info() returns realistic per-protocol values."""
+        proto = (self.protocol_name or 'solarize').lower()
+        model_name = self._PROTO_MODEL_NAME.get(proto, 'SRPV-3-50-KS-SIM')
+        # Stable serial: protocol prefix + zero padded
+        prefix = proto[:3].upper()
+        # slave_id is set later by ModbusServerContext, use 0 placeholder for now
+        # Use protocol_name hash as seed so each instance is distinct enough
+        serial = f"{prefix}{abs(hash(proto)) % 100000000:08d}"
+
+        device_model_addr = self._find_addr('DEVICE_MODEL', 'DEVICE_MODEL_NAME', 'MODEL')
+        if device_model_addr is not None:
+            self._write_string_regs(device_model_addr, model_name, 16)
+
+        serial_addr = self._find_addr('SERIAL_NUMBER', 'DEVICE_SERIAL_NUMBER',
+                                       'SERIAL_NUMBER_BASE')
+        if serial_addr is not None:
+            self._write_string_regs(serial_addr, serial, 8)
+
+        mppt_count_addr = self._find_addr('MPPT_COUNT')
+        if mppt_count_addr is not None:
+            self._set_reg(mppt_count_addr, [self.mppt_channels])
+
+        np_lo = self._find_addr('NOMINAL_POWER_LOW', 'NOMINAL_POWER_L')
+        np_hi = self._find_addr('NOMINAL_POWER_HIGH', 'NOMINAL_POWER_H')
+        if np_lo is not None and np_hi is not None:
+            val = int(self.NOMINAL_POWER) & 0xFFFFFFFF
+            self._set_reg(np_lo, [val & 0xFFFF])
+            self._set_reg(np_hi, [(val >> 16) & 0xFFFF])
 
     @staticmethod
     def _load_module(protocol_name):

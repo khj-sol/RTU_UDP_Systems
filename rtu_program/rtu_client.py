@@ -250,6 +250,8 @@ class RTUClient:
         # Heartbeat
         self.last_heartbeat_time = time.time()
         self._last_rtu_info_time = 0.0   # force first H05 RTU Info at startup
+        self._last_inv_info_time = {}    # {dev_num: last_send_ts} for periodic inverter info
+        self._inv_info_interval  = 600.0 # 10 min between periodic inverter info per device
 
         # DER-AVM
         self.der_avm_enabled = False
@@ -1412,6 +1414,28 @@ class RTUClient:
                 self._last_rtu_info_time = now
             except Exception as e:
                 self.logger.error(f"H05 RTU Info error: {e}")
+
+        # ── Phase 1.6: H05 Inverter Model Info (Body Type 11) — 인버터별 10분 간격 ──
+        for inv in self.inverters:
+            dev_num = inv['device_number']
+            last = self._last_inv_info_time.get(dev_num, 0.0)
+            if now - last < self._inv_info_interval:
+                continue
+            handler = inv.get('handler')
+            try:
+                info = handler.read_model_info() if (handler and hasattr(handler, 'read_model_info')) else {}
+                if info is None:
+                    info = {}
+                cap = (1 if inv.get('iv_scan') else 0) | (2 if inv.get('control') else 0)
+                info['capabilities'] = cap
+                pkt, s = self.protocol.create_h05_inverter_model(dev_num, inv['model'], info)
+                self._send_udp_no_ack(pkt)
+                self.logger.info(
+                    f"H05 INV{dev_num} Model Info sent (seq={s}) [periodic] "
+                    f"model={info.get('model','')} sn={info.get('serial','')}")
+                self._last_inv_info_time[dev_num] = now
+            except Exception as e:
+                self.logger.error(f"H05 INV{dev_num} Model Info error: {e}")
 
         # ── Phase 2: Backup packets (recovery mode only) ────────────────────
         if self.recovery_mode:

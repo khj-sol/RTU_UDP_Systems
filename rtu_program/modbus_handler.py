@@ -2111,21 +2111,61 @@ class ModbusHandlerSerial:
             return False
     
     def read_model_info(self):
-        """Read inverter model information via pymodbus"""
+        """Read inverter model information via pymodbus (FC03 or FC04)."""
         if not self.connected:
             return None
 
-        # Guard: register module must have device info registers
-        if not hasattr(self.RegMap, 'DEVICE_MODEL'):
+        # Multi-name lookup helper (different register files use different names)
+        def _addr(*names):
+            for n in names:
+                a = getattr(self.RegMap, n, None)
+                if a is not None and isinstance(a, int):
+                    return a
+            return None
+
+        device_model_addr = _addr('DEVICE_MODEL', 'DEVICE_MODEL_NAME', 'MODEL')
+        serial_addr = _addr('SERIAL_NUMBER', 'DEVICE_SERIAL_NUMBER', 'SERIAL_NUMBER_BASE')
+        mppt_count_addr = _addr('MPPT_COUNT')
+        np_lo_addr = _addr('NOMINAL_POWER_LOW', 'NOMINAL_POWER_L', 'NOMINAL_POWER')
+        np_hi_addr = _addr('NOMINAL_POWER_HIGH', 'NOMINAL_POWER_H')
+
+        # Guard: at least model address must exist
+        if device_model_addr is None:
             return {'model': '', 'serial': '', 'mppt_count': 4,
                     'string_count': 8, 'nominal_power': 50000}
+
+        # FC03 (holding) vs FC04 (input) — driven by register module
+        use_fc04 = getattr(self, 'rtu_fc_code', 3) == 4
+        if use_fc04:
+            read_fn = self.client.read_input_registers
+        else:
+            read_fn = self.client.read_holding_registers
+
+        def _read(addr, count):
+            """pymodbus 2.x/3.x compatible read (count + slave kw variations)."""
+            try:
+                # pymodbus 3.7+: device_id (count keyword-only)
+                return read_fn(addr, count=count, device_id=self.slave_id)
+            except TypeError:
+                pass
+            try:
+                # pymodbus 3.0-3.6: slave (count keyword-only)
+                return read_fn(addr, count=count, slave=self.slave_id)
+            except TypeError:
+                pass
+            try:
+                # pymodbus 2.x: unit, positional count
+                return read_fn(addr, count, unit=self.slave_id)
+            except Exception as e:
+                self.logger.error(f"read_model_info read error addr={hex(addr)}: {e}")
+                return None
 
         try:
             info = {}
 
             # Model name (16 registers = 32 bytes)
-            result = self.client.read_holding_registers(self.RegMap.DEVICE_MODEL, 16, slave=self.slave_id)
-            if not result.isError():
+            result = _read(device_model_addr, 16)
+            if result is not None and not result.isError():
                 model_bytes = b''
                 for reg in result.registers:
                     model_bytes += bytes([(reg >> 8) & 0xFF, reg & 0xFF])
@@ -2134,32 +2174,45 @@ class ModbusHandlerSerial:
                 info['model'] = ''
 
             # Serial number (8 registers = 16 bytes)
-            result = self.client.read_holding_registers(self.RegMap.SERIAL_NUMBER, 8, slave=self.slave_id)
-            if not result.isError():
-                serial_bytes = b''
-                for reg in result.registers:
-                    serial_bytes += bytes([(reg >> 8) & 0xFF, reg & 0xFF])
-                info['serial'] = serial_bytes.rstrip(b'\x00').decode('utf-8', errors='ignore')
+            if serial_addr is not None:
+                result = _read(serial_addr, 8)
+                if result is not None and not result.isError():
+                    serial_bytes = b''
+                    for reg in result.registers:
+                        serial_bytes += bytes([(reg >> 8) & 0xFF, reg & 0xFF])
+                    info['serial'] = serial_bytes.rstrip(b'\x00').decode('utf-8', errors='ignore')
+                else:
+                    info['serial'] = ''
             else:
                 info['serial'] = ''
 
             # MPPT count
-            result = self.client.read_holding_registers(self.RegMap.MPPT_COUNT, 1, slave=self.slave_id)
-            info['mppt_count'] = result.registers[0] if not result.isError() else 4
+            if mppt_count_addr is not None:
+                result = _read(mppt_count_addr, 1)
+                info['mppt_count'] = (result.registers[0]
+                                      if (result is not None and not result.isError())
+                                      else 4)
+            else:
+                info['mppt_count'] = 4
 
             # String count (managed via config file, use default)
             info['string_count'] = 8
 
-            # Nominal power
-            result_low = self.client.read_holding_registers(self.RegMap.NOMINAL_POWER_LOW, 1, slave=self.slave_id)
-            result_high = self.client.read_holding_registers(self.RegMap.NOMINAL_POWER_HIGH, 1, slave=self.slave_id)
-            if not result_low.isError() and not result_high.isError():
-                info['nominal_power'] = self.reg_to_u32(result_low.registers[0], result_high.registers[0])
+            # Nominal power (U32, low+high words)
+            if np_lo_addr is not None and np_hi_addr is not None:
+                result_low = _read(np_lo_addr, 1)
+                result_high = _read(np_hi_addr, 1)
+                if (result_low is not None and not result_low.isError()
+                        and result_high is not None and not result_high.isError()):
+                    info['nominal_power'] = self.reg_to_u32(
+                        result_low.registers[0], result_high.registers[0])
+                else:
+                    info['nominal_power'] = 50000
             else:
                 info['nominal_power'] = 50000
-            
+
             return info
-            
+
         except Exception as e:
             self.logger.error(f"Read model info error: {e}")
             return None
@@ -2884,14 +2937,33 @@ class ModbusHandlerSimulation:
         }
     
     def read_model_info(self):
-        """Read simulated model info"""
+        """Read simulated model info (per-protocol)"""
+        # Per-protocol display name + nominal power
+        _PROTO_MODEL = {
+            'solarize':  ('SRPV-3-50-KS-SIM',  50000),
+            'huawei':    ('SUN2000-50KTL-SIM', 50000),
+            'kstar':     ('KSG-60K-DM-SIM',    60000),
+            'sungrow':   ('SG50CX-SIM',        50000),
+            'ekos':      ('EKOS-10K-SIM',      10000),
+            'senergy':   ('SE-50K-SIM',        50000),
+            'sofar':     ('SOFAR-70KTL-SIM',   70000),
+            'solis':     ('SOLIS-50K-SIM',     50000),
+            'growatt':   ('MOD-30KTL3-SIM',    30000),
+            'cps':       ('CPS-50KTL-SIM',     50000),
+            'sunways':   ('STT-30KTL-SIM',     30000),
+        }
+        proto = (self.protocol or 'solarize').lower()
+        model_name, nominal = _PROTO_MODEL.get(proto, ('SRPV-3-50-KS-SIM', 50000))
+        # Stable serial: protocol prefix + slave_id zero-padded
+        prefix = proto[:3].upper()
+        serial = f"{prefix}{self.slave_id:08d}"
         return {
-            'model': 'SRPV-3-50-KS-SIM',
-            'serial': 'SIM001234',
-            'firmware': 'V1.4.0-SIM',
-            'nominal_power': 50000,
+            'model': model_name,
+            'serial': serial,
+            'firmware': 'V2.0.0-SIM',
+            'nominal_power': nominal,
             'mppt_count': 4,
-            'string_count': 8
+            'string_count': self.string_count,
         }
     
     def read_device_info(self):

@@ -815,14 +815,13 @@ class UDPEngine:
         elif body_type == BODY_TYPE_INVERTER_MODEL:
             event_type = "inverter_model"
             pos = 0
-            parts = []
+            parsed = {}
             for fname in ['model_name', 'serial_number']:
                 if pos < len(body):
                     size = body[pos]
                     pos += 1
                     if pos + size <= len(body):
-                        value = body[pos:pos + size].decode('utf-8', errors='ignore')
-                        parts.append(f"{fname}={value}")
+                        parsed[fname] = body[pos:pos + size].decode('utf-8', errors='ignore')
                         pos += size
             # Parse capability flags: bit0=iv_scan, bit1=der_avm
             cap_iv = False
@@ -831,11 +830,17 @@ class UDPEngine:
                 cap = body[pos]
                 cap_iv = bool(cap & 0x01)
                 cap_der = bool(cap & 0x02)
-                parts.append(f"iv_scan={cap_iv}, der_avm={cap_der}")
             with self._lock:
                 state = self.rtu_registry.get(rtu_id)
                 if state:
-                    state.dev_caps[dev_num] = {'iv_scan': cap_iv, 'der_avm': cap_der}
+                    state.dev_caps[dev_num] = {
+                        'iv_scan': cap_iv,
+                        'der_avm': cap_der,
+                        'model_name': parsed.get('model_name', ''),
+                        'serial_number': parsed.get('serial_number', ''),
+                    }
+            parts = [f"{k}={v}" for k, v in parsed.items()]
+            parts.append(f"iv_scan={cap_iv}, der_avm={cap_der}")
             detail = f"INV{dev_num}: " + (", ".join(parts) if parts else "empty")
 
         elif body_type == BODY_TYPE_CONTROL_CHECK:
