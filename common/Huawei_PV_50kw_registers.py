@@ -2065,7 +2065,7 @@ def generate_iv_current_data(isc, voc, v_min, data_points=64):
 
 
 DATA_TYPES = {
-    'POWER_FACTOR': 'S32',
+    'POWER_FACTOR': 'S16',
     'TEMPERATURE': 'U16',
     'FREQUENCY': 'U16',
     'REACTIVE_POWER': 'U16',
@@ -2073,7 +2073,7 @@ DATA_TYPES = {
     'VDE_0126_1_1_GRB': 'U16',
     'L1_VOLTAGE': 'U16',
     'P_P_VALUE_AT_POINT_1N': 'U16',
-    'PV_POWER': 'U16',
+    'PV_POWER': 'S32',
     'L3_VOLTAGE': 'U16',
     'AS4777': 'U16',
     'SERIAL_NUMBER': 'U16',
@@ -2326,6 +2326,19 @@ DATA_TYPES = {
     'MAXIMUM_FEED_GRID_POWER_DEFAULT': 'S32',
     'DEFAULTACTIVEPOWERCHANGEGRADIENT': 'U32',
     'FAULTY_MONITORING_UNIT': 'U16',
+    'MPPT1_VOLTAGE': 'U16',
+    'MPPT1_CURRENT': 'U16',
+    'MPPT2_CURRENT': 'U16',
+    'MPPT3_VOLTAGE': 'U16',
+    'MPPT4_VOLTAGE': 'U16',
+    'MPPT4_CURRENT': 'U16',
+    'R_PHASE_VOLTAGE': 'U16',
+    'S_PHASE_VOLTAGE': 'U16',
+    'T_PHASE_VOLTAGE': 'U16',
+    'R_PHASE_CURRENT': 'S32',
+    'S_PHASE_CURRENT': 'S32',
+    'T_PHASE_CURRENT': 'S32',
+    'AC_POWER': 'S32',
 }
 
 FLOAT32_FIELDS: set = set()
@@ -2344,8 +2357,7 @@ READ_BLOCKS = [
     {'start': 0x007D, 'count':  87, 'fc': 3},
     {'start': 0x00F8, 'count':  23, 'fc': 3},
     {'start': 0x07F2, 'count':  55, 'fc': 3},
-    {'start': 0x7D00, 'count':  24, 'fc': 3},
-    {'start': 0x7D40, 'count':  46, 'fc': 3},
+    {'start': 0x7D00, 'count':  56, 'fc': 3},
     {'start': 0x7D97, 'count':   4, 'fc': 3},
     {'start': 0x7DBE, 'count': 118, 'fc': 3},
     {'start': 0x84D0, 'count':   2, 'fc': 3},

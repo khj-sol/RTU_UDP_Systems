@@ -471,7 +471,7 @@ DATA_TYPES = {
     'FAULT_5': 'U16',
     'PV2_CURRENT': 'U16',
     'ALARM1': 'U16',
-    'PV_POWER': 'U16',
+    'PV_POWER': 'U32',
     'PV_VOLTAGE': 'U16',
     'L2_VOLTAGE': 'U16',
     'B_PHASE_VOLTAGE': 'U16',
