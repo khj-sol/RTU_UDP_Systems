@@ -356,19 +356,35 @@ def _gen_register_map(regs_by_cat: dict, mppt: int, total_strings: int,
 
     # Standard handler compatibility aliases (H01 Body Type 4 required)
     lines.append('    # --- Standard handler compatibility aliases (H01 Body Type 4 required) ---')
-    # Sungrow 등: A_B_LINEVOLTAGE_PHASE_AVOLTAGE → L1_VOLTAGE 먼저 생성 (downstream 의존)
+    # Sungrow / SunSpec / 단상 다양한 명명을 L1/L2/L3로 정규화 (downstream 의존)
+    # 같은 alias에 여러 src 후보 — 첫 매칭만 사용
     _phase_src_aliases = [
-        ('L1_VOLTAGE', 'A_B_LINEVOLTAGE_PHASE_AVOLTAGE'),
-        ('L2_VOLTAGE', 'B_C_LINE_VOLTAGE_PHASE_BVOLTAGE'),
-        ('L3_VOLTAGE', 'C_A_LINE_VOLTAGE_PHASE_CVOLTAGE'),
-        ('L1_CURRENT', 'A_PHASE_CURRENT'),
-        ('L2_CURRENT', 'B_PHASE_CURRENT'),
-        ('L3_CURRENT', 'C_PHASE_CURRENT'),
+        # L1
+        ('L1_VOLTAGE', ['A_B_LINEVOLTAGE_PHASE_AVOLTAGE', 'PH_VPH_A', 'PHVPH_A',
+                        'PPVPH_AB', 'A_PHASE_VOLTAGE', 'UA', 'VAN', 'V1', 'U_A',
+                        'UA_VOLTAGE', 'VPH_A', 'GRID_VOLTAGE_A']),
+        ('L2_VOLTAGE', ['B_C_LINE_VOLTAGE_PHASE_BVOLTAGE', 'PH_VPH_B', 'PHVPH_B',
+                        'PPVPH_BC', 'B_PHASE_VOLTAGE', 'UB', 'VBN', 'V2', 'U_B',
+                        'UB_VOLTAGE', 'VPH_B', 'GRID_VOLTAGE_B']),
+        ('L3_VOLTAGE', ['C_A_LINE_VOLTAGE_PHASE_CVOLTAGE', 'PH_VPH_C', 'PHVPH_C',
+                        'PPVPH_CA', 'C_PHASE_VOLTAGE', 'UC', 'VCN', 'V3', 'U_C',
+                        'UC_VOLTAGE', 'VPH_C', 'GRID_VOLTAGE_C']),
+        # L*_CURRENT
+        ('L1_CURRENT', ['A_PHASE_CURRENT', 'APH_A', 'IPH_A', 'IA', 'I_A',
+                        'IA_CURRENT', 'GRID_CURRENT_A', 'PHASE_A_CURRENT']),
+        ('L2_CURRENT', ['B_PHASE_CURRENT', 'APH_B', 'IPH_B', 'IB', 'I_B',
+                        'IB_CURRENT', 'GRID_CURRENT_B', 'PHASE_B_CURRENT']),
+        ('L3_CURRENT', ['C_PHASE_CURRENT', 'APH_C', 'IPH_C', 'IC', 'I_C',
+                        'IC_CURRENT', 'GRID_CURRENT_C', 'PHASE_C_CURRENT']),
     ]
-    for alias, src in _phase_src_aliases:
-        if src in all_defined and alias not in all_defined:
-            lines.append(f'    {alias:40s} = {src}')
-            all_defined.add(alias)
+    for alias, srcs in _phase_src_aliases:
+        if alias in all_defined:
+            continue
+        for src in srcs:
+            if src in all_defined:
+                lines.append(f'    {alias:40s} = {src}')
+                all_defined.add(alias)
+                break
 
     compat_aliases = [
         ('R_PHASE_VOLTAGE', 'L1_VOLTAGE'), ('T_PHASE_VOLTAGE', 'L3_VOLTAGE'),
@@ -389,28 +405,64 @@ def _gen_register_map(regs_by_cat: dict, mppt: int, total_strings: int,
         fallback = next((x for x in [
             'L2_VOLTAGE', 'L1_VOLTAGE', 'R_PHASE_VOLTAGE',
             'AC_VOLTAGE', 'GRID_VOLTAGE', '전압종합',  # 단상/한글 인버터 대체
+            # SunSpec
+            'PH_VPH_B', 'PHVPH_B', 'PPVPH_BC', 'VPH_B', 'VBN', 'V_BN',
+            'GRID_VOLTAGE_B', 'GRID_VOLTAGE_2',
         ] if x in all_defined), None)
         if fallback:
             lines.append(f'    {"S_PHASE_VOLTAGE":40s} = {fallback}  # L2 없음 → 대체')
             all_defined.add('S_PHASE_VOLTAGE')
 
     # MPPT{N}_VOLTAGE/CURRENT aliases (handler: MPPTn_, 생성파일: MPPT_N_)
-    # 지원 네이밍: MPPT_N_(Sungrow), PV{N}VOLTAGE(Huawei), PV{N}_INPUT_VOLTAGE(Kstar),
-    #              PV{N}_VOLTAGE(generic), 한글이름_PV_VOLTAGE(Ekos)
+    # 지원 네이밍:
+    #   MPPT_N_       Sungrow/standard
+    #   PV{N}VOLTAGE  Huawei (no separator)
+    #   PV{N}_VOLTAGE generic
+    #   PV{N}_INPUT_VOLTAGE  Kstar
+    #   PV{N}VOLT     SAJ (truncated)
+    #   REG_{N}_DCV   SunSpec model 160 (Fronius/SolarEdge multi-MPPT)
+    #   MOD_{N}_DCV   SunSpec alt
+    #   M{N}_DCV      compact SunSpec
+    #   한글이름_PV_VOLTAGE  Ekos
     lines.append('')
     lines.append('    # --- MPPT alias (modbus_handler: MPPT{N}_ 형식) ---')
+    last_consecutive = 0
     for i in range(1, 17):
         v_candidates = [
-            f'MPPT_{i}_VOLTAGE',       # Sungrow/standard
-            f'PV{i}VOLTAGE',           # Huawei (no separator)
-            f'PV{i}_VOLTAGE',          # generic
-            f'PV{i}_INPUT_VOLTAGE',    # Kstar
+            f'MPPT_{i}_VOLTAGE',
+            f'PV{i}VOLTAGE',
+            f'PV{i}_VOLTAGE',
+            f'PV{i}_INPUT_VOLTAGE',
+            f'PV{i}VOLT',           # SAJ
+            f'PV{i}_VOLT',
+            f'REG_{i}_DCV',         # SunSpec model 160
+            f'MOD_{i}_DCV',
+            f'MODULE_{i}_DCV',
+            f'M{i}_DCV',
+            f'STRING_{i}_VOLTAGE',
+            f'DC{i}_VOLTAGE',
+            f'DC_VOLTAGE_{i}',
+            f'DCV_{i}',
+            f'VPV{i}',              # Goodwe variant
+            f'VPV_{i}',
         ]
         c_candidates = [
             f'MPPT_{i}_CURRENT',
             f'PV{i}CURRENT',
             f'PV{i}_CURRENT',
             f'PV{i}_INPUT_CURRENT',
+            f'PV{i}CURR',
+            f'PV{i}_CURR',
+            f'REG_{i}_DCA',         # SunSpec model 160
+            f'MOD_{i}_DCA',
+            f'MODULE_{i}_DCA',
+            f'M{i}_DCA',
+            f'STRING_{i}_CURRENT',
+            f'DC{i}_CURRENT',
+            f'DC_CURRENT_{i}',
+            f'DCA_{i}',
+            f'IPV{i}',              # Goodwe variant
+            f'IPV_{i}',
         ]
         src_v = next((c for c in v_candidates if c in all_defined), None)
         src_c = next((c for c in c_candidates if c in all_defined), None)
@@ -418,12 +470,15 @@ def _gen_register_map(regs_by_cat: dict, mppt: int, total_strings: int,
         # MPPT1 마지막 수단: 이름 끝에 _PV_VOLTAGE 포함 (한글 인버터 등)
         if src_v is None and i == 1:
             src_v = next((n for n in sorted(all_defined) if n.endswith('_PV_VOLTAGE')), None)
+        if src_c is None and i == 1:
+            src_c = next((n for n in sorted(all_defined) if n.endswith('_PV_CURRENT')), None)
 
         alias_v = f'MPPT{i}_VOLTAGE'
         alias_c = f'MPPT{i}_CURRENT'
         if src_v and alias_v not in all_defined:
             lines.append(f'    {alias_v:40s} = {src_v}')
             all_defined.add(alias_v)
+            last_consecutive = i
         if src_c and alias_c not in all_defined:
             lines.append(f'    {alias_c:40s} = {src_c}')
             all_defined.add(alias_c)
@@ -470,11 +525,19 @@ def _gen_register_map(regs_by_cat: dict, mppt: int, total_strings: int,
     lines.append('    # --- RTU modbus_handler / simulator 필수 alias ---')
 
     # INNER_TEMP — 온도 레지스터 후보 중 존재하는 첫 번째 사용
+    # SunSpec: TMP_CAB(cabinet), TMP_SNK(sink), TMP_TRNS(transformer), TMP_OT(other)
     if 'INNER_TEMP' not in all_defined:
         for _tc in ['TEMPERATURE', 'INNER_TEMPERATURE', 'HEAT_SINK_TEMPERATURE',
                     'CABINET_TEMPERATURE', 'INVERTER_TEMPERATURE', 'MODULE_TEMPERATURE',
                     'INTERNAL_TEMP', 'INTERNAL_TEMPERATURE', 'INTERNALTEMPERATURE',
-                    'INVERTER_INNERTEMPERATURE', 'INVERTER_MODULETEMPERATURE']:
+                    'INVERTER_INNERTEMPERATURE', 'INVERTER_MODULETEMPERATURE',
+                    # SunSpec
+                    'TMP_CAB', 'TMP_SNK', 'TMP_TRNS', 'TMP_OT', 'TMPCAB', 'TMPSNK',
+                    'TEMP_CAB', 'TEMP_SNK', 'TEMP_HEATSINK', 'HEATSINK_TEMP',
+                    'TEMP_INVERTER', 'INV_TEMP', 'T_INV', 'T_AMB', 'AMB_TEMP',
+                    # camelCase / SAJ-like
+                    'TEMPERATURE_SINK', 'TEMPERATURE_INVERTER', 'TEMPERATURE_INSIDE',
+                    'TEMPSINK', 'SINKTEMP', 'INVTEMP', 'CABINETTEMP']:
             if _tc in all_defined:
                 lines.append(f'    INNER_TEMP                               = {_tc}')
                 all_defined.add('INNER_TEMP')
@@ -487,15 +550,64 @@ def _gen_register_map(regs_by_cat: dict, mppt: int, total_strings: int,
             if _tc:
                 lines.append(f'    INNER_TEMP                               = {_tc}')
                 all_defined.add('INNER_TEMP')
+            else:
+                # 영문 마지막 수단: TEMP/TMP 접두/접미 (sub-string)
+                _tc2 = next((n for n in sorted(all_defined)
+                             if ('TEMP' in n or n.startswith('TMP_'))
+                             and 'BATT' not in n and 'AMB' not in n
+                             and 'EXT' not in n and 'PV' not in n), None)
+                if _tc2:
+                    lines.append(f'    INNER_TEMP                               = {_tc2}')
+                    all_defined.add('INNER_TEMP')
 
     # INVERTER_MODE — 운전 상태 레지스터 후보 중 존재하는 첫 번째 사용
+    # SunSpec: ST(state), STVND(vendor state), CHA_STATE(charge state), RT_ST(running)
     if 'INVERTER_MODE' not in all_defined:
         for _mc in ['WORK_STATE', 'RUNNING_STATE', 'DEVICE_STATUS', 'SYSTEM_STATUS',
                     'SYSTEM_STATE', 'OPERATING_STATUS', 'RUNNING_STATUS', 'STATUS',
-                    'DEVICE_STATE', 'INVERTER_STATUS']:
+                    'DEVICE_STATE', 'INVERTER_STATUS', 'INVERTER_STATE',
+                    # SunSpec
+                    'ST', 'STVND', 'ST_VND', 'RT_ST', 'CHA_STATE', 'OPSTATE',
+                    'OP_STATE', 'OPERATING_STATE',
+                    # 기타
+                    'WORK_MODE', 'WORKMODE', 'WORK_MD', 'WRK_MD', 'WRKMD',
+                    'STATE_CODE', 'STATUSCODE', 'STAT', 'F_ACTIVE_STATE_CODE']:
             if _mc in all_defined:
                 lines.append(f'    INVERTER_MODE                            = {_mc}')
                 all_defined.add('INVERTER_MODE')
+                break
+    # INVERTER_MODE 마지막 수단: STATUS_BITS, RUN_STATE 같은 합성 이름 fuzzy
+    if 'INVERTER_MODE' not in all_defined:
+        _excl = ('GRID_MODE','BMS_MODE','BATTERY_MODE','METER_MODE','DER_',
+                 'CONTROL_MODE','SD_','SD_CARD','TIME_POINT','MANAGEMENTMODEL',
+                 'MODEL','SAFETY')
+        _cand = next((n for n in sorted(all_defined)
+                      if (('STATUS' in n or 'RUN_STATE' in n or 'OP_STATE' in n
+                           or 'INVERTER_STATE' in n or 'WORK_STATE' in n
+                           or 'OPERATING' in n)
+                          and not any(x in n for x in _excl))), None)
+        if _cand:
+            lines.append(f'    INVERTER_MODE                            = {_cand}')
+            all_defined.add('INVERTER_MODE')
+
+    # FREQUENCY — 주파수
+    if 'FREQUENCY' not in all_defined:
+        for _fq in ['HZ', 'GRID_FREQUENCY', 'GRID_FREQ', 'AC_FREQUENCY',
+                    'OUTPUT_FREQUENCY', 'F_AC', 'FREQ', 'FRQ',
+                    'L1_FREQUENCY', 'PHASE_FREQUENCY', 'GRIDFREQUENCY',
+                    'OUTFREQ', 'OUTPUTFREQ', '주파수']:
+            if _fq in all_defined:
+                lines.append(f'    {"FREQUENCY":40s} = {_fq}')
+                all_defined.add('FREQUENCY')
+                break
+
+    # POWER_FACTOR — 역률 (이름이 짧아 별도)
+    if 'POWER_FACTOR' not in all_defined:
+        for _pf in ['PF', 'POWERFACTOR', 'GRID_POWER_FACTOR', 'OUT_PF',
+                    'COS_PHI', 'COSPHI', '역률']:
+            if _pf in all_defined:
+                lines.append(f'    {"POWER_FACTOR":40s} = {_pf}')
+                all_defined.add('POWER_FACTOR')
                 break
 
     # AC_POWER — 유효전력 레지스터 다양한 후보명 지원 (한글/영문/제조사별)
@@ -504,6 +616,10 @@ def _gen_register_map(regs_by_cat: dict, mppt: int, total_strings: int,
                     'GRID_TOTAL_ACTIVE_POWER_LOW', 'ACTIVE_POWER_LOW', 'AC_ACTIVE_POWER',
                     'OUTPUT_POWER', 'GRID_ACTIVE_POWER', 'TOTAL_OUTPUT_POWER',
                     'ACTIVE_OUTPUT_POWER', 'ACTIVE_OUTPUT_POWER_LOW',
+                    # SunSpec
+                    'W', 'AC_W', 'GRID_W', 'OUT_W', 'TOTAL_W',
+                    # camelCase
+                    'ACTIVEPOWER', 'OUTPUTPOWER', 'TOTALACTIVEPOWER',
                     'PV_POWER']:
             if _ap in all_defined:
                 lines.append(f'    {"AC_POWER":40s} = {_ap}')
@@ -514,7 +630,9 @@ def _gen_register_map(regs_by_cat: dict, mppt: int, total_strings: int,
     if 'R_PHASE_VOLTAGE' not in all_defined:
         _found_r = False
         for _rv in ['L1_VOLTAGE', 'R_VOLTAGE', 'PHASE_A_VOLTAGE', 'UA_VOLTAGE',
-                    'A_PHASE_VOLTAGE', 'A_B_LINEVOLTAGE_PHASE_AVOLTAGE']:
+                    'A_PHASE_VOLTAGE', 'A_B_LINEVOLTAGE_PHASE_AVOLTAGE',
+                    'PH_VPH_A', 'PHVPH_A', 'PPVPH_AB', 'VPH_A', 'VAN', 'V_AN',
+                    'GRID_VOLTAGE_A', 'GRIDVOLTAGEA', 'GRID_VOLTAGE_1']:
             if _rv in all_defined:
                 lines.append(f'    {"R_PHASE_VOLTAGE":40s} = {_rv}')
                 all_defined.add('R_PHASE_VOLTAGE')
@@ -528,7 +646,9 @@ def _gen_register_map(regs_by_cat: dict, mppt: int, total_strings: int,
     if 'T_PHASE_VOLTAGE' not in all_defined:
         _found_t = False
         for _tv in ['L3_VOLTAGE', 'T_VOLTAGE', 'PHASE_C_VOLTAGE', 'UC_VOLTAGE',
-                    'C_PHASE_VOLTAGE', 'C_A_LINE_VOLTAGE_PHASE_CVOLTAGE']:
+                    'C_PHASE_VOLTAGE', 'C_A_LINE_VOLTAGE_PHASE_CVOLTAGE',
+                    'PH_VPH_C', 'PHVPH_C', 'PPVPH_CA', 'VPH_C', 'VCN', 'V_CN',
+                    'GRID_VOLTAGE_C', 'GRIDVOLTAGEC', 'GRID_VOLTAGE_3']:
             if _tv in all_defined:
                 lines.append(f'    {"T_PHASE_VOLTAGE":40s} = {_tv}')
                 all_defined.add('T_PHASE_VOLTAGE')
@@ -542,7 +662,8 @@ def _gen_register_map(regs_by_cat: dict, mppt: int, total_strings: int,
     if 'R_PHASE_CURRENT' not in all_defined:
         _found_rc = False
         for _rc in ['L1_CURRENT', 'R_CURRENT', 'PHASE_A_CURRENT', 'IA_CURRENT',
-                    'A_PHASE_CURRENT', '전류종합']:
+                    'A_PHASE_CURRENT', '전류종합',
+                    'APH_A', 'IPH_A', 'IA', 'I_A', 'GRID_CURRENT_A', 'GRID_CURRENT_1']:
             if _rc in all_defined:
                 lines.append(f'    {"R_PHASE_CURRENT":40s} = {_rc}')
                 all_defined.add('R_PHASE_CURRENT')
@@ -553,15 +674,24 @@ def _gen_register_map(regs_by_cat: dict, mppt: int, total_strings: int,
             all_defined.add('R_PHASE_CURRENT')
     if 'S_PHASE_CURRENT' not in all_defined:
         for _sc in ['L2_CURRENT', 'S_CURRENT', 'PHASE_B_CURRENT', 'IB_CURRENT',
-                    'B_PHASE_CURRENT', '전류종합']:
+                    'B_PHASE_CURRENT', '전류종합',
+                    'APH_B', 'IPH_B', 'IB', 'I_B', 'GRID_CURRENT_B', 'GRID_CURRENT_2']:
             if _sc in all_defined:
                 lines.append(f'    {"S_PHASE_CURRENT":40s} = {_sc}')
+                all_defined.add('S_PHASE_CURRENT')
+                break
+    # S_PHASE_CURRENT 단상 fallback: R 또는 T로 대체 (3상→단상 호환)
+    if 'S_PHASE_CURRENT' not in all_defined:
+        for _fb in ['R_PHASE_CURRENT', 'T_PHASE_CURRENT', 'L1_CURRENT']:
+            if _fb in all_defined:
+                lines.append(f'    {"S_PHASE_CURRENT":40s} = {_fb}  # L2 없음 → 단상 대체')
                 all_defined.add('S_PHASE_CURRENT')
                 break
     if 'T_PHASE_CURRENT' not in all_defined:
         _found_tc2 = False
         for _tc2 in ['L3_CURRENT', 'T_CURRENT', 'PHASE_C_CURRENT', 'IC_CURRENT',
-                     'C_PHASE_CURRENT']:
+                     'C_PHASE_CURRENT',
+                     'APH_C', 'IPH_C', 'IC', 'I_C', 'GRID_CURRENT_C', 'GRID_CURRENT_3']:
             if _tc2 in all_defined:
                 lines.append(f'    {"T_PHASE_CURRENT":40s} = {_tc2}')
                 all_defined.add('T_PHASE_CURRENT')
@@ -574,16 +704,33 @@ def _gen_register_map(regs_by_cat: dict, mppt: int, total_strings: int,
     # TOTAL_ENERGY — 누적 발전량 후보 (kWh/Wh 단위 구분은 modbus_handler가 처리)
     if 'TOTAL_ENERGY' not in all_defined:
         for _te in ['CUMULATIVE_ENERGY', 'TOTAL_ACTIVE_ENERGY', 'ACCUMULATED_ENERGY',
-                    'TOTAL_ENERGY_LOW', 'TOTAL_GENERATED_ENERGY', 'ENERGY_TOTAL']:
+                    'TOTAL_ENERGY_LOW', 'TOTAL_GENERATED_ENERGY', 'ENERGY_TOTAL',
+                    # SunSpec
+                    'WH', 'ACT_WH', 'TOTAL_WH', 'LIFETIME_WH', 'WHEXP', 'WH_EXP',
+                    # camelCase
+                    'TOTALACTIVEENERGY', 'TOTALENERGY', 'LIFETIMEENERGY']:
             if _te in all_defined:
                 lines.append(f'    {"TOTAL_ENERGY":40s} = {_te}')
                 all_defined.add('TOTAL_ENERGY')
                 break
+    # TOTAL_ENERGY 마지막 수단: TOTAL_*_WH_LOW_WORD 형식 (Deye 등 split low/high)
+    if 'TOTAL_ENERGY' not in all_defined:
+        _cand = next((n for n in sorted(all_defined)
+                      if 'TOTAL' in n and ('WH_LOW' in n or 'KWH_LOW' in n
+                                            or n.endswith('_WH') or n.endswith('_KWH'))
+                      and 'PV' not in n and 'DC' not in n
+                      and 'APPARENT' not in n and 'REACTIVE' not in n), None)
+        if _cand:
+            lines.append(f'    {"TOTAL_ENERGY":40s} = {_cand}')
+            all_defined.add('TOTAL_ENERGY')
 
     # PV_POWER alias (없으면 추가)
     if 'PV_POWER' not in all_defined:
         for _pvp in ['PV_TOTAL_INPUT_POWER_LOW', 'TOTAL_PV_POWER_LOW', 'DC_POWER',
-                     'INPUT_POWER', 'DC_INPUT_POWER']:
+                     'INPUT_POWER', 'DC_INPUT_POWER',
+                     # SunSpec
+                     'DCW', 'DC_W', 'TOTAL_DCW',
+                     'PVPOWER', 'TOTALPVPOWER', 'DCPOWER']:
             if _pvp in all_defined:
                 lines.append(f'    {"PV_POWER":40s} = {_pvp}')
                 all_defined.add('PV_POWER')
@@ -592,10 +739,21 @@ def _gen_register_map(regs_by_cat: dict, mppt: int, total_strings: int,
     # MPPT1_CURRENT 추가 후보 (단상/EKOS 등 PV전류 직접 레지스터 사용 인버터)
     if 'MPPT1_CURRENT' not in all_defined:
         for _mc1 in ['태양전지_전류', 'PV_CURRENT', 'DC_CURRENT', 'INPUT_CURRENT',
-                     'PV_INPUT_CURRENT', 'PV1_CURRENT', 'PV_SIDE_CURRENT']:
+                     'PV_INPUT_CURRENT', 'PV1_CURRENT', 'PV_SIDE_CURRENT',
+                     'DCA', 'DC_A', 'IDC', 'I_DC']:
             if _mc1 in all_defined:
                 lines.append(f'    {"MPPT1_CURRENT":40s} = {_mc1}')
                 all_defined.add('MPPT1_CURRENT')
+                break
+
+    # MPPT1_VOLTAGE 추가 후보 (위 MPPT 루프가 못 잡은 SunSpec/단순 명칭)
+    if 'MPPT1_VOLTAGE' not in all_defined:
+        for _mv1 in ['DCV', 'DC_V', 'VDC', 'V_DC', 'PV_VOLTAGE', 'PV_INPUT_VOLTAGE',
+                     'DC_VOLTAGE', 'DC_BUS_VOLTAGE', 'BUS_VOLTAGE',
+                     'PV1_VOLTAGE', 'PV1VOLT']:
+            if _mv1 in all_defined:
+                lines.append(f'    {"MPPT1_VOLTAGE":40s} = {_mv1}')
+                all_defined.add('MPPT1_VOLTAGE')
                 break
 
     # STRING{N}_CURRENT aliases — 한글 인버터 등 STRING_N_CURRENT 형식 통일
@@ -1656,8 +1814,10 @@ def run_stage3(
     # Stage2 H01 매칭(h01_field 설정) 또는 MPPT/String/PV 채널 패턴에 해당하는
     # 레지스터만 RegisterMap에 포함하고, 설정·네트워크·라이선스 등 불필요 레지스터 제거.
     # AC측 전압/전류/온도 관련 레지스터도 alias 생성에 필요하므로 유지.
-    _MPPT_STR_PAT = re.compile(r'^(MPPT|STRING|PV)\d+', re.IGNORECASE)
+    _MPPT_STR_PAT = re.compile(
+        r'^(MPPT|STRING|PV|REG_\d|MOD_\d|MODULE_\d)\d?', re.IGNORECASE)
     # L1/L2/L3, R/S/T Phase, 선간전압, 온도, 주파수, 전력, 에너지 — alias 체인에 필요
+    # SunSpec 모델 101/103/113 + 160 명명도 포함 (Fronius/SolarEdge/SMA)
     _AC_ALIAS_PAT = re.compile(
         r'^(L[123]_|R_PHASE|S_PHASE|T_PHASE|'
         r'A_B_|B_C_|C_A_|AB_LINE|BC_LINE|CA_LINE|'
@@ -1666,7 +1826,17 @@ def run_stage3(
         r'INNER_TEMP|TEMPERATURE|HEAT_SINK|CABINET_TEMP|INVERTER_TEMP|'
         r'FREQUENCY|POWER_FACTOR|AC_POWER|PV_POWER|'
         r'WORK_STATE|RUNNING_STATE|DEVICE_STATUS|SYSTEM_STATUS|'
-        r'ERROR_CODE|ALARM)',
+        r'ERROR_CODE|ALARM|'
+        # SunSpec 표준 short names
+        r'APH_[ABC]|IPH_[ABC]|PH_VPH_[ABC]|PHVPH_[ABC]|PPVPH_(AB|BC|CA)|'
+        r'VPH_[ABC]|V[ABC]N|U[ABC]|I[ABC]|'
+        r'DCV|DCA|DCW|DC_V|DC_A|DC_W|VDC|IDC|'
+        r'TMP_(CAB|SNK|TRNS|OT)|TMPCAB|TMPSNK|TEMP_|HZ|GRID_FREQ|'
+        r'WH$|ACT_WH|TOTAL_WH|LIFETIME_WH|'
+        r'ST$|STVND|ST_VND|RT_ST|CHA_STATE|OPSTATE|OP_STATE|'
+        r'WORK_MODE|WORKMODE|PF$|POWERFACTOR|'
+        # camelCase 흔한 형식
+        r'GRID_VOLTAGE|GRID_CURRENT|OUTPUT_(POWER|VOLTAGE|CURRENT))',
         re.IGNORECASE
     )
     mon_regs = regs_by_cat.get('MONITORING', [])
