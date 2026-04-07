@@ -1090,12 +1090,20 @@ class ModbusHandlerHAT:
             return False
         
         try:
+            # Helper: try multiple alias names (DER_* fallback for newer register files)
+            def _get(*names, default=None):
+                for n in names:
+                    v = getattr(self.RegMap, n, None)
+                    if v is not None:
+                        return v
+                return default
+
             reg_map = {
-                CTRL_INV_ON_OFF: getattr(self.RegMap, 'INVERTER_ON_OFF', None),
-                CTRL_INV_ACTIVE_POWER: getattr(self.RegMap, 'ACTIVE_POWER_PCT', None),
-                CTRL_INV_POWER_FACTOR: getattr(self.RegMap, 'POWER_FACTOR_SET', None),
-                CTRL_INV_REACTIVE_POWER: getattr(self.RegMap, 'REACTIVE_POWER_SET', None),
-                CTRL_INV_IV_SCAN: getattr(self.RegMap, 'IV_SCAN_COMMAND', None),
+                CTRL_INV_ON_OFF: _get('INVERTER_ON_OFF', default=0x0834),
+                CTRL_INV_ACTIVE_POWER: _get('ACTIVE_POWER_PCT', 'DER_ACTIVE_POWER_PCT', default=0x07D3),
+                CTRL_INV_POWER_FACTOR: _get('POWER_FACTOR_SET', 'DER_POWER_FACTOR_SET', default=0x07D0),
+                CTRL_INV_REACTIVE_POWER: _get('REACTIVE_POWER_SET', 'DER_REACTIVE_POWER_PCT', default=0x07D2),
+                CTRL_INV_IV_SCAN: _get('IV_SCAN_COMMAND', default=0x600D),
             }
 
             if control_type == CTRL_INV_CONTROL_INIT:
@@ -2048,43 +2056,58 @@ class ModbusHandlerSerial:
             return None
     
     def write_control(self, control_type: int, value: int):
-        """Write control to inverter via pymodbus"""
+        """Write control to inverter via pymodbus (Serial/TCP)."""
         if not self.connected:
             return False
-        
+
+        # pymodbus 2.x/3.x compatible single register write
+        def _write_reg(addr, val):
+            try:
+                try:
+                    r = self.client.write_register(addr, value=val, slave=self.slave_id)
+                except TypeError:
+                    try:
+                        r = self.client.write_register(addr, value=val, device_id=self.slave_id)
+                    except TypeError:
+                        r = self.client.write_register(addr, val, slave=self.slave_id)
+                return r is not None and not r.isError()
+            except Exception as e:
+                self.logger.error(f"write_register error addr={hex(addr)} val={val}: {e}")
+                return False
+
         try:
+            def _get(*names, default=None):
+                for n in names:
+                    v = getattr(self.RegMap, n, None)
+                    if v is not None:
+                        return v
+                return default
+
             reg_map = {
-                CTRL_INV_ON_OFF: getattr(self.RegMap, 'INVERTER_ON_OFF', None),
-                CTRL_INV_ACTIVE_POWER: getattr(self.RegMap, 'ACTIVE_POWER_PCT', None),
-                CTRL_INV_POWER_FACTOR: getattr(self.RegMap, 'POWER_FACTOR_SET', None),
-                CTRL_INV_REACTIVE_POWER: getattr(self.RegMap, 'REACTIVE_POWER_SET', None),
-                CTRL_INV_IV_SCAN: getattr(self.RegMap, 'IV_SCAN_COMMAND', None),
+                CTRL_INV_ON_OFF: _get('INVERTER_ON_OFF', default=0x0834),
+                CTRL_INV_ACTIVE_POWER: _get('ACTIVE_POWER_PCT', 'DER_ACTIVE_POWER_PCT', default=0x07D3),
+                CTRL_INV_POWER_FACTOR: _get('POWER_FACTOR_SET', 'DER_POWER_FACTOR_SET', default=0x07D0),
+                CTRL_INV_REACTIVE_POWER: _get('REACTIVE_POWER_SET', 'DER_REACTIVE_POWER_PCT', default=0x07D2),
+                CTRL_INV_IV_SCAN: _get('IV_SCAN_COMMAND', default=0x600D),
             }
 
             if control_type == CTRL_INV_CONTROL_INIT:
-                # Control Init: Reset all control values
-                # ON_OFF: 0=Run(ON), 1=Stop(OFF) in register
                 results = []
-                if getattr(self.RegMap, 'INVERTER_ON_OFF', None) is not None:
-                    results.append(self.client.write_register(
-                        self.RegMap.INVERTER_ON_OFF, 0, slave=self.slave_id))
-                if getattr(self.RegMap, 'ACTIVE_POWER_PCT', None) is not None:
-                    results.append(self.client.write_register(
-                        self.RegMap.ACTIVE_POWER_PCT, 1000, slave=self.slave_id))
-                if getattr(self.RegMap, 'POWER_FACTOR_SET', None) is not None:
-                    results.append(self.client.write_register(
-                        self.RegMap.POWER_FACTOR_SET, 1000, slave=self.slave_id))
-                if getattr(self.RegMap, 'REACTIVE_POWER_SET', None) is not None:
-                    results.append(self.client.write_register(
-                        self.RegMap.REACTIVE_POWER_SET, 0, slave=self.slave_id))
-                return all(not r.isError() for r in results) if results else True
-            
+                results.append(_write_reg(_get('INVERTER_ON_OFF', default=0x0834), 0))
+                results.append(_write_reg(_get('ACTIVE_POWER_PCT', 'DER_ACTIVE_POWER_PCT', default=0x07D3), 1000))
+                results.append(_write_reg(_get('POWER_FACTOR_SET', 'DER_POWER_FACTOR_SET', default=0x07D0), 1000))
+                results.append(_write_reg(_get('REACTIVE_POWER_SET', 'DER_REACTIVE_POWER_PCT', default=0x07D2), 0))
+                return all(results)
+
             reg = reg_map.get(control_type)
-            if reg:
-                result = self.client.write_register(reg, value, slave=self.slave_id)
-                return not result.isError()
+            if reg is not None:
+                self.logger.info(f"Modbus WRITE: Reg=0x{reg:04X} Value={value} (ctrl_type={control_type})")
+                ok = _write_reg(reg, value)
+                self.logger.info(f"Modbus WRITE result: {ok}")
+                return ok
             return False
-        except:
+        except Exception as e:
+            self.logger.error(f"write_control error: {e}")
             return False
     
     def read_model_info(self):

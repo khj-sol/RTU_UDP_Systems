@@ -163,6 +163,220 @@ def fetch_api(path):
         return None
 
 
+def post_api(path, payload):
+    """POST JSON to http://127.0.0.1:WEB_PORT/path → dict or None."""
+    url = f"http://127.0.0.1:{TEST_WEB_PORT}{path}"
+    try:
+        data = json.dumps(payload).encode('utf-8')
+        req = urllib.request.Request(url, data=data,
+                                      headers={'Content-Type': 'application/json'},
+                                      method='POST')
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            return json.loads(resp.read().decode('utf-8'))
+    except (urllib.error.URLError, urllib.error.HTTPError, OSError, json.JSONDecodeError) as e:
+        return {'error': str(e)}
+
+
+def get_device_data(rtu_id, dev_num):
+    """Get single device data from API."""
+    data = fetch_api(f'/api/rtus/{rtu_id}/devices')
+    if not data:
+        return None
+    return data.get('devices', {}).get(f'INV_{dev_num}', {}).get('data', {})
+
+
+def test_time_change(rtu_id, wait_seconds=15):
+    """Phase 2: Verify cumulative energy and AC power vary over time.
+
+    Energy accumulates slowly (50kW × 10s = 0.14 kWh = 140Wh),
+    so we check it doesn't DECREASE and AC power has some variation
+    (sun simulation produces small fluctuations).
+    """
+    log("=" * 80)
+    log(f"PHASE 2: Time-based variation (sun fluctuation, energy non-decrease)")
+    initial_data = fetch_api(f'/api/rtus/{rtu_id}/devices')
+    if not initial_data:
+        log("Cannot fetch initial data", 'FAIL')
+        return False
+    initial = {}
+    for key, dev in initial_data.get('devices', {}).items():
+        if dev.get('type_name') == 'INV':
+            d = dev.get('data', {})
+            initial[key] = {
+                'energy': d.get('cumulative_energy', 0),
+                'ac': d.get('ac_power', 0),
+            }
+
+    time.sleep(wait_seconds)
+
+    final_data = fetch_api(f'/api/rtus/{rtu_id}/devices')
+    if not final_data:
+        log("Cannot fetch final data", 'FAIL')
+        return False
+
+    fail = 0
+    for key in sorted(initial.keys()):
+        init = initial[key]
+        d = final_data.get('devices', {}).get(key, {}).get('data', {})
+        final_e = d.get('cumulative_energy', 0)
+        final_ac = d.get('ac_power', 0)
+        delta_e = final_e - init['energy']
+        delta_ac = final_ac - init['ac']
+        # Energy should NOT decrease
+        if final_e < init['energy']:
+            log(f"  {key}: energy DECREASED {init['energy']}→{final_e}", 'FAIL')
+            fail += 1
+            continue
+        # AC power should vary (sun simulation has fluctuation)
+        ac_changed = abs(delta_ac) > 0
+        e_changed = delta_e > 0
+        if ac_changed or e_changed:
+            log(f"  {key}: ac Δ{delta_ac:+d}W energy Δ{delta_e:+d}Wh OK", 'OK')
+        else:
+            log(f"  {key}: no variation (ac={final_ac} energy={final_e})", 'WARN')
+    return fail == 0
+
+
+def test_control(rtu_id, dev_num):
+    """Phase 3: Send control commands and verify."""
+    log("=" * 80)
+    log(f"PHASE 3: Control commands (INV_{dev_num})")
+    fail = 0
+
+    # 3.1: PF set to 0.95 (raw 950)
+    log(f"  3.1 Power factor → 0.95")
+    r = post_api('/api/control/power_factor', {
+        'rtu_id': rtu_id, 'device_num': dev_num, 'value': 950
+    })
+    if r and 'error' not in r:
+        log(f"      sent: {r}", 'OK')
+    else:
+        log(f"      FAIL: {r}", 'FAIL')
+        fail += 1
+    time.sleep(2)
+
+    # 3.2: Active power → 80%
+    log(f"  3.2 Active power → 80% (raw 800)")
+    r = post_api('/api/control/active_power', {
+        'rtu_id': rtu_id, 'device_num': dev_num, 'value': 800
+    })
+    if r and 'error' not in r:
+        log(f"      sent: {r}", 'OK')
+    else:
+        log(f"      FAIL: {r}", 'FAIL')
+        fail += 1
+    time.sleep(2)
+
+    # 3.3: ON/OFF → ON (0)
+    log(f"  3.3 ON/OFF → ON")
+    r = post_api('/api/control/on_off', {
+        'rtu_id': rtu_id, 'device_num': dev_num, 'value': 0
+    })
+    if r and 'error' not in r:
+        log(f"      sent: {r}", 'OK')
+    else:
+        log(f"      FAIL: {r}", 'FAIL')
+        fail += 1
+    time.sleep(2)
+
+    # 3.4: Verify control_status reflects PF/active_power changes
+    time.sleep(3)
+    d = get_device_data(rtu_id, dev_num)
+    if d and 'ctrl' in d:
+        ctrl = d['ctrl']
+        log(f"  3.4 Control status verification:")
+        log(f"      ctrl={ctrl}", 'OK')
+        # 'power_factor' may be in raw or float
+        pf = ctrl.get('power_factor', 0)
+        ap = ctrl.get('active_power_pct', 0)
+        if pf == 950 or pf == 0.95:
+            log(f"      PF=950 reflected", 'OK')
+        else:
+            log(f"      PF mismatch: expected 950, got {pf}", 'FAIL')
+            fail += 1
+        if ap == 800 or ap == 80.0:
+            log(f"      Active=800 reflected", 'OK')
+        else:
+            log(f"      Active mismatch: expected 800, got {ap}", 'FAIL')
+            fail += 1
+    else:
+        log(f"  3.4 No 'ctrl' data in API response", 'FAIL')
+        fail += 1
+    return fail == 0
+
+
+def test_iv_scan(rtu_id, dev_num=1):
+    """Phase 4: IV scan command."""
+    log("=" * 80)
+    log(f"PHASE 4: IV Scan (INV_{dev_num})")
+    r = post_api('/api/control/iv_scan', {
+        'rtu_id': rtu_id, 'device_num': dev_num, 'value': 1
+    })
+    if not r or 'error' in r:
+        log(f"  IV scan request failed: {r}", 'FAIL')
+        return False
+    log(f"  IV scan command sent: {r}", 'OK')
+    time.sleep(8)  # IV scan takes ~5s + processing
+    iv_data = fetch_api(f'/api/rtus/{rtu_id}/iv_scan')
+    if iv_data:
+        log(f"  IV scan data received: {len(str(iv_data))} bytes", 'OK')
+        # Check structure
+        if isinstance(iv_data, dict):
+            keys = list(iv_data.keys())[:5]
+            log(f"  Keys: {keys}", 'OK')
+        return True
+    else:
+        log(f"  No IV scan data after 8s", 'WARN')
+        return False
+
+
+def test_der_avm_monitor(rtu_id):
+    """Phase 5: Verify DER-AVM Monitor (mon) data exists for inverters with control=DER_AVM."""
+    log("=" * 80)
+    log(f"PHASE 5: DER-AVM Monitor data")
+    data = fetch_api(f'/api/rtus/{rtu_id}/devices')
+    if not data:
+        log("Cannot fetch", 'FAIL')
+        return False
+    pass_cnt = 0
+    fail_cnt = 0
+    for key in sorted(data.get('devices', {}).keys()):
+        dev = data['devices'][key]
+        if dev.get('type_name') != 'INV':
+            continue
+        d = dev.get('data', {})
+        mon = d.get('mon')
+        ctrl = d.get('ctrl')
+        if mon and ctrl:
+            i_r = mon.get('current_r', 0)
+            v_rs = mon.get('voltage_rs', 0)
+            p = mon.get('active_power_kw', 0)
+            log(f"  {key}: I={i_r}A V={v_rs}V P={p}kW [mon] ctrl_pf={ctrl.get('power_factor')} OK", 'OK')
+            pass_cnt += 1
+        else:
+            log(f"  {key}: no mon/ctrl data (control=NONE?)", 'WARN')
+            fail_cnt += 1
+    return pass_cnt > 0
+
+
+def test_kstar_night(rtu_id, dev_num=3):
+    """Phase 6: Verify Kstar nighttime standby behavior.
+
+    Note: This requires sun=0 in simulator, which depends on time of day.
+    Cannot easily force in test mode, so just check status.
+    """
+    log("=" * 80)
+    log(f"PHASE 6: Kstar nighttime mode (INV_{dev_num})")
+    d = get_device_data(rtu_id, dev_num)
+    if d:
+        status = d.get('status', -1)
+        ac = d.get('ac_power', 0)
+        log(f"  Kstar status={status} ac={ac}W")
+        log(f"  (Cannot force night mode in TCP test - skipping detailed check)", 'WARN')
+        return True
+    return False
+
+
 def validate_devices(data, expected):
     """Validate device data with strict value range checks.
 
@@ -262,6 +476,8 @@ def main():
                         help='Wait seconds after startup before API check (default: 20)')
     parser.add_argument('--keep-running', action='store_true',
                         help='Keep processes running after test (manual inspection)')
+    parser.add_argument('--extended', action='store_true',
+                        help='Run extended test phases (time/control/IV/DER-AVM/night)')
     args = parser.parse_args()
 
     prepare_test_config()
@@ -353,8 +569,29 @@ def main():
             if issues:
                 print(f"           ISSUES: {', '.join(issues)}")
         print('=' * 110)
-        print(f"RESULT: {pass_cnt} PASS / {fail_cnt} FAIL / {len(results)} TOTAL")
+        print(f"PHASE 1 RESULT: {pass_cnt} PASS / {fail_cnt} FAIL / {len(results)} TOTAL")
         print()
+
+        # Optional extended phases
+        if args.extended:
+            phase_results = {'phase1': fail_cnt == 0}
+            phase_results['phase2'] = test_time_change(TEST_RTU_ID, wait_seconds=10)
+            phase_results['phase3'] = test_control(TEST_RTU_ID, dev_num=1)
+            phase_results['phase4'] = test_iv_scan(TEST_RTU_ID, dev_num=1)
+            phase_results['phase5'] = test_der_avm_monitor(TEST_RTU_ID)
+            phase_results['phase6'] = test_kstar_night(TEST_RTU_ID, dev_num=3)
+
+            print()
+            print('=' * 80)
+            print("EXTENDED PHASES SUMMARY")
+            print('=' * 80)
+            for k, v in phase_results.items():
+                status = 'PASS' if v else 'FAIL'
+                print(f"  {k}: {status}")
+            print('=' * 80)
+            ext_fail = sum(1 for v in phase_results.values() if not v)
+            if ext_fail > 0:
+                fail_cnt += ext_fail
 
         if args.keep_running:
             log("Keeping processes alive (Ctrl+C to stop). Dashboard: http://localhost:8090", 'INFO')

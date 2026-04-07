@@ -635,12 +635,16 @@ class RTUClient:
                            CTRL_INV_ACTIVE_POWER, CTRL_INV_POWER_FACTOR,
                            CTRL_INV_REACTIVE_POWER):
             # Apply to Modbus device
+            self.logger.info(f"H03 ctrl_type={ctrl_type} target_handler={target_handler is not None} target_inv_ctrl={target_inv.get('control') if target_inv else None}")
             if target_handler and hasattr(target_handler, 'write_control'):
                 try:
                     with self._modbus_lock:
-                        target_handler.write_control(ctrl_type, applied_val)
+                        wr_result = target_handler.write_control(ctrl_type, applied_val)
+                    self.logger.info(f"write_control result: {wr_result}")
                 except Exception as e:
                     self.logger.error(f"H03 control apply error: {e}")
+            else:
+                self.logger.warning(f"H03 control SKIPPED - no target_handler or write_control method")
 
             # H05(13) + H05(14) fire-and-forget
             self._send_h05_control_sequence(target_handler, dev_num, model)
