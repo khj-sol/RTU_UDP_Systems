@@ -839,25 +839,25 @@
       + `String I ${mark(str_i.found, str_i.expected)} ${str_i.found}/${str_i.expected}`,
       lvl);
 
-    // 자동 제안: 실제 추출 카운트 vs 사용자 입력
-    // - MPPT V/I 가 expected 보다 작거나 String V/I 가 작으면, 입력 필드 값을 제안
+    // 추출 카운트 vs 사용자 입력 비교
+    // 주의: 자동으로 입력 필드를 덮어쓰지 않는다 (사용자 의도 보존)
+    //       — 추출이 부족하면 사용자가 PDF에 정의된 값으로 직접 조정
     const mppt_actual = Math.max(mppt_v.found, mppt_i.found);
     const str_actual = Math.max(str_v.found, str_i.found);
     const mppt_input = parseInt(document.getElementById('s2-mppt').value) || 0;
     const str_input = parseInt(document.getElementById('s2-str').value) || 0;
     const total_str_input = mppt_input * str_input;
 
-    // 제안 영역 표시 (값 다를 때만)
     let needsRerun = false;
     let suggestion = '';
     if (mppt_actual > 0 && mppt_actual !== mppt_input) {
       suggestion += `MPPT 채널: 입력 ${mppt_input} → 실제 추출 <b style="color:#86efac">${mppt_actual}</b>  `;
       needsRerun = true;
     }
-    if (str_actual > 0 && str_actual !== total_str_input) {
-      // strings_per_mppt 추정: 가능하면 정수
-      const newSpm = mppt_actual > 0 ? Math.ceil(str_actual / mppt_actual) : 1;
-      suggestion += `String 총수: ${total_str_input} → <b style="color:#86efac">${str_actual}</b> (=${mppt_actual}×${newSpm})  `;
+    if (str_actual !== total_str_input) {
+      // 부족(actual < expected): under-extraction — 입력은 그대로 두고 사용자에게 알림만
+      // 초과(actual > expected): 입력이 너무 작음 — 마찬가지로 알림
+      suggestion += `String 총수: 입력 ${total_str_input} → 실제 추출 <b style="color:#86efac">${str_actual}</b>  `;
       needsRerun = true;
     }
     if (needsRerun) {
@@ -865,22 +865,16 @@
         `💡 입력값과 실제 추출 카운트가 다릅니다. ${suggestion}`,
         'warn');
       appendLog('s2',
-        `→ MPPT 채널 수와 String 수를 조정 후 'Stage 2 실행' 다시 클릭`,
+        `→ MPPT/String 수를 확인 후 필요시 'Stage 2 실행' 다시 클릭 (입력값은 자동변경되지 않음)`,
         'warn');
-      // 자동으로 입력 필드에 추천값 채워넣기
-      if (mppt_actual > 0 && mppt_actual !== mppt_input) {
-        document.getElementById('s2-mppt').value = mppt_actual;
-        document.getElementById('s2-mppt').style.background = '#1e3a2a';
-        document.getElementById('s2-mppt').style.borderColor = '#86efac';
-      }
-      if (str_actual > 0 && mppt_actual > 0) {
-        const newSpm = Math.ceil(str_actual / mppt_actual);
-        if (newSpm !== str_input) {
-          document.getElementById('s2-str').value = newSpm;
-          document.getElementById('s2-str').style.background = '#1e3a2a';
-          document.getElementById('s2-str').style.borderColor = '#86efac';
+      // 색상만 강조 — 값은 건드리지 않음
+      ['s2-mppt', 's2-str'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+          el.style.background = '#3a2a1e';
+          el.style.borderColor = '#fbbf24';
         }
-      }
+      });
     } else {
       // 입력값이 정확함 — 입력 필드 색 초기화
       ['s2-mppt', 's2-str'].forEach(id => {

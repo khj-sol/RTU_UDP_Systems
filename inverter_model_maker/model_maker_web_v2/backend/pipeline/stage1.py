@@ -3104,16 +3104,58 @@ def _build_all_suggestions(h01_table: list, categorized: dict,
 
     # ── 1. INFO: Model/SN 미매칭 ──
     info_regs = categorized.get('INFO', [])
-    has_model = any(
-        (any(k in r.definition.lower() for k in ['model', 'device type', 'type code'])
-         and not any(k in r.definition.lower() for k in ['working', 'battery', 'pf', 'init fault']))
-        or r.definition.startswith('DEVICE_MODEL')  # PDF 텍스트 추출 모델명
-        for r in info_regs)
-    has_sn = any(
-        any(k in r.definition.lower() for k in ['serial_number', 'serial n', 'serialn', 'c_serial',
-                                                  'sn[', 'sn0', 'sn1', 'serial no', 'inverter sn',
-                                                  'product code', 'c_serialnumber'])
-        for r in info_regs)
+
+    # synonym_db에서 사용자 선택 INFO 항목 로드 (info_model / info_sn 의 synonyms)
+    _user_model_syns: set = set()
+    _user_sn_syns: set = set()
+    try:
+        from . import load_synonym_db as _load_db
+        _sdb = _load_db()
+        _sdb_fields = _sdb.get('fields', {})
+        for _key, _attr in (('info_model', _user_model_syns),
+                            ('info_sn',    _user_sn_syns)):
+            _entry = _sdb_fields.get(_key)
+            if isinstance(_entry, dict):
+                for _s in _entry.get('synonyms', []) or []:
+                    _attr.add(str(_s).upper().replace(' ', '_'))
+            elif isinstance(_entry, list):
+                for _s in _entry:
+                    _attr.add(str(_s).upper().replace(' ', '_'))
+    except Exception:
+        pass
+
+    def _name_key(reg) -> str:
+        return (reg.definition or '').upper().replace(' ', '_')
+
+    # Model/SN 검사 — INFO 카테고리뿐 아니라 전체 regs 대상으로 키워드 OR 사용자 선택
+    has_model = False
+    for r in info_regs:
+        dl = r.definition.lower()
+        if ((any(k in dl for k in ['model', 'device type', 'type code'])
+             and not any(k in dl for k in ['working', 'battery', 'pf', 'init fault']))
+            or r.definition.startswith('DEVICE_MODEL')):
+            has_model = True
+            break
+    if not has_model and _user_model_syns:
+        for r in all_regs:
+            if _name_key(r) in _user_model_syns:
+                has_model = True
+                break
+
+    _SN_KWS = ['serial_number', 'serial n', 'serialn', 'c_serial',
+               'sn[', 'sn0', 'sn1', 'serial no', 'inverter sn',
+               'product code', 'c_serialnumber']
+    has_sn = False
+    for r in info_regs:
+        dl = r.definition.lower()
+        if any(k in dl for k in _SN_KWS):
+            has_sn = True
+            break
+    if not has_sn and _user_sn_syns:
+        for r in all_regs:
+            if _name_key(r) in _user_sn_syns:
+                has_sn = True
+                break
 
     if not has_model:
         cands = _suggest_info_field(all_regs, 'model')
