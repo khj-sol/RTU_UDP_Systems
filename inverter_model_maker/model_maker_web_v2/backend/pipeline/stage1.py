@@ -3127,41 +3127,76 @@ def _build_all_suggestions(h01_table: list, categorized: dict,
     def _name_key(reg) -> str:
         return (reg.definition or '').upper().replace(' ', '_')
 
-    # Model/SN 검사 — INFO 카테고리뿐 아니라 전체 regs 대상으로 키워드 OR 사용자 선택
+    # Model/SN 검사 — 정의를 정규화(언더스코어/점/하이픈→공백)한 뒤 키워드 매칭
+    # 사용자 선택(synonym_db) 도 함께 확인. INFO 뿐 아니라 all_regs 까지 검색
+    def _info_norm(s: str) -> str:
+        if not s:
+            return ' '
+        n = s.lower().replace('_', ' ').replace('.', ' ').replace('-', ' ')
+        n = re.sub(r'\s+', ' ', n).strip()
+        return ' ' + n + ' '
+
     # Model: 시리얼/모델명/제조사 정보 (대부분 ASCII/STRING 타입)
-    _MODEL_KWS = ['model', 'device type', 'type code', 'manufacturer',
-                  'mfr', 'maker', 'vendor', 'product name', 'product type',
-                  'device info', 'inverter type', 'inverter model']
-    _MODEL_EXCL = ['working', 'battery', 'pf', 'init fault', 'mode', 'state']
+    _MODEL_KWS = [' model', ' manufacturer', ' mfr ', ' maker ', ' vendor ',
+                  ' device type', ' type code', ' product name',
+                  ' product type', ' device info', ' inverter type',
+                  ' inverter model', ' product code']
+    _MODEL_NEG = [' working ', ' battery ', ' init fault ', ' mode ',
+                  ' state ', ' pf ']
+
+    def _is_model_def(reg) -> bool:
+        nd = _info_norm(reg.definition)
+        if any(neg in nd for neg in _MODEL_NEG):
+            return False
+        if any(kw in nd for kw in _MODEL_KWS):
+            return True
+        if reg.definition.startswith('DEVICE_MODEL'):
+            return True
+        return False
+
     has_model = False
     for r in info_regs:
-        dl = r.definition.lower()
-        if ((any(k in dl for k in _MODEL_KWS)
-             and not any(k in dl for k in _MODEL_EXCL))
-            or r.definition.startswith('DEVICE_MODEL')):
+        if _is_model_def(r):
             has_model = True
             break
+    if not has_model:
+        for r in all_regs:
+            if _is_model_def(r):
+                has_model = True
+                break
     if not has_model and _user_model_syns:
         for r in all_regs:
             if _name_key(r) in _user_model_syns:
                 has_model = True
                 break
 
-    # SN: 시리얼번호 OR 펌웨어버전 (둘 다 인버터를 식별 가능, 보통 ASCII)
-    _SN_KWS = ['serial_number', 'serial n', 'serialn', 'c_serial',
-               'sn[', 'sn0', 'sn1', 'serial no', 'inverter sn',
-               'product code', 'c_serialnumber',
-               # 펌웨어 — SN과 동등하게 처리
-               'firmware', 'fw_ver', 'fw ver', 'fw[', 'fw_no', 'fwver',
-               'firmware version', 'firmware ver', 'fw version',
-               'software version', 'soft version', 'soft ver', 'sw_ver',
-               'software ver', 'sw ver', 'control firmware']
+    # SN: 시리얼번호 OR 펌웨어버전 (둘 다 인버터 식별 가능, 보통 ASCII)
+    _SN_KWS = [' serial', ' c serial', ' inverter sn ',
+               ' firmware', ' fw ver', ' fwver', ' fw no', ' fw[',
+               ' software version', ' soft version', ' soft ver',
+               ' software ver', ' sw ver', ' sw version',
+               ' control firmware']
+    # 'sn1' 'sn[' 같은 SN 인덱스 패턴 — 정규화된 토큰으로 단어경계 검사
+    _SN_INDEX_RE = re.compile(r'\bsn\d+\b|\bsn\[')
+
+    def _is_sn_def(reg) -> bool:
+        nd = _info_norm(reg.definition)
+        if any(kw in nd for kw in _SN_KWS):
+            return True
+        if _SN_INDEX_RE.search(nd):
+            return True
+        return False
+
     has_sn = False
     for r in info_regs:
-        dl = r.definition.lower()
-        if any(k in dl for k in _SN_KWS):
+        if _is_sn_def(r):
             has_sn = True
             break
+    if not has_sn:
+        for r in all_regs:
+            if _is_sn_def(r):
+                has_sn = True
+                break
     if not has_sn and _user_sn_syns:
         for r in all_regs:
             if _name_key(r) in _user_sn_syns:
