@@ -1676,12 +1676,83 @@ def validate_code(code: str, mppt: int, total_strings: int,
 
 # ─── 학습 피드백 ─────────────────────────────────────────────────────────────
 
+def _is_junk_for_synonym(defn: str) -> bool:
+    """Stage2 자동매칭 오류로 잘못된 synonym 학습 방지.
+    명백한 junk 패턴(상태/알람/bit/16진 등)이나 너무 긴 이름은 거부."""
+    if not defn:
+        return True
+    if len(defn) > 50:
+        return True
+    dl = defn.lower()
+    # 상태/알람/bit/주소값/reserved 등 학습 금지
+    junk_keywords = [
+        'abnormal', 'fault', 'alarm', 'error', 'reserved', 'bit',
+        'reg_0x', '0x0', '0x1', '0x2', '0x3', '0x4', '0x5', '0x6',
+        '0x7', '0x8', '0x9', '0xa', '0xb', '0xc', '0xd', '0xe', '0xf',
+        'standard', 'function code', 'address', 'null', 'unbalance',
+        'over', 'under', 'leakage', 'insulation', 'v1.', 'v2.', 'v3.',
+        'fw_', 'sys ', 'blue-', 'mv480', 'mv600', 'mv800',
+        '고장', '이상', '트립', 'trip', 'write', 'read',
+        # 한글 고장/알람 키워드 (Ekos L1_VOLTAGE가 '계통정전'을 synonym으로 학습 방지)
+        '정전', '지락', '누전', '과전압', '저전압', '과전류', '저전류',
+        '과주파', '저주파', '과열', '통신이상', '통신오류', '단선',
+        '단락', '퓨즈', '팬이상', '릴레이', '센서',
+        # 영문 샘플링/consistency/detection 키워드
+        'sampling', 'consistency', 'detect', 'detected', 'threshold',
+        'point', 'count', 'byte', 'number',
+    ]
+    return any(k in dl for k in junk_keywords)
+
+
+def _h01_field_conflict(defn: str, target_field: str) -> bool:
+    """Definition이 다른 h01 field의 명백한 의미와 충돌하는지.
+    예: 'L1전류'는 reactive_power에 추가되면 안 됨."""
+    dl = defn.lower().replace(' ', '').replace('_', '')
+    # 키워드 → 해당 h01 field (이 field가 아니면 충돌)
+    field_keywords = {
+        'r_voltage':   ['l1전압', 'r상전압', 'a상전압', 'rphasevoltage',
+                        'l1voltage', 'aphasevoltage', 'uan', 'van'],
+        's_voltage':   ['l2전압', 's상전압', 'b상전압', 'sphasevoltage',
+                        'l2voltage', 'bphasevoltage', 'ubn', 'vbn'],
+        't_voltage':   ['l3전압', 't상전압', 'c상전압', 'tphasevoltage',
+                        'l3voltage', 'cphasevoltage', 'ucn', 'vcn'],
+        'r_current':   ['l1전류', 'r상전류', 'a상전류', 'rphasecurrent',
+                        'l1current', 'aphasecurrent'],
+        's_current':   ['l2전류', 's상전류', 'b상전류', 'sphasecurrent',
+                        'l2current', 'bphasecurrent'],
+        't_current':   ['l3전류', 't상전류', 'c상전류', 'tphasecurrent',
+                        'l3current', 'cphasecurrent'],
+        'frequency':   ['주파수', 'frequency', 'hz', 'fac'],
+        'ac_power':    ['유효전력', 'activepower', 'outputpower'],
+        'reactive_power': ['무효전력', 'reactivepower'],
+        'power_factor':['역률', 'powerfactor', 'cosphi'],
+        'inner_temp':  ['온도', 'temperature', 'tmpcab'],
+        'cumulative_energy': ['누적발전', '적산전력', 'totalenergy',
+                              'cumulativeenergy', 'lifetimeenergy'],
+        'daily_energy':['일발전', 'dailyenergy', 'todayenergy'],
+        'mode':        ['운전상태', '동작상태', 'operatingstate',
+                        'runningstate', 'workmode', 'inverterstate'],
+    }
+    for owner_field, keywords in field_keywords.items():
+        if owner_field == target_field:
+            continue
+        if any(k in dl for k in keywords):
+            return True  # 다른 field가 소유한 의미
+    return False
+
+
 def update_synonym_db(all_regs: List[RegisterRow], synonym_db: dict) -> int:
+    """Stage2 h01_field 매칭 결과를 synonym_db에 학습.
+    잘못된 매칭 누적 방지를 위해 junk/conflict 필터 적용."""
     added = 0
     for reg in all_regs:
         if not reg.h01_field:
             continue
         defn = reg.definition
+        if _is_junk_for_synonym(defn):
+            continue
+        if _h01_field_conflict(defn, reg.h01_field):
+            continue
         for field_name, info in synonym_db.get('fields', {}).items():
             if info.get('h01_field') == reg.h01_field:
                 syns = info.setdefault('synonyms', [])
@@ -1990,12 +2061,18 @@ def run_stage3(
     log(f'코드 저장: {output_name}', 'ok')
 
     # ── 학습 피드백 ──
-    log('학습 피드백 업데이트...')
-    synonym_db = load_synonym_db()
-    syn_added = update_synonym_db(all_regs, synonym_db)
-    if syn_added > 0:
-        save_synonym_db(synonym_db)
-        log(f'  synonym_db: +{syn_added}개 동의어')
+    # synonym_db 자동 학습은 기본 비활성화 (SYNONYM_DB_LEARN 환경변수로 활성화 가능)
+    # 이유: Stage2 자동매칭 오류가 누적되어 DB가 오염됨 → Ekos L1전류→REACTIVE_POWER 같은
+    #       잘못된 매핑이 후속 런에서 정상 정규화를 망가뜨림.
+    # 정상 synonym은 synonym_db.json에 수동 등록하여 관리.
+    syn_added = 0
+    if os.environ.get('SYNONYM_DB_LEARN', '').lower() in ('1', 'true', 'yes'):
+        log('학습 피드백 업데이트... (SYNONYM_DB_LEARN=on)')
+        synonym_db = load_synonym_db()
+        syn_added = update_synonym_db(all_regs, synonym_db)
+        if syn_added > 0:
+            save_synonym_db(synonym_db)
+            log(f'  synonym_db: +{syn_added}개 동의어')
 
     review_history = load_review_history()
     rv_recorded = update_review_history(review_items, manufacturer, review_history)
