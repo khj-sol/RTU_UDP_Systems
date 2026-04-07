@@ -2399,17 +2399,31 @@ def run_stage1(
         if matched_ref:
             enriched = 0
             skipped_conflict = 0
+            # 표준 이름 우선순위
+            _STD = {
+                'L1_VOLTAGE', 'L2_VOLTAGE', 'L3_VOLTAGE',
+                'L1_CURRENT', 'L2_CURRENT', 'L3_CURRENT',
+                'R_PHASE_VOLTAGE', 'S_PHASE_VOLTAGE', 'T_PHASE_VOLTAGE',
+                'R_PHASE_CURRENT', 'S_PHASE_CURRENT', 'T_PHASE_CURRENT',
+                'FREQUENCY', 'AC_POWER', 'PV_POWER', 'POWER_FACTOR',
+                'INNER_TEMP', 'INVERTER_MODE', 'CUMULATIVE_ENERGY', 'TOTAL_ENERGY',
+                'MPPT1_VOLTAGE', 'MPPT1_CURRENT', 'MPPT2_VOLTAGE', 'MPPT2_CURRENT',
+                'ERROR_CODE1', 'ERROR_CODE2', 'ERROR_CODE3',
+            }
             for reg in registers:
                 addr = reg.address if isinstance(reg.address, int) else parse_address(reg.address)
                 if addr is None:
                     continue
-                ref_name = None
+                # 모든 매칭된 ref 파일에서 후보 수집 → 표준 이름 우선 선택
+                candidates = []
                 for proto, addr_map in matched_ref.items():
                     if addr in addr_map:
-                        ref_name = addr_map[addr]
-                        break
-                if not ref_name:
+                        candidates.append(addr_map[addr])
+                if not candidates:
                     continue
+                std_candidates = [c for c in candidates if c in _STD]
+                ref_name = std_candidates[0] if std_candidates else candidates[0]
+
                 # 타입 불일치 검사: Pac→CURRENT 같은 잘못된 치환 차단
                 orig_type = _reg_type_hint(reg.definition)
                 # unit 기반 추가 체크
@@ -2431,6 +2445,11 @@ def run_stage1(
                 if orig_type and ref_type and orig_type != ref_type:
                     skipped_conflict += 1
                     continue  # 타입 충돌 → 레퍼런스 치환 거부
+                # 보수적 정책: orig 타입은 명확한데 ref 타입 불명 → 치환 거부
+                # (SERIAL_NO_5, RESERVED 같은 메타데이터가 측정 필드 이름을 덮지 않게)
+                if orig_type and not ref_type:
+                    skipped_conflict += 1
+                    continue
                 original = reg.definition
                 reg.definition = ref_name
                 if reg.comment and original != ref_name:
