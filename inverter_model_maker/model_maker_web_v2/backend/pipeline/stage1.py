@@ -595,10 +595,29 @@ def extract_registers_from_tables(tables: List[List[list]],
             continue
         fc = fc_list[t_idx] if fc_list and t_idx < len(fc_list) else ''
         table = _clean_table(table)
+        # 첫 행이 데이터 행인지 검사 (0x.. 주소 OR 1~5자리 10진수)
+        # 1-2자리 주소(00~99)는 Input Reg continuation 테이블(Growatt p22 등)에서 흔함.
+        # 단, 이전 표에서 col_map 을 얻었을 때만 1-2자리 허용 (오인 방지).
         first_has_addr = any(
             str(c).strip().startswith('0x') or str(c).strip().startswith('0X') or
             (re.match(r'^\d{3,5}$', str(c).strip()) and 0 <= int(str(c).strip()) <= 65535)
             for c in table[0] if c)
+        # 1-2자리 주소 continuation 표 감지: prev_col_map 있고, 첫 행의 첫 셀이
+        # 0~99 숫자이고, 다음 행도 증가하는 숫자 패턴이면 데이터 행으로 간주
+        if not first_has_addr and prev_col_map and len(table) >= 2:
+            def _is_small_num(s):
+                s = str(s or '').strip()
+                return s.isdigit() and 0 <= int(s) <= 99
+            if _is_small_num(table[0][0]) and _is_small_num(table[1][0]):
+                # 두 행의 첫 셀이 연속 증가하면 continuation data 행
+                try:
+                    n0 = int(str(table[0][0]).strip())
+                    n1 = int(str(table[1][0]).strip())
+                    if 0 < n1 - n0 <= 3:
+                        first_has_addr = True
+                except (ValueError, IndexError):
+                    pass
+
         if first_has_addr:
             data_rows = table
             col_map = _detect_table_columns([], data_rows)
