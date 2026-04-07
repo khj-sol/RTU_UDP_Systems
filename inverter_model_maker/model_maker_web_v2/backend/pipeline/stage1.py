@@ -1476,6 +1476,13 @@ def assign_h01_field(reg: RegisterRow, synonym_db: dict,
                                       '태양전지 전력', '태양전지전력']) or \
        re.search(r'\bpac\b', defn_lower):
         return 'pv_power'
+    # Growatt: 'Ppv H' / 'Ppv L' / 'Ppv_H' / 'Ppv_L' (총 PV 전력 U32 high/low — 채널번호 없음)
+    # Ppv1/Ppv2 등 채널 번호 있는 것은 위 MPPT 분기에서 이미 처리됨
+    if re.match(r'^ppv[\s_]*[hl]\b', defn_lower):
+        return 'pv_power'
+    # Ppv (단독, 채널번호도 H/L도 없음) → 총 pv_power
+    if defn_lower.strip() == 'ppv':
+        return 'pv_power'
     defn_nospace = defn_lower.replace(' ', '')
     # cumulative_energy LOW (소수부/Wh/Low Byte) — comment도 체크
     if any(k in defn_lower for k in ['decimals of total energy', 'decimal of total',
