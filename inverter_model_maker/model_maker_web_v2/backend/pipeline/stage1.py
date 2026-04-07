@@ -3128,11 +3128,16 @@ def _build_all_suggestions(h01_table: list, categorized: dict,
         return (reg.definition or '').upper().replace(' ', '_')
 
     # Model/SN 검사 — INFO 카테고리뿐 아니라 전체 regs 대상으로 키워드 OR 사용자 선택
+    # Model: 시리얼/모델명/제조사 정보 (대부분 ASCII/STRING 타입)
+    _MODEL_KWS = ['model', 'device type', 'type code', 'manufacturer',
+                  'mfr', 'maker', 'vendor', 'product name', 'product type',
+                  'device info', 'inverter type', 'inverter model']
+    _MODEL_EXCL = ['working', 'battery', 'pf', 'init fault', 'mode', 'state']
     has_model = False
     for r in info_regs:
         dl = r.definition.lower()
-        if ((any(k in dl for k in ['model', 'device type', 'type code'])
-             and not any(k in dl for k in ['working', 'battery', 'pf', 'init fault']))
+        if ((any(k in dl for k in _MODEL_KWS)
+             and not any(k in dl for k in _MODEL_EXCL))
             or r.definition.startswith('DEVICE_MODEL')):
             has_model = True
             break
@@ -3142,9 +3147,15 @@ def _build_all_suggestions(h01_table: list, categorized: dict,
                 has_model = True
                 break
 
+    # SN: 시리얼번호 OR 펌웨어버전 (둘 다 인버터를 식별 가능, 보통 ASCII)
     _SN_KWS = ['serial_number', 'serial n', 'serialn', 'c_serial',
                'sn[', 'sn0', 'sn1', 'serial no', 'inverter sn',
-               'product code', 'c_serialnumber']
+               'product code', 'c_serialnumber',
+               # 펌웨어 — SN과 동등하게 처리
+               'firmware', 'fw_ver', 'fw ver', 'fw[', 'fw_no', 'fwver',
+               'firmware version', 'firmware ver', 'fw version',
+               'software version', 'soft version', 'soft ver', 'sw_ver',
+               'software ver', 'sw ver', 'control firmware']
     has_sn = False
     for r in info_regs:
         dl = r.definition.lower()
@@ -3369,27 +3380,39 @@ def _suggest_info_field(all_regs: list, field_type: str) -> list:
     - 2개 미만이면 보조 키워드로 보충
     """
     if field_type == 'model':
-        prim_kws  = ['model', 'device type', 'type code', 'product']
-        prim_excl = ['working', 'battery', 'pf']
-        str_kws   = ['model', 'product']
+        prim_kws  = ['model', 'device type', 'type code', 'product',
+                     'manufacturer', 'mfr', 'maker', 'vendor',
+                     'inverter type', 'inverter model', 'device info']
+        prim_excl = ['working', 'battery', 'pf', 'mode', 'state']
+        str_kws   = ['model', 'product', 'manufacturer', 'mfr', 'vendor']
         sec_kws   = ['type', 'rated', 'name', 'equip', 'identifier', 'kind']
-    else:  # sn
-        prim_kws  = ['serial', 'sn']
+    else:  # sn — 시리얼번호 또는 펌웨어버전
+        prim_kws  = ['serial', 'sn',
+                     'firmware', 'fw_ver', 'fw ver', 'fw[', 'fwver',
+                     'fw_no', 'software version', 'soft ver', 'sw_ver',
+                     'sw ver', 'software ver']
         prim_excl = []
-        str_kws   = ['serial', 'sn']
-        sec_kws   = ['number', 'id', 'code', 'uid', 'barcode', 'lot']
+        str_kws   = ['serial', 'sn', 'firmware', 'fw', 'software', 'sw']
+        sec_kws   = ['number', 'id', 'code', 'uid', 'barcode', 'lot',
+                     'version', 'ver']
 
     def _score_single(reg, kws, excl, str_kws):
         dl = reg.definition.lower()
-        if not any(k in dl for k in kws):
-            return 0, ''
         if any(k in dl for k in excl):
+            return 0, ''
+        kw_hit = any(k in dl for k in kws)
+        is_ascii = (reg.data_type or '').upper() in ('STRING', 'STRINGING', 'ASCII')
+        if not kw_hit:
             return 0, ''
         score = 70
         reason = f'{field_type.upper()} 키워드'
-        if (reg.data_type or '').upper() in ('STRING', 'STRINGING', 'ASCII'):
+        # ASCII/STRING 타입은 Model/SN/FW 의 강력한 신호
+        if is_ascii:
+            score = 90
+            reason = f'{field_type.upper()} + ASCII 타입'
             if any(k in dl for k in str_kws):
-                score, reason = 85, f'{field_type.upper()} + STRING 타입'
+                score = 95
+                reason = f'{field_type.upper()} 키워드 + ASCII'
         return score, reason
 
     # 1차: 주 키워드 매칭
