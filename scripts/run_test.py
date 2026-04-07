@@ -164,9 +164,9 @@ def fetch_api(path):
 
 
 def validate_devices(data, expected):
-    """Validate device data against expected MPPT/String counts.
+    """Validate device data with strict value range checks.
 
-    expected = {'INV_1': ('solarize', 4, 8), ...}
+    expected = {'INV_1': ('solarize', 4, 8, 50000), ...}  # last = nominal_w
     """
     devices = data.get('devices', {})
     results = []
@@ -178,27 +178,81 @@ def validate_devices(data, expected):
             mppt = d.get('mppt', [])
             strings = d.get('strings', [])
             ac = d.get('ac_power', 0)
+            pv = d.get('pv_power', 0)
             freq = d.get('frequency', 0)
-            proto, exp_m, exp_s = expected.get(key, ('?', 0, 0))
+            pf = d.get('power_factor', 0)
+            energy = d.get('cumulative_energy', 0)
+            r_v = d.get('r_voltage', 0)
+            # r_current is in 0.1A units in H01 packet (raw)
+            r_i_raw = d.get('r_current', 0)
+            r_i = r_i_raw / 10.0  # convert to A
+            exp = expected.get(key, ('?', 0, 0, 50000))
+            proto, exp_m, exp_s = exp[0], exp[1], exp[2]
+            nominal = exp[3] if len(exp) > 3 else 50000
             issues = []
+
+            # 1. Channel count
             if len(mppt) != exp_m:
                 issues.append(f"mppt={len(mppt)}/{exp_m}")
             if len(strings) != exp_s:
                 issues.append(f"str={len(strings)}/{exp_s}")
+
+            # 2. AC Power: should be 50%-110% of nominal in sunny test
             if ac <= 0:
-                issues.append(f"ac={ac}W")
-            if freq < 50 or freq > 65:
+                issues.append(f"ac=0W")
+            elif ac < nominal * 0.3 or ac > nominal * 1.5:
+                issues.append(f"ac={ac}W(nom={nominal})")
+
+            # 3. PV Power: should be slightly higher than AC (efficiency)
+            if pv <= 0:
+                issues.append(f"pv=0W")
+            elif pv < ac * 0.9:  # PV should be ≥ AC
+                issues.append(f"pv<ac(pv={pv},ac={ac})")
+
+            # 4. Frequency 59-61 Hz
+            if freq < 58 or freq > 62:
                 issues.append(f"freq={freq}")
-            # MPPT voltage sanity (API returns V already, expect ≥100V when ac>0)
+
+            # 5. Power factor 0.8-1.0
+            if pf < 0.8 or pf > 1.05:
+                issues.append(f"pf={pf}")
+
+            # 6. R phase voltage 200-450V
+            if r_v < 200 or r_v > 450:
+                issues.append(f"rv={r_v}")
+
+            # 7. R phase current > 0 if ac > 0
+            if ac > 0 and r_i <= 0:
+                issues.append(f"ri=0")
+
+            # 8. Energy > 1000 kWh (initial)
+            if energy < 1000:
+                issues.append(f"energy={energy}kWh")
+
+            # 9. MPPT voltage 100-1000V
             for i, m in enumerate(mppt):
                 v = m.get('voltage', 0)
-                if v < 100 and ac > 0:
-                    issues.append(f"MPPT{i+1}_V={v}")
-                    break  # one is enough
+                if v < 100 or v > 1000:
+                    if ac > 0:
+                        issues.append(f"MPPT{i+1}_V={v}")
+                        break
+
+            # 10. MPPT current > 0 if ac > 0
+            for i, m in enumerate(mppt):
+                c = m.get('current', 0)
+                if ac > 0 and c <= 0:
+                    issues.append(f"MPPT{i+1}_I={c}")
+                    break
+
             status = 'OK' if not issues else 'FAIL'
-            results.append((key, proto, status, issues, ac, len(mppt), len(strings)))
+            results.append((key, proto, status, issues,
+                            f'{ac/1000:.1f}', f'{pv/1000:.1f}', freq, pf,
+                            f'{r_v:.0f}/{r_i:.1f}',
+                            len(mppt), len(strings),
+                            f'{energy/1000:.0f}'))
         elif dtype in ('RELAY', 'WEATHER'):
-            results.append((key, dtype.lower(), 'OK', [], 0, 0, 0))
+            results.append((key, dtype.lower(), 'OK', [],
+                            '-', '-', '-', '-', '-', 0, 0, '-'))
     return results
 
 
@@ -266,37 +320,39 @@ def main():
             print('\n'.join(read_log('dash').split('\n')[-30:]))
             return 1
 
-        # 6. Validate
+        # 6. Validate (proto, mppt, str, nominal_W)
         expected = {
-            'INV_1': ('solarize', 4, 8),
-            'INV_2': ('sungrow', 4, 8),
-            'INV_3': ('kstar', 3, 9),
-            'INV_4': ('huawei', 4, 0),
-            'INV_5': ('ekos', 1, 2),
-            'INV_6': ('senergy', 4, 8),
-            'INV_7': ('sofar', 4, 4),
-            'INV_8': ('solis', 4, 0),
-            'INV_9': ('growatt', 2, 8),
-            'INV_10': ('cps', 4, 0),
-            'INV_11': ('sunways', 3, 6),
+            'INV_1':  ('solarize', 4, 8, 50000),
+            'INV_2':  ('sungrow',  4, 8, 50000),
+            'INV_3':  ('kstar',    3, 9, 60000),
+            'INV_4':  ('huawei',   4, 0, 50000),
+            'INV_5':  ('ekos',     1, 2, 10000),
+            'INV_6':  ('senergy',  4, 8, 50000),
+            'INV_7':  ('sofar',    4, 4, 70000),
+            'INV_8':  ('solis',    4, 0, 50000),
+            'INV_9':  ('growatt',  2, 8, 30000),
+            'INV_10': ('cps',      4, 0, 50000),
+            'INV_11': ('sunways',  3, 6, 30000),
         }
         results = validate_devices(data, expected)
 
         print()
-        print('=' * 80)
-        print(f"{'Device':<10} {'Proto':<12} {'Status':<6} {'AC':<10} {'MPPT':<6} {'STR':<6}")
-        print('=' * 80)
+        print('=' * 110)
+        print(f"{'Device':<10} {'Proto':<10} {'St':<5} {'AC':<6} {'PV':<6} {'Freq':<6} {'PF':<6} {'R V/I':<12} {'MPPT':<5} {'STR':<5} {'Energy':<8}")
+        print('=' * 110)
         pass_cnt = fail_cnt = 0
-        for key, proto, status, issues, ac, m, s in results:
-            lvl = 'OK' if status == 'OK' else 'FAIL'
+        for row in results:
+            key, proto, status = row[0], row[1], row[2]
+            issues = row[3]
+            ac, pv, freq, pf, rvi, m, s, energy = row[4], row[5], row[6], row[7], row[8], row[9], row[10], row[11]
             if status == 'OK':
                 pass_cnt += 1
             else:
                 fail_cnt += 1
-            print(f"{key:<10} {proto:<12} {status:<6} {ac:<10} {m:<6} {s:<6}")
+            print(f"{key:<10} {proto:<10} {status:<5} {ac:<6} {pv:<6} {str(freq):<6} {str(pf):<6} {rvi:<12} {m:<5} {s:<5} {energy:<8}")
             if issues:
                 print(f"           ISSUES: {', '.join(issues)}")
-        print('=' * 80)
+        print('=' * 110)
         print(f"RESULT: {pass_cnt} PASS / {fail_cnt} FAIL / {len(results)} TOTAL")
         print()
 
