@@ -490,22 +490,23 @@ def _add_h01_mapping_sheet(wb, s1: dict, openpyxl_module) -> None:
     all_cats = (s1.get('monitoring', []) + s1.get('info', []) +
                 s1.get('status', []) + s1.get('alarm', []))
 
-    # 1차: h01_match 테이블에서 매칭 정보 수집 (DER/HANDLER/PDF 전부 포함)
+    # 1차: h01_match 테이블에서 매칭 정보 수집
+    # Phase C: DER 가상 주소(DEA_*)는 사용자 드롭다운 H열에 없으므로 D열 auto-populate에서 제외
+    # (Stage3의 alias generator가 자동 처리)
     for hm in s1.get('h01_match', []):
         field = hm.get('field', '').strip()
         status = hm.get('status', '')
         if not field or status not in ('O', '~'):
             continue
         source = hm.get('source', '')
+        if source == 'DER':
+            continue  # DEA_* 가상 주소 건너뛰기
         defn = hm.get('definition', '') or ''
         addr = hm.get('address', '') or ''
         name = to_upper_snake(defn) if defn and defn != '-' else ''
         if source == 'HANDLER':
             display_name = 'HANDLER'
             display_addr = ''
-        elif source == 'DER':
-            display_name = name or defn
-            display_addr = addr
         else:
             display_name = name or defn
             display_addr = addr
@@ -540,15 +541,29 @@ def _add_h01_mapping_sheet(wb, s1: dict, openpyxl_module) -> None:
     DATA_START = 4
     n_fields = len(_H01_MAPPING_FIELDS)
 
+    # Phase C: Stage3와 동일한 semantic validator 공유
+    try:
+        from .stage1 import _h01_semantic_valid
+    except ImportError:
+        def _h01_semantic_valid(field, name):
+            return True
+
     # 데이터 행
     for i, (field, desc) in enumerate(_H01_MAPPING_FIELDS):
         row = DATA_START + i
         matched_list = h01_auto.get(field, [])
 
-        # D열: 매칭된 레지스터 전부 표시 (세미콜론 구분)
-        if matched_list:
+        # Phase C: semantic 검증을 통과한 후보만 D열에 auto-populate
+        # 통과 못 하면 D열은 비워서 사용자가 직접 선택하도록 유도
+        valid_matched = [
+            (name, addr) for name, addr in matched_list
+            if _h01_semantic_valid(field, name)
+        ]
+
+        # D열: semantic-valid 매칭만 표시 (세미콜론 구분)
+        if valid_matched:
             parts = []
-            for name, addr in matched_list:
+            for name, addr in valid_matched:
                 parts.append(f'{name} ({addr})' if addr else name)
             matched_display = '; '.join(parts)
         else:
@@ -560,12 +575,16 @@ def _add_h01_mapping_sheet(wb, s1: dict, openpyxl_module) -> None:
 
         cell_d = ws.cell(row=row, column=4, value=matched_display)
         cell_d.border = thin
-        cell_d.fill = auto_fill if matched_list else empty_fill
+        cell_d.fill = auto_fill if valid_matched else empty_fill
 
-        # 추천 후보 (E~G열) — 이미 매칭된 레지스터는 제외
+        # 추천 후보 (E~G열) — 이미 매칭된 것 제외 + semantic 검증 통과만
         matched_names = {e[0] for e in matched_list}
         candidates = _suggest_candidates(field, all_cats)
-        filtered = [c for c in candidates if c['name'] not in matched_names]
+        filtered = [
+            c for c in candidates
+            if c['name'] not in matched_names
+            and _h01_semantic_valid(field, c['name'])
+        ]
         for ci, cand in enumerate(filtered[:3]):
             val = f'{cand["name"]} ({cand["addr_hex"]})' if cand['addr_hex'] else cand['name']
             cell = ws.cell(row=row, column=5 + ci, value=val)
