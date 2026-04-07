@@ -2288,8 +2288,53 @@ def run_stage1(
     if ref_patterns:
         mfr_lower = manufacturer.lower()
         matched_ref = {k: v for k, v in ref_patterns.items() if mfr_lower in k.lower()}
+
+        def _reg_type_hint(name: str) -> str:
+            """레지스터 이름/단위에서 측정 타입 추정.
+            Growatt 등에서 Pac2 H → L3_CURRENT 같은 잘못된 레퍼런스 치환 방지."""
+            if not name:
+                return ''
+            n = name.lower().replace('_', ' ').strip()
+            # 접두사 기반 (Growatt, ABB 등의 관례)
+            # Pac/Ppv = power, Vac/Vpv = voltage, Iac/Ipv = current, Fac = freq
+            if re.match(r'^p(ac|pv|ower|v\d|out)', n) or 'power' in n or 'watt' in n:
+                return 'power'
+            if re.match(r'^v(ac|pv|\d|olt)', n) or 'voltage' in n or '전압' in n:
+                return 'voltage'
+            if re.match(r'^i(ac|pv|\d)', n) or 'current' in n or '전류' in n or 'amp' in n:
+                return 'current'
+            if re.match(r'^f(ac|req)', n) or 'frequency' in n or 'hz' in n:
+                return 'frequency'
+            if 'energy' in n or 'wh' in n or 'kwh' in n:
+                return 'energy'
+            if 'temp' in n or '온도' in n:
+                return 'temperature'
+            if 'factor' in n or re.fullmatch(r'pf\d*', n):
+                return 'power_factor'
+            return ''
+
+        def _ref_type_hint(ref: str) -> str:
+            """레퍼런스 이름에서 측정 타입 추정."""
+            u = ref.upper()
+            if 'VOLTAGE' in u or u.endswith('_V') or 'VOLT' in u:
+                return 'voltage'
+            if 'CURRENT' in u or u.endswith('_A') or 'AMP' in u:
+                return 'current'
+            if 'POWER' in u or u.endswith('_W') or u.endswith('WATT'):
+                return 'power'
+            if 'FREQ' in u or 'HERTZ' in u:
+                return 'frequency'
+            if 'ENERGY' in u or u.endswith('_WH') or u.endswith('_KWH'):
+                return 'energy'
+            if 'TEMP' in u or 'TMP' in u:
+                return 'temperature'
+            if 'POWER_FACTOR' in u or u.endswith('_PF'):
+                return 'power_factor'
+            return ''
+
         if matched_ref:
             enriched = 0
+            skipped_conflict = 0
             for reg in registers:
                 addr = reg.address if isinstance(reg.address, int) else parse_address(reg.address)
                 if addr is None:
@@ -2299,16 +2344,40 @@ def run_stage1(
                     if addr in addr_map:
                         ref_name = addr_map[addr]
                         break
-                if ref_name:
-                    original = reg.definition
-                    reg.definition = ref_name
-                    if reg.comment and original != ref_name:
-                        reg.comment = f'{original} | {reg.comment}'
-                    elif original != ref_name:
-                        reg.comment = original
-                    enriched += 1
-            if enriched:
-                log(f'  레퍼런스 enrichment: {enriched}/{len(registers)}개 ({list(matched_ref.keys())})')
+                if not ref_name:
+                    continue
+                # 타입 불일치 검사: Pac→CURRENT 같은 잘못된 치환 차단
+                orig_type = _reg_type_hint(reg.definition)
+                # unit 기반 추가 체크
+                unit_lower = (reg.unit or '').lower()
+                if not orig_type:
+                    if unit_lower in ('v',) or 'volt' in unit_lower:
+                        orig_type = 'voltage'
+                    elif unit_lower in ('a',) or unit_lower == 'amp':
+                        orig_type = 'current'
+                    elif unit_lower in ('w', 'kw') or 'watt' in unit_lower:
+                        orig_type = 'power'
+                    elif 'va' == unit_lower or unit_lower == 'kva':
+                        orig_type = 'power'
+                    elif unit_lower in ('hz',):
+                        orig_type = 'frequency'
+                    elif unit_lower in ('wh', 'kwh'):
+                        orig_type = 'energy'
+                ref_type = _ref_type_hint(ref_name)
+                if orig_type and ref_type and orig_type != ref_type:
+                    skipped_conflict += 1
+                    continue  # 타입 충돌 → 레퍼런스 치환 거부
+                original = reg.definition
+                reg.definition = ref_name
+                if reg.comment and original != ref_name:
+                    reg.comment = f'{original} | {reg.comment}'
+                elif original != ref_name:
+                    reg.comment = original
+                enriched += 1
+            msg = f'  레퍼런스 enrichment: {enriched}/{len(registers)}개'
+            if skipped_conflict:
+                msg += f' (타입충돌 {skipped_conflict}개 건너뜀)'
+            log(msg)
         else:
             log(f'  레퍼런스 enrichment: 해당 제조사({manufacturer}) 없음')
 
