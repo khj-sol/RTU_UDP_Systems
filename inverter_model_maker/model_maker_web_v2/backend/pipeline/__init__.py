@@ -180,6 +180,10 @@ def load_reference_patterns() -> Dict[str, Dict[int, str]]:
     """
     common/*_registers.py에서 RegisterMap 속성 → 주소 매핑 수집
     Returns: {protocol_name: {address: attr_name}}
+
+    주의: 같은 주소에 서로 다른 의미의 속성이 있으면(예: Growatt 0x000D =
+    FREQUENCY AND FW_VERSION2M), 해당 주소는 매핑에서 제외한다.
+    → FC03 vs FC04 cross-table 충돌을 자동 회피.
     """
     patterns = {}
     py_files = glob.glob(os.path.join(COMMON_DIR, '*_registers.py'))
@@ -193,26 +197,39 @@ def load_reference_patterns() -> Dict[str, Dict[int, str]]:
             rm = getattr(mod, 'RegisterMap', None)
             if rm is None:
                 continue
-            addr_map = {}
-            # 별칭 감지: 같은 주소를 가리키는 속성이 여러 개면 원본(비별칭) 우선
-            # 우선순위: L1/L2/L3 > R/S/T, 언더스코어 포함 긴 이름 > 짧은 별칭
+            # 주소별로 모든 속성 수집 (별칭 제외)
             alias_prefixes = ('R_', 'S_', 'T_', 'R_PHASE', 'S_PHASE', 'T_PHASE',
                               'FIRMWARE_VERSION', 'AC_POWER', 'PV_POWER', 'FREQUENCY',
                               'TOTAL_ENERGY', 'GRID_POWER', 'ACTION_MODE',
                               'POWER_FACTOR_SET', 'REACTIVE_POWER_SET', 'REACTIVE_POWER_PCT',
-                              'ACTIVE_POWER_PCT', 'OPERATION_MODE', 'IV_SCAN_COMMAND', 'IV_SCAN_STATUS')
+                              'ACTIVE_POWER_PCT', 'OPERATION_MODE', 'IV_SCAN_COMMAND', 'IV_SCAN_STATUS',
+                              'INNER_TEMP', 'POWER_FACTOR', 'CUMULATIVE_ENERGY', 'DAILY_ENERGY',
+                              'INVERTER_MODE', 'L1_VOLTAGE', 'L2_VOLTAGE', 'L3_VOLTAGE',
+                              'L1_CURRENT', 'L2_CURRENT', 'L3_CURRENT', 'MPPT1_VOLTAGE',
+                              'MPPT1_CURRENT', 'MPPT2_VOLTAGE', 'MPPT2_CURRENT',
+                              'ERROR_CODE1', 'ERROR_CODE2', 'ERROR_CODE3')
+            addr_to_names = {}  # {addr: [(is_alias, attr_name), ...]}
             for attr in sorted(dir(rm)):
                 if attr.startswith('_'):
                     continue
                 val = getattr(rm, attr)
                 if isinstance(val, int) and 0 <= val <= 0xFFFF:
-                    is_alias = any(attr == p or  # 정확히 일치하는 경우만 별칭
+                    is_alias = any(attr == p or
                                    (attr.startswith(p) and not attr[len(p):].startswith('_'))
                                    for p in alias_prefixes)
-                    if val in addr_map and not is_alias:
-                        addr_map[val] = attr
-                    elif val not in addr_map:
-                        addr_map[val] = attr
+                    addr_to_names.setdefault(val, []).append((is_alias, attr))
+            # 충돌 검사: 한 주소에 non-alias 이름이 2개 이상이면 의미 충돌 → 제외
+            addr_map = {}
+            for addr, names in addr_to_names.items():
+                non_aliases = [n for a, n in names if not a]
+                aliases = [n for a, n in names if a]
+                if len(non_aliases) >= 2:
+                    # 서로 다른 의미가 한 주소에 → 신뢰 불가, 매핑 제외
+                    continue
+                if non_aliases:
+                    addr_map[addr] = non_aliases[0]
+                elif aliases:
+                    addr_map[addr] = aliases[0]
             patterns[proto] = addr_map
         except Exception:
             continue
