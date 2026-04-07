@@ -40,7 +40,7 @@ class RegisterMap:
     # =========================================================================
     # Monitoring Data
     # =========================================================================
-    POWER_FACTOR                             = 0x03F8  # DEA_POWER_FACTOR (S32, 0.001), scale A
+    POWER_FACTOR                             = 0x0BEF  # 3055 Power factor U16 0.001 (PDF KSG1-250K)
     TEMPERATURE                              = 0x0001  # U16
     REACTIVE_POWER                           = 0x0003  # U16
     PV_PARALLEL_OPEN                         = 0x0007  # U16
@@ -204,13 +204,13 @@ class RegisterMap:
     T_VOLTAGE                                = L3_VOLTAGE
     T_CURRENT                                = L3_CURRENT
 
-    # --- Standard handler compatibility aliases (H01 Body Type 4 required) ---
-    R_PHASE_VOLTAGE                          = L1_VOLTAGE
-    S_PHASE_VOLTAGE                          = L2_VOLTAGE
-    T_PHASE_VOLTAGE                          = L3_VOLTAGE
-    R_PHASE_CURRENT                          = L1_CURRENT
-    S_PHASE_CURRENT                          = S_PHASE_GRID_TIED_CURRENT
-    T_PHASE_CURRENT                          = L3_CURRENT
+    # --- PDF KSG1-250K 기준 정정 주소 ---
+    R_PHASE_VOLTAGE                          = 0x0BC6  # 3014 RS voltage
+    S_PHASE_VOLTAGE                          = 0x0BC7  # 3015 ST voltage
+    T_PHASE_VOLTAGE                          = 0x0BC8  # 3016 TR voltage
+    R_PHASE_CURRENT                          = 0x0BCC  # 3020 R current
+    S_PHASE_CURRENT                          = 0x0BCD  # 3021 S current
+    T_PHASE_CURRENT                          = 0x0BCE  # 3022 T current
 
     # --- MPPT alias (modbus_handler: MPPT{N}_ 형식) — PDF 기반 정정 ---
     MPPT1_VOLTAGE                            = 0x0BB8  # PV1_INPUT_VOLTAGE
@@ -247,7 +247,9 @@ class RegisterMap:
     CUMULATIVE_ENERGY                        = 0x0BDE  # PDF Kstar CUMULATIVE_PRODUCTION_L
     CUMULATIVE_ENERGY_LOW                    = 0x0BDE
     TOTAL_ENERGY                             = 0x0BDE
-    FREQUENCY                                = 0x0C1A  # PDF Kstar GRID_FREQUENCY
+    FREQUENCY                                = 0x0BC9  # 3017 RS grid freq 0.01Hz
+    AC_POWER                                 = 0x0BCF  # 3023 Grid-tied power S32 1W
+    PV_POWER                                 = 0x0BBE  # 3006 PV1 input power S32 1W
     DER_AVM_DIGITAL_METERCONNECT_STATUS      = 0x1210
 
     # =========================================================================
@@ -562,7 +564,7 @@ StatusConverter = KstarStatusConverter
 SCALE = {
     'voltage':            0.1,
     'current':            0.01,
-    'power':              0.1,
+    'power':              1.0,    # Kstar power is in 1W (PDF gain 1)
     'frequency':          0.01,
     'power_factor':       0.001,
     'dea_current':        0.1,
@@ -677,14 +679,14 @@ def generate_iv_current_data(isc, voc, v_min, data_points=64):
 
 
 DATA_TYPES = {
-    'POWER_FACTOR': 'S16',
+    'POWER_FACTOR': 'U16',
     'TEMPERATURE': 'U16',
     'FREQUENCY': 'U16',
     'REACTIVE_POWER': 'U16',
     'L1_VOLTAGE': 'U16',
     'PV_PARALLEL_OPEN': 'U16',
     'INVERTER_CURRENT_OVER': 'U16',
-    'PV_POWER': 'U32',
+    'PV_POWER': 'S32',
     'L2_VOLTAGE': 'U16',
     'ERROR_CODE2': 'U16',
     'BIT17': 'U16',
@@ -802,7 +804,7 @@ DATA_TYPES = {
     'SECOND': 'U16',
     'REG_485ADDRESS2': 'U16',
     'L1_CURRENT': 'U16',
-    'AC_POWER': 'U32',
+    'AC_POWER': 'S32',
     'INTERNAL_USE_REGISTERSMALL_THREE_PHASE': 'U16',
     'SETTING_VALUE_OF_RATEDPOWER_FOR_ANTI_BACKFLOW': 'U16',
     'MODEL_NAME_BASE': 'ASCII',

@@ -351,7 +351,6 @@ class RegisterMap:
     DER_ACTIVE_POWER_PCT                     = 0x07D3
     INVERTER_ON_OFF                          = 0x0834
     MPPT_NUMBER                              = 0x1A4A  # default MPPT count register
-    MPPT1_VOLTAGE                            = PV_VOLTAGE
     CUMULATIVE_ENERGY_LOW                    = CUMULATIVE_ENERGY
     DER_AVM_DIGITAL_METERCONNECT_STATUS      = 0x1210
 
@@ -1948,11 +1947,11 @@ StatusConverter = HuaweiStatusConverter
 
 # Scale factors
 SCALE = {
-    'voltage':            0.1,
-    'current':            0.01,
-    'power':              0.1,
-    'frequency':          0.01,
-    'power_factor':       0.001,
+    'voltage':            0.1,    # PDF gain=10
+    'current':            0.001,  # PDF gain=1000 (S32)
+    'power':              1.0,    # PDF gain=1000 kW → raw in W
+    'frequency':          0.01,   # PDF gain=100
+    'power_factor':       0.001,  # PDF gain=1000
     'dea_current':        0.1,
     'dea_voltage':        0.1,
     'dea_active_power':   0.1,
