@@ -198,72 +198,92 @@ def distribute_alarms(alarm_regs: List[RegisterRow]) -> Dict[str, List[RegisterR
     # score 99 제외 (Appendix 코드값, Work State 값 등)
     valid = [r for r in scored if _alarm_score(r) < 99]
     result = {'alarm1': [], 'alarm2': [], 'alarm3': [], 'dropped': []}
+    slots = ['alarm1', 'alarm2', 'alarm3']
 
     if not valid:
         return result
 
-    # ── 1) 번호 붙은 시퀀스 우선 (Huawei [Remotesignal]Alarm 1/2/3,
-    #        CPS-Comm Fault0/1/2 Alarm Register, Growatt System fault word 0/1/2) ──
-    def _seq_index(reg):
+    # ── 1) 번호 붙은 시퀀스 그룹 식별 ──
+    # 시퀀스 우선순위 (높을수록 선호):
+    #   1. Huawei [Remotesignal]Alarm 1/2/3
+    #   2. CPS-Comm FaultN Alarm Register
+    #   3. Growatt Inverter fault code + Inverter Warning code (+ System fault word 0 보충)
+    #   4. Growatt System fault word 0/1/2
+    SEQ_PRIORITY = ['remotesignal_alarm', 'faultN_alarm_register',
+                    'inverter_code', 'system_fault_word']
+
+    def _seq_key(reg):
         d = (reg.definition or '').lower().replace('_', ' ')
-        # [Remotesignal]Alarm N
         m = _re.search(r'remotesignal\]?\s*alarm\s*(\d+)', d)
         if m:
             return ('remotesignal_alarm', int(m.group(1)))
-        # FaultN Alarm Register / PFault → 0
         m = _re.search(r'\bfault(\d)\b.*alarm.*register', d)
         if m:
             return ('faultN_alarm_register', int(m.group(1)))
-        # System fault word N
-        m = _re.search(r'system\s*fault\s*word\s*(\d+)', d)
-        if m:
-            return ('system_fault_word', int(m.group(1)))
-        # Inverter fault code / Inverter Warning code (Growatt) → 시퀀스 1/2 처럼 처리
         if 'inverter fault code' in d:
             return ('inverter_code', 1)
         if 'inverter warning code' in d:
             return ('inverter_code', 2)
+        m = _re.search(r'system\s*fault\s*word\s*(\d+)', d)
+        if m:
+            return ('system_fault_word', int(m.group(1)))
         return None
 
-    # 그룹별로 묶기
     seq_groups = {}
     for r in valid:
-        si = _seq_index(r)
-        if si:
-            key, idx = si
+        sk = _seq_key(r)
+        if sk:
+            key, idx = sk
             seq_groups.setdefault(key, []).append((idx, r))
 
-    # 가장 큰 시퀀스 (3개 우선)
-    best_seq = None
-    for key, items in seq_groups.items():
-        items.sort(key=lambda t: t[0])
-        if best_seq is None or len(items) > len(best_seq):
-            best_seq = items
+    chosen_seq = None
+    chosen_key = None
+    for key in SEQ_PRIORITY:
+        if key in seq_groups:
+            items = sorted(seq_groups[key], key=lambda t: t[0])
+            chosen_seq = [t[1] for t in items]
+            chosen_key = key
+            break
 
-    if best_seq and len(best_seq) >= 1:
-        slots = ['alarm1', 'alarm2', 'alarm3']
-        for i in range(3):
-            if i < len(best_seq):
-                result[slots[i]].append(best_seq[i][1])
-            else:
-                # 시퀀스 부족 시 같은 시퀀스의 첫 항목으로 alias
-                result[slots[i]].append(best_seq[0][1])
-        # 나머지는 dropped
-        used = {id(t[1]) for t in best_seq}
+    if chosen_seq:
+        # 시퀀스 채우기
+        for i in range(min(3, len(chosen_seq))):
+            result[slots[i]].append(chosen_seq[i])
+        # 부족하면 보충 — inverter_code(2개)는 system_fault_word 첫 항목으로 alarm3 보충
+        if len(chosen_seq) < 3 and chosen_key == 'inverter_code':
+            sfw = sorted(seq_groups.get('system_fault_word', []), key=lambda t: t[0])
+            if sfw:
+                result['alarm3'].append(sfw[0][1])
+        # 그래도 부족하면 alarm1 으로 alias
+        for s in slots:
+            if not result[s] and result['alarm1']:
+                result[s].append(result['alarm1'][0])
+        used = {id(r) for r in chosen_seq}
         for r in valid:
             if id(r) not in used:
                 result['dropped'].append(r)
         return result
 
-    # ── 2) 시퀀스 없음 — score 순으로 채우고, 부족 시 alarm1 으로 alias ──
-    slots = ['alarm1', 'alarm2', 'alarm3']
+    # ── 2) 시퀀스 없음 — score 0 우선 + alias ──
+    score0 = [r for r in valid if _alarm_score(r) == 0]
+    if score0:
+        for i in range(3):
+            if i < len(score0):
+                result[slots[i]].append(score0[i])
+            else:
+                # 부족 시 alarm1 으로 alias
+                result[slots[i]].append(score0[0])
+        for r in valid:
+            if r not in score0[:3]:
+                result['dropped'].append(r)
+        return result
+
+    # ── 3) score 0 도 없음 — 일반 정렬, 부족 시 alias ──
     for i, reg in enumerate(valid):
         if i < 3:
             result[slots[i]].append(reg)
         else:
             result['dropped'].append(reg)
-    # 단일 alarm 만 있으면 alarm2/3 도 alarm1 으로 alias
-    # (Sungrow Fault/Alarm code 1, CPS-SCA ErrorCodeTable 등)
     if result['alarm1'] and not result['alarm2']:
         result['alarm2'].append(result['alarm1'][0])
     if result['alarm1'] and not result['alarm3']:
