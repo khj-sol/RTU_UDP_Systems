@@ -2320,10 +2320,27 @@ def build_h01_match_table(categorized: dict, meta: dict) -> List[dict]:
     # 강제로 가져와 MODULE_CURRENT/TEMPERATER_AVE/DEBUG_DATA 같은 무관 레지스터를
     # voltage 로 잘못 매칭하는 원인이 되었음. 이름 기반 매칭 결과만 신뢰한다.
 
+    # 반대 키워드 차단: voltage 슬롯에 current/curr/전류 들어간 정의는 거부, 반대도 동일
+    # (Module Voltage/Module Current 같은 모호 이름이 mppt2/3 등에 잘못 매칭되는 것 방지)
+    def _opposite_keyword_reject(reg_obj, mtype: str) -> bool:
+        if not reg_obj or not reg_obj.definition:
+            return False
+        dl = reg_obj.definition.lower()
+        if mtype == 'voltage':
+            has_v = any(k in dl for k in ['voltage', 'volt', 'vpv', '전압'])
+            has_i = any(k in dl for k in ['current', 'curr', 'ipv', '전류'])
+            return has_i and not has_v
+        else:  # current
+            has_v = any(k in dl for k in ['voltage', 'volt', 'vpv', '전압'])
+            has_i = any(k in dl for k in ['current', 'curr', 'ipv', '전류'])
+            return has_v and not has_i
+
     for n in range(1, max_mppt + 1):
         for mtype in ['voltage', 'current']:
             field = f'mppt{n}_{mtype}'
             reg = _find_matched_reg(categorized, field)
+            if _opposite_keyword_reject(reg, mtype):
+                reg = None  # 잘못된 매칭 → (없음) 처리
 
             # voltage인 경우 보정된 주소와 비교
             # current/curr/전류 키워드 가진 레지스터는 voltage 슬롯에 매칭 금지
@@ -2435,6 +2452,8 @@ def build_h01_match_table(categorized: dict, meta: dict) -> List[dict]:
     for n in range(1, max_string + 1):
         field = f'string{n}_current'
         reg = _find_matched_reg(categorized, field)
+        if _opposite_keyword_reject(reg, 'current'):
+            reg = None
         if reg:
             rows.append(_make_pdf_match_row(field, reg))
         else:
