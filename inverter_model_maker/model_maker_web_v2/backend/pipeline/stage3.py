@@ -216,6 +216,48 @@ def _parse_s2_reg_row(cells, header, category):
 
 # ─── 레퍼런스 ErrorCode BITS 로딩 ───────────────────────────────────────────
 
+def _derive_model_token(pdf_filename: str, manufacturer: str) -> str:
+    """PDF 파일명에서 같은 제조사 내 프로토콜 구분용 모델 토큰 추출.
+
+    예시:
+      CPS-PV_CPS-SCA-M_Modbus_Protocol_V4.16_EN.pdf → 'SCA_M'
+      CPS-PV_Modbus_Comm.pdf → 'Comm'
+      Sungrow-PV_StringInverter_Modbus_Protocol_v1137.pdf → 'StringInverter'
+      Sungrow-PV_ti_20230117_communication-protocol_v1.1.53_en.pdf → 'ti'
+      Huawei-PV_SUN2000MC_Modbus_Interface_Definitions.pdf → 'SUN2000MC'
+      Goodwe-PV_Modbus_Protocol.pdf → '' (구분 토큰 없음)
+    """
+    import re as _re
+    if not pdf_filename:
+        return ''
+    base = os.path.splitext(os.path.basename(pdf_filename))[0]
+    parts = _re.split(r'[-_\s]+', base)
+    mfr_low = (manufacturer or '').lower()
+    skip = {'pv', 'hyb', 'hybrid', 'modbus', 'protocol', 'rtu', 'rs485',
+            'en', 'kr', 'korea', 'communication', 'interface', 'definitions',
+            'inverter', 'map'}
+    out_parts = []
+    for p in parts:
+        pl = p.lower()
+        if not pl or pl == mfr_low:
+            continue
+        if pl in skip:
+            continue
+        if _re.match(r'^v\d', pl):  # v1.2, V19, v120
+            continue
+        if _re.match(r'^\d{6,}$', pl):  # 날짜 20230117
+            continue
+        if _re.match(r'^\d+(\.\d+)+$', pl):  # 1.2.4, 4.16
+            continue
+        if pl.isdigit():
+            continue
+        out_parts.append(p)
+    token = '_'.join(out_parts)
+    token = _re.sub(r'[^A-Za-z0-9_]', '_', token)
+    token = _re.sub(r'_+', '_', token).strip('_')
+    return token
+
+
 def _load_error_bits_from_reference(manufacturer: str) -> dict:
     """레퍼런스 REF_*_registers.py 또는 {제조사}_*_registers.py에서 ErrorCode BITS 로드"""
     import glob
@@ -2216,8 +2258,18 @@ def run_stage3(
     # regs_by_cat 에 phase_type 저장 — _gen_register_map 에서 사용
     regs_by_cat['_phase_type'] = phase_type
 
+    # 프로토콜 모델 토큰 — 같은 제조사 내 복수 프로토콜 구분용
+    # 예: CPS-PV_CPS-SCA-M_Modbus_Protocol_V4.16_EN.pdf → 'SCA_M'
+    #     Sungrow-PV_StringInverter_... → 'StringInverter'
+    #     Sungrow-PV_ti_... → 'ti'
+    _model_token = _derive_model_token(meta.get('원본 파일', ''), manufacturer)
+
     # 프로토콜명 정규화 (긴 파일명 → 짧은 프로토콜명)
-    protocol_name = manufacturer.lower()
+    # 모델 토큰이 있으면 protocol_name 에도 포함하여 device_models.ini 충돌 방지
+    if _model_token:
+        protocol_name = f'{manufacturer}_{_model_token}'.lower()
+    else:
+        protocol_name = manufacturer.lower()
     protocol_version = meta.get('프로토콜 버전', '')
 
     # 인버터 타입 감지 (PDF 파일명 기반): HYB / PV
@@ -2298,7 +2350,9 @@ def run_stage3(
         log(f'    {"✓" if ok else "✗"} {check_name}')
 
     # ── 파일 저장 ──
-    output_name = f'{manufacturer}_{inverter_type}{capacity_str}_registers.py'
+    # 모델 토큰이 있으면 파일명에 포함 (같은 제조사 복수 프로토콜 충돌 방지)
+    _model_part = f'_{_model_token}' if _model_token else ''
+    output_name = f'{manufacturer}_{inverter_type}{_model_part}{capacity_str}_registers.py'
     output_path = os.path.join(output_dir, output_name)
     with open(output_path, 'w', encoding='utf-8') as f:
         f.write(code)
