@@ -617,11 +617,27 @@ def _add_h01_mapping_sheet(wb, s1: dict, openpyxl_module) -> None:
         matched_list = h01_auto.get(field, [])
 
         # Phase C: semantic 검증을 통과한 후보만 D열에 auto-populate
-        # 통과 못 하면 D열은 비워서 사용자가 직접 선택하도록 유도
+        # HANDLER/DEA_* 는 semantic valid 통과 (Stage3 에서 자동 alias 처리)
         valid_matched = [
             (name, addr) for name, addr in matched_list
             if _h01_semantic_valid(field, name)
         ]
+
+        # Fallback: h01_match 에 없거나 HANDLER 만 있으면 all_cats 에서
+        # _suggest_candidates 로 최고 점수 후보를 자동 채택 (top 1)
+        # HANDLER 뿐이면 실제 PDF 레지스터도 함께 표시
+        if (not valid_matched) or all(n == 'HANDLER' for n, _ in valid_matched):
+            candidates = _suggest_candidates(field, all_cats)
+            auto_candidates = [
+                c for c in candidates
+                if _h01_semantic_valid(field, c['name'])
+            ]
+            if auto_candidates:
+                # 드롭다운 H 열에 존재하는 것만 자동 채택 (실제 추출 레지스터)
+                for ac in auto_candidates[:1]:  # 최고 점수 1개만 auto
+                    nm = ac['name']
+                    if nm in name_to_fcs and not any(e[0] == nm for e in valid_matched):
+                        valid_matched.append((nm, ac.get('addr_hex', '')))
 
         # D열: semantic-valid 매칭만 표시 (세미콜론 구분)
         if valid_matched:
@@ -641,7 +657,7 @@ def _add_h01_mapping_sheet(wb, s1: dict, openpyxl_module) -> None:
         cell_d.fill = auto_fill if valid_matched else empty_fill
 
         # 추천 후보 (E~G열) — 이미 매칭된 것 제외 + semantic 검증 통과만
-        matched_names = {e[0] for e in matched_list}
+        matched_names = {e[0] for e in matched_list} | {n for n, _ in valid_matched}
         candidates = _suggest_candidates(field, all_cats)
         filtered = [
             c for c in candidates

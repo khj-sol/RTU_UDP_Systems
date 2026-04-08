@@ -1289,12 +1289,19 @@ _H01_REQUIRED_KEYWORDS = {
     'daily_energy': ['daily', 'today', 'day energy', '일발전', '금일', 'day generate'],
     'inner_temp': ['temp', 'tmp', '온도', 'heat sink', 'heatsink', 'cabinet'],
     'power_factor': ['power factor', 'cos phi', 'cosphi', '역률', ' pf ', 'ph_f'],
+    # mode / status / inverter_status 는 모두 같은 의미 — 동일 키워드 공유
     'mode':      ['mode', 'state', 'status', '상태', 'operating', 'running',
-                  'work', 'device', 'st_vnd', ' st '],
-    'alarm1':    ['alarm', 'error', 'fault', 'warning', '알람', '에러', '고장'],
-    'alarm2':    ['alarm', 'error', 'fault', 'warning', '알람', '에러', '고장'],
-    'alarm3':    ['alarm', 'error', 'fault', 'warning', '알람', '에러', '고장'],
-    'status':    ['status', 'state', '상태'],
+                  'work', 'device', 'st_vnd', ' st ', 'inverter'],
+    'alarm1':    ['alarm', 'error', 'fault', 'warning', '알람', '에러', '고장',
+                  'trip', 'event'],
+    'alarm2':    ['alarm', 'error', 'fault', 'warning', '알람', '에러', '고장',
+                  'trip', 'event'],
+    'alarm3':    ['alarm', 'error', 'fault', 'warning', '알람', '에러', '고장',
+                  'trip', 'event'],
+    'status':    ['mode', 'state', 'status', '상태', 'operating', 'running',
+                  'work', 'device', 'st_vnd', ' st ', 'inverter'],
+    'inverter_status': ['mode', 'state', 'status', '상태', 'operating', 'running',
+                        'work', 'device', 'inverter'],
 }
 
 
@@ -1346,7 +1353,15 @@ def _h01_semantic_valid(h01_field: str, reg_name_or_defn: str) -> bool:
     Phase 특정 필드(r/s/t_voltage/current)는 타입 + phase ID 둘 다 필요."""
     if not h01_field or not reg_name_or_defn:
         return False
-    name_lower = ' ' + str(reg_name_or_defn).lower().replace('_', ' ') + ' '
+
+    # 특수 표식 — 항상 유효
+    # HANDLER: Stage 1 이 handler 계산을 지시한 경우 (pv_voltage/pv_current/pv_power)
+    # DEA_*: Solarize DER-AVM 가상 주소 (fallback 유효)
+    name_str = str(reg_name_or_defn).strip()
+    if name_str.upper() == 'HANDLER' or name_str.upper().startswith('DEA_'):
+        return True
+
+    name_lower = ' ' + name_str.lower().replace('_', ' ') + ' '
 
     # Phase-specific: 타입 키워드 AND phase 식별자 모두 필요
     phase_req = _PHASE_SPECIFIC_REQUIRED.get(h01_field)
