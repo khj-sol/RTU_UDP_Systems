@@ -3127,6 +3127,34 @@ def run_stage1(
 
     max_mppt = 0
     max_string = 0
+    # 스트링전류 우선 원칙:
+    # PDF에 "PVN String M current" 같은 string current 모니터링 레지스터가
+    # 있으면, 그 N 의 최댓값을 MPPT 카운트로 사용한다 (PDF 에 더 많은
+    # PV input voltage 가 있어도 무시).
+    # Kstar: PV1~PV12 input voltage + PV1~PV6 String current 1-4 →
+    #        MPPT=6, String=24 (6×4)
+    pv_string_pv_nums = set()
+    for reg in registers:
+        d = reg.definition or ''
+        m = re.search(r'\bPV\s*(\d+)\s+String\s+current', d, re.I)
+        if m:
+            pv_string_pv_nums.add(int(m.group(1)))
+    pv_string_max = max(pv_string_pv_nums) if pv_string_pv_nums else 0
+
+    # Solis 패턴: "MPPT N voltage/current" 와 "PVN voltage/current" 가 둘 다
+    # 있으면 → MPPT N 은 진짜 MPPT, PVN 은 string-level 로 분류.
+    # 예: Solis V19 → "MPPT 1V~16V" (16 MPPT) + "PV1~32 Current" (32 string)
+    has_explicit_mppt = False
+    explicit_mppt_max = 0
+    for reg in registers:
+        d = reg.definition or ''
+        m = re.search(r'\bMPPT\s*(\d+)\s*(voltage|current|V|I)\b', d, re.I)
+        if m:
+            n = int(m.group(1))
+            if 1 <= n <= 64:
+                has_explicit_mppt = True
+                explicit_mppt_max = max(explicit_mppt_max, n)
+
     # detect_channel_from_ref는 제조사 매칭 ref만 사용 (타 제조사 주소 충돌 방지)
     for reg in registers:
         ch = detect_channel_number(reg.definition)
@@ -3137,6 +3165,14 @@ def run_stage1(
         if ch:
             prefix, n = ch
             if prefix == 'MPPT':
+                # 스트링전류 우선: pv_string_max 가 있으면 그 이상은 무시
+                if pv_string_max > 0 and n > pv_string_max:
+                    continue
+                # Solis 패턴: explicit MPPT 가 있으면 그 이상의 PVN 은
+                # string 으로 재분류
+                if has_explicit_mppt and n > explicit_mppt_max:
+                    max_string = max(max_string, n)
+                    continue
                 max_mppt = max(max_mppt, n)
             elif prefix == 'STRING':
                 max_string = max(max_string, n)

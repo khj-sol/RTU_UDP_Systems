@@ -407,7 +407,9 @@ def detect_channel_number(definition: str) -> Optional[tuple]:
         return ('MPPT', int(m.group(1)))
 
     # ABB: "Input 1 Voltage", "Input 2 Current" → MPPT
-    m = re.search(r'\bInput\s+(\d+)\s+(Voltage|Current|Power)', definition, re.I)
+    # 언더스코어 형태도 허용 ("INVERTER_INPUT_1_VOLTAGE" 같은 정규화 결과)
+    # \b 는 underscore 를 word char 로 보기 때문에 (?:^|[\s_]) 사용
+    m = re.search(r'(?:^|[\s_])Input[_\s]+(\d+)[_\s]+(Voltage|Current|Power)', definition, re.I)
     if m:
         return ('MPPT', int(m.group(1)))
 
