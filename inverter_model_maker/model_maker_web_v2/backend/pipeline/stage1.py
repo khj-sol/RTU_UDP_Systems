@@ -3888,37 +3888,58 @@ def _build_all_suggestions(h01_table: list, categorized: dict,
         n = re.sub(r'\s+', ' ', n).strip()
         return ' ' + n + ' '
 
-    # Model: 시리얼/모델명/제조사 정보 (대부분 ASCII/STRING 타입)
-    _MODEL_KWS = [' model', ' manufacturer', ' mfr ', ' maker ', ' vendor ',
-                  ' device type', ' type code', ' product name',
-                  ' product type', ' device info', ' inverter type',
-                  ' inverter model', ' product code']
+    # Model: 인버터 모델 식별자 (대부분 ASCII/STRING 타입)
+    # 1순위: 진짜 모델 (device/inverter/machine model, model h/l)
+    # 2순위: product/type 키워드
+    # 3순위(fallback): manufacturer/vendor 등 브랜드 문자열
+    _MODEL_PRIMARY_KWS = [' model', ' inverter model', ' device model',
+                          ' machine model', ' product name', ' product code',
+                          ' product type', ' device type', ' type code',
+                          ' inverter type']
+    _MODEL_FALLBACK_KWS = [' manufacturer', ' mfr ', ' maker ', ' vendor ',
+                           ' device info']
     _MODEL_NEG = [' working ', ' battery ', ' init fault ', ' mode ',
-                  ' state ', ' pf ']
+                  ' state ', ' pf ', ' traker ', ' tracker ', ' bms ',
+                  ' afci ', ' epm ', ' fault ', ' alarm ', ' warning ',
+                  ' set ', ' set value', ' ref ', ' enable ', ' disable ',
+                  ' boost ', ' charge ', ' discharge ', ' control ',
+                  ' mppt ', ' grid ', ' protection ', ' status ']
 
-    def _is_model_def(reg) -> bool:
+    def _model_score(reg):
+        """Model 후보 점수: 높을수록 우선. 0이면 후보 아님."""
         nd = _info_norm(reg.definition)
         if any(neg in nd for neg in _MODEL_NEG):
-            return False
-        if any(kw in nd for kw in _MODEL_KWS):
-            return True
-        if reg.definition.startswith('DEVICE_MODEL'):
-            return True
-        return False
+            return 0
+        score = 0
+        if any(kw in nd for kw in _MODEL_PRIMARY_KWS):
+            score = 100
+        elif (reg.definition or '').startswith('DEVICE_MODEL'):
+            score = 100
+        elif any(kw in nd for kw in _MODEL_FALLBACK_KWS):
+            score = 50
+        if score == 0:
+            return 0
+        # ASCII/STRING 타입은 model 의 강한 신호
+        if (reg.data_type or '').upper() in ('STRING', 'STRINGING', 'ASCII'):
+            score += 10
+        return score
+
+    def _pick_model(regs):
+        ranked = [(r, _model_score(r)) for r in regs]
+        ranked = [(r, s) for r, s in ranked if s > 0]
+        if not ranked:
+            return None
+        ranked.sort(key=lambda x: -x[1])
+        return ranked[0][0]
 
     has_model = False
-    matched_model_reg = None
-    for r in info_regs:
-        if _is_model_def(r):
-            has_model = True
-            matched_model_reg = r
-            break
+    matched_model_reg = _pick_model(info_regs)
+    if matched_model_reg:
+        has_model = True
     if not has_model:
-        for r in all_regs:
-            if _is_model_def(r):
-                has_model = True
-                matched_model_reg = r
-                break
+        matched_model_reg = _pick_model(all_regs)
+        if matched_model_reg:
+            has_model = True
     if not has_model and _user_model_syns:
         for r in all_regs:
             if _name_key(r) in _user_model_syns:
