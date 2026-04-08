@@ -598,7 +598,7 @@ DATA_TYPES = {
     'S_PHASE_CALIBRATION_FACTOR': 'U16',
     'L3_VOLTAGE': 'U16',
     'L3_CURRENT': 'U16',
-    'AC_POWER': 'U16',
+    'AC_POWER': 'U32',  # hand-patched: U16 overflows for >6.5kW at scale 0.1W
     'SETTING_VALUE_OF_RATEDPOWER_FOR_ANTI_BACKFLOW': 'U16',
     'MACHINE_MODEL': 'ASCII',
     'FUSE_ALARM_INFORMATION': 'U32',

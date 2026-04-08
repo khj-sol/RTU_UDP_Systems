@@ -613,6 +613,10 @@ class ModbusHandlerHAT:
         if dtype == 'float32':
             w0 = cache.get(addr)
             w1 = cache.get(addr + 1)
+            if (w0 is None or w1 is None):
+                direct = self._read_reg(addr, 2)
+                if direct and len(direct) >= 2:
+                    w0, w1 = direct[0], direct[1]
             if w0 is not None and w1 is not None and self.reg_to_float32:
                 if getattr(self, 'u32_word_order', 'LH') == 'HL':
                     return self.reg_to_float32(w1, w0)
@@ -621,6 +625,12 @@ class ModbusHandlerHAT:
         elif dtype in ('u32', 's32'):
             w0 = cache.get(addr)
             w1 = cache.get(addr + 1)
+            # Cache may not cover addr+1 when the READ_BLOCK ends exactly on
+            # the U32's low word — fall back to a direct 2-register read.
+            if w0 is None or w1 is None:
+                direct = self._read_reg(addr, 2)
+                if direct and len(direct) >= 2:
+                    w0, w1 = direct[0], direct[1]
             if w0 is not None and w1 is not None:
                 if getattr(self, 'u32_word_order', 'LH') == 'HL':
                     lo, hi = w1, w0

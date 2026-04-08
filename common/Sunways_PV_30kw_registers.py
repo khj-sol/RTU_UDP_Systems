@@ -386,7 +386,7 @@ DATA_TYPES = {
     'REACTIVE_POWER': 'U16',
     'L1_VOLTAGE': 'U16',
     'L2_VOLTAGE': 'U16',
-    'PV_POWER': 'U16',
+    'PV_POWER': 'U32',  # hand-patched U16->U32
     'GFCI_FAULT': 'U16',
     'BUS_VOLTAGE_FAULT': 'U16',
     'SERIAL_NUMBER_OFDEVICES': 'STRING',
