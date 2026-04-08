@@ -3309,14 +3309,16 @@ def run_stage1(
     excluded = []
 
     for reg in registers:
+        # 매칭된 제조사 ref 만 사용 — 다른 제조사의 동일 주소 매핑 (예: Kstar 0x0BF8 vs
+        # Solis SERIAL_NUMBER_SN_4) 이 카테고리를 오염시키는 것을 방지
         cat, reason = classify_register_with_rules(
-            reg, synonym_db, review_history, ref_patterns,
+            reg, synonym_db, review_history, matched_ref,
             device_type, all_regs=registers)
         if cat == 'EXCLUDE':
             excluded.append(reg)
             continue
         reg.category = cat
-        reg.h01_field = assign_h01_field(reg, synonym_db, ref_patterns)
+        reg.h01_field = assign_h01_field(reg, synonym_db, matched_ref)
 
         if cat == 'REVIEW':
             reg.review_reason = reason or '자동 분류 불가'
