@@ -613,7 +613,9 @@ def _is_valid_register_name(name: str) -> bool:
                            'curve', 'device abnormal'):
         return False
     # V2: 너무 짧은 이름 (3자 이하인데 키워드가 아닌 것)
-    if len(stripped) <= 3 and not any(k in stripped_lower for k in
+    # CJK(한글/한자/일본어) 문자는 글자당 의미가 크므로 길이 필터에서 제외
+    has_cjk = any('\u3040' <= ch <= '\u9fff' or '\uac00' <= ch <= '\ud7a3' for ch in stripped)
+    if not has_cjk and len(stripped) <= 3 and not any(k in stripped_lower for k in
             ['sn', 'pf', 'pv', 'dc', 'ac', 'bus', 'ia', 'ib', 'ic', 'ua', 'ub', 'uc']):
         return False
     return True
@@ -3986,7 +3988,10 @@ def _build_all_suggestions(h01_table: list, categorized: dict,
     _MODEL_PRIMARY_KWS = [' model', ' inverter model', ' device model',
                           ' machine model', ' product name', ' product code',
                           ' product type', ' device type', ' type code',
-                          ' inverter type']
+                          ' inverter type',
+                          # 한국어
+                          '모델명', '모델 명', '모델번호', '제품명', '제품 명',
+                          '제품번호', '제품 번호', '기기명', '장치명']
     _MODEL_FALLBACK_KWS = [' manufacturer', ' mfr ', ' maker ', ' vendor ',
                            ' device info']
     _MODEL_NEG = [' working ', ' battery ', ' init fault ', ' mode ',
@@ -4049,7 +4054,10 @@ def _build_all_suggestions(h01_table: list, categorized: dict,
 
     # SN: 시리얼번호 OR 펌웨어버전 (둘 다 인버터 식별 가능, 보통 ASCII)
     # 1순위: 진짜 SN (serial/sn 인덱스), 2순위: firmware/software fallback
-    _SN_PRIMARY_KWS = [' serial', ' c serial', ' inverter sn ']
+    _SN_PRIMARY_KWS = [' serial', ' c serial', ' inverter sn ',
+                       # 한국어
+                       '시리얼번호', '시리얼 번호', '시리얼', '일련번호',
+                       '제조번호', '시리얼no', 's/n']
     _SN_FALLBACK_KWS = [' firmware', ' fw ver', ' fwver', ' fw no', ' fw[',
                         ' software version', ' soft version', ' soft ver',
                         ' software ver', ' sw ver', ' sw version',
@@ -4332,17 +4340,20 @@ def _suggest_info_field(all_regs: list, field_type: str) -> list:
     if field_type == 'model':
         prim_kws  = ['model', 'device type', 'type code', 'product',
                      'manufacturer', 'mfr', 'maker', 'vendor',
-                     'inverter type', 'inverter model', 'device info']
+                     'inverter type', 'inverter model', 'device info',
+                     '모델명', '모델', '제품명', '기기명', '장치명']
         prim_excl = ['working', 'battery', 'pf', 'mode', 'state']
-        str_kws   = ['model', 'product', 'manufacturer', 'mfr', 'vendor']
+        str_kws   = ['model', 'product', 'manufacturer', 'mfr', 'vendor', '모델', '제품']
         sec_kws   = ['type', 'rated', 'name', 'equip', 'identifier', 'kind']
     else:  # sn — 시리얼번호 또는 펌웨어버전
         prim_kws  = ['serial', 'sn',
                      'firmware', 'fw_ver', 'fw ver', 'fw[', 'fwver',
                      'fw_no', 'software version', 'soft ver', 'sw_ver',
-                     'sw ver', 'software ver']
+                     'sw ver', 'software ver',
+                     '시리얼', '일련번호', '제조번호']
         prim_excl = []
-        str_kws   = ['serial', 'sn', 'firmware', 'fw', 'software', 'sw']
+        str_kws   = ['serial', 'sn', 'firmware', 'fw', 'software', 'sw',
+                     '시리얼', '일련']
         sec_kws   = ['number', 'id', 'code', 'uid', 'barcode', 'lot',
                      'version', 'ver']
 
