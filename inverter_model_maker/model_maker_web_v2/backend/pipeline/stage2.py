@@ -654,8 +654,8 @@ def _add_h01_mapping_sheet(wb, s1: dict, openpyxl_module) -> None:
                     nm = ac['name']
                     if nm in name_to_fcs and not any(e[0] == nm for e in valid_matched):
                         valid_matched.append((nm, ac.get('addr_hex', '')))
-                        # PDF 후보 fallback — pdf 로 분류 (handler 보다 우선)
-                        if h01_source.get(field) in (None, '', 'handler'):
+                        # 출처 미설정인 경우만 'pdf' 로 표기 (handler/der 는 그대로 유지)
+                        if not h01_source.get(field):
                             h01_source[field] = 'pdf'
 
         # D열: semantic-valid 매칭만 표시 (세미콜론 구분)
