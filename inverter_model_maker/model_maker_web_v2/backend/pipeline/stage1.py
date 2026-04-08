@@ -2823,6 +2823,7 @@ def run_stage1(
 
     log(f'입력 파일 읽기: {os.path.basename(input_path)}')
     all_tables = []
+    pages = []  # Excel 경로에서도 _detect_phase_type 등이 안전하게 동작
 
     if ext == '.pdf':
         pages = extract_pdf_text_and_tables(input_path, log=log)
