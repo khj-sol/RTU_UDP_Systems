@@ -2595,7 +2595,111 @@ def build_h01_match_table(categorized: dict, meta: dict) -> List[dict]:
             else:
                 rows.append(_make_pdf_match_row(field, None, 'String current 미지원 시 생략'))
 
+    # ── stride 보간: mppt{n}/string{n} 단일 행 누락 시 인접 행으로부터 추정 ──
+    # PDF 표 추출 (pymupdf find_tables) 이 페이지 경계/병합 셀에서 한 줄 흘릴 때
+    # 인접 mppt(n-1), mppt(n+1) 또는 string(n-1), string(n+1) 가 균일 stride 면
+    # 누락된 n 행의 주소를 보간하여 매칭 처리.
+    _interpolate_stride_gaps(rows)
+
     return rows
+
+
+def _interpolate_stride_gaps(rows: List[dict]) -> None:
+    """mppt{n}_voltage/current, string{n}_current 의 단일 행 누락을 stride 보간."""
+    import re as _re
+
+    def _parse_field(field):
+        m = _re.match(r'^(mppt|string)(\d+)_(voltage|current)$', field or '')
+        if not m:
+            return None
+        return (m.group(1), int(m.group(2)), m.group(3))
+
+    def _parse_addr(addr_str):
+        if not addr_str or addr_str == '-' or '~' in str(addr_str):
+            return None
+        try:
+            return int(addr_str, 16)
+        except (ValueError, TypeError):
+            return None
+
+    field_to_idx = {r.get('field', ''): i for i, r in enumerate(rows)}
+    used_addrs = set()
+    for r in rows:
+        a = _parse_addr(r.get('address', ''))
+        if a is not None:
+            used_addrs.add(a)
+
+    def _get_addr(family, idx, kind):
+        f = f'{family}{idx}_{kind}'
+        if f not in field_to_idx:
+            return None
+        r = rows[field_to_idx[f]]
+        if r.get('status') != 'O':
+            return None
+        return _parse_addr(r.get('address', ''))
+
+    for i, row in enumerate(rows):
+        if row.get('status') == 'O':
+            continue
+        parsed = _parse_field(row.get('field', ''))
+        if not parsed:
+            continue
+        family, n, kind = parsed
+
+        prev_addr = _get_addr(family, n - 1, kind)
+        next_addr = _get_addr(family, n + 1, kind)
+        prev2_addr = _get_addr(family, n - 2, kind)
+        next2_addr = _get_addr(family, n + 2, kind)
+
+        predicted = None
+        method = ''
+
+        # 1) midpoint: prev/next 양쪽이 균일 stride 일 때
+        if prev_addr is not None and next_addr is not None:
+            diff = next_addr - prev_addr
+            if 0 < diff <= 8 and diff % 2 == 0:
+                predicted = prev_addr + diff // 2
+                method = 'midpoint'
+        # 2) forward extrapolation: next, next2 로부터 역추정 (블록 시작 행 누락)
+        if predicted is None and next_addr is not None and next2_addr is not None:
+            stride = next2_addr - next_addr
+            if 0 < stride <= 4:
+                cand = next_addr - stride
+                if cand > 0:
+                    predicted = cand
+                    method = 'forward extrap'
+        # 3) backward extrapolation: prev, prev2 로부터 정추정 (블록 끝 행 누락)
+        if predicted is None and prev_addr is not None and prev2_addr is not None:
+            stride = prev_addr - prev2_addr
+            if 0 < stride <= 4:
+                predicted = prev_addr + stride
+                method = 'backward extrap'
+
+        if predicted is None or predicted in used_addrs:
+            continue
+
+        # 인접 행에서 type/unit/scale 템플릿 복사
+        template = None
+        for idx in (n - 1, n + 1):
+            f = f'{family}{idx}_{kind}'
+            if f in field_to_idx and rows[field_to_idx[f]].get('status') == 'O':
+                template = rows[field_to_idx[f]]
+                break
+        if template is None:
+            continue
+
+        rows[i] = {
+            'field': row['field'],
+            'source': 'PDF_INTERP',
+            'status': 'O',
+            'address': f'0x{predicted:04X}',
+            'definition': f'{family.upper()}{n}_{kind.upper()} (stride 보간)',
+            'type': template.get('type', 'U16'),
+            'unit': template.get('unit', ''),
+            'scale': template.get('scale', ''),
+            'note': f'stride 보간 ({method}) — 인접 행으로부터 주소 추정',
+        }
+        used_addrs.add(predicted)
 
 
 def _find_matched_reg(categorized: dict, h01_field: str, cat: str = None) -> Optional[RegisterRow]:
