@@ -1481,6 +1481,22 @@ def assign_h01_field(reg: RegisterRow, synonym_db: dict,
     # V2: STATUS 카테고리 — inverter_status 매핑
     if category == 'STATUS':
         defn_nospace_s = defn_lower.replace(' ', '')
+        # 부정 키워드: 인버터 운전 상태가 아닌 것들
+        # (DryContact, BMS, PID, SVG, charge, function bits, dispatch 등)
+        _STATUS_NEG = ['drycontact', 'dry contact', 'bms', 'svg', 'apf',
+                       'function status', 'functionstatus',
+                       'pid&spd', 'pid spd', 'pid status',
+                       'state of charge', 'stateofcharge', 'soc',
+                       'shadow mode', 'shadowmode',
+                       'battery mode', 'batterymode',
+                       'dispatch', 'output control',
+                       'string', 'pv string',
+                       'access status', 'accessstatus',
+                       'connection status', 'connectionstatus',
+                       'ramp rate', 'volt-var', 'volt var']
+        if any(k in defn_lower for k in _STATUS_NEG) or \
+           any(k in defn_nospace_s for k in [k.replace(' ', '') for k in _STATUS_NEG]):
+            return ''
         if any(k in defn_lower for k in ['inverter mode', 'work mode', 'work state',
                                           'operating mode', 'operational mode',
                                           'operation state',
@@ -1493,8 +1509,8 @@ def assign_h01_field(reg: RegisterRow, synonym_db: dict,
                                           'device status', 'system status']) or \
            any(k in defn_nospace_s for k in ['workmode', 'invworkmode', 'runningmode',
                                               'workingmodes', 'workingmode',
-                                              'sysstatemode', 'currentstatus',
-                                              'operatingstatus']) or \
+                                              'sysstatemode',
+                                              'operatingstatus', 'devicestatus']) or \
            defn_lower.strip() in ('state', 'running', 'st'):
             return 'inverter_status'
         return ''
