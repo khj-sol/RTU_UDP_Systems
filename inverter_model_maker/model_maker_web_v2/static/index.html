@@ -614,6 +614,22 @@
         'info');
     }
 
+    // 상 타입 감지 결과 표시 (단상/삼상/공통)
+    const phaseType = msg.phase_type || 'unknown';
+    const phaseLabel = {
+      'single':  '단상 (1-phase / 2-wire)',
+      'three':   '삼상 (3-phase)',
+      'both':    '단상/삼상 공통 (런타임 구분)',
+      'unknown': '미확인',
+    }[phaseType] || phaseType;
+    const phaseColor = {
+      'single':  'info',
+      'three':   'info',
+      'both':    'warn',
+      'unknown': 'warn',
+    }[phaseType] || 'warn';
+    appendLog('s1', `상 타입: ${phaseLabel}`, phaseColor);
+
     appendLog('s1', `카테고리: ${Object.entries(msg.counts||{}).filter(([k,v])=>v>0).map(([k,v])=>`${k}:${v}`).join(' ')}`, 'ok');
 
     // Stage 1 검증: 인버터 모델명 + SN 레지스터 존재 여부

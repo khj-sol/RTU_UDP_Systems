@@ -150,5 +150,24 @@
     "max_mppt": 1,
     "max_string": 2,
     "date": "2026-04-03"
+  },
+  "599cb825d3e8f83f88043b41a144d8b4f4d1f5697c7e30f2041e9f9080b00006": {
+    "manufacturer": "Growatt",
+    "pdf_filename": "Growatt-PV_Modbus_RS485_RTU_V3-14.pdf",
+    "h01": [
+      30,
+      30
+    ],
+    "der": [
+      33,
+      33
+    ],
+    "info_match": {
+      "model": false,
+      "sn": false
+    },
+    "max_mppt": 3,
+    "max_string": 8,
+    "date": "2026-04-07"
   }
 }

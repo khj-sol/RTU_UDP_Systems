@@ -273,6 +273,7 @@ async def stage1_run(body: dict):
                 'suggestions': result.get('suggestions', {}),
                 'max_mppt': result['meta'].get('max_mppt', 0),
                 'max_string': result['meta'].get('max_string', 0),
+                'phase_type': result['meta'].get('phase_type', 'unknown'),
             })
         except asyncio.CancelledError:
             pass  # 새 파일 업로드로 인해 취소됨 — 정상
@@ -373,6 +374,7 @@ async def apply_suggestion(body: dict):
                 'suggestions': result.get('suggestions', {}),
                 'max_mppt': result['meta'].get('max_mppt', 0),
                 'max_string': result['meta'].get('max_string', 0),
+                'phase_type': result['meta'].get('phase_type', 'unknown'),
             })
         except NotRegisterMapError as e:
             await ws_manager.send_json(sid, {
