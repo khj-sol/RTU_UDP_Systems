@@ -813,7 +813,8 @@ class GenericInverterSimulator:
     VERSION = "1.0.0"
     NOMINAL_POWER = 50000  # 50kW default (overridden per protocol)
 
-    # Protocol → nominal power in W
+    # Protocol (prefix) → nominal power in W.
+    # Supports new-style names like 'solarize_50_3' via prefix match.
     _NOMINAL_BY_PROTOCOL = {
         'solarize': 50000,
         'senergy':  50000,
@@ -821,20 +822,36 @@ class GenericInverterSimulator:
         'huawei':   50000,
         'kstar':    60000,
         'ekos':     10000,
-        'sofar':    70000,
+        'sofar':    50000,
         'solis':    50000,
         'growatt':  30000,
         'cps':      50000,
         'sunways':  30000,
+        'abb':      50000,
+        'goodwe':   50000,
     }
+
+    @classmethod
+    def _lookup_by_prefix(cls, table: dict, protocol_name: str, default=None):
+        """Resolve {manufacturer}_{kW}_{phase} protocol to a table entry by
+        trying exact lowercase match first, then prefix up to first underscore,
+        so both old ('solarize') and new ('solarize_50_3') styles work.
+        """
+        key = (protocol_name or '').lower()
+        if key in table:
+            return table[key]
+        prefix = key.split('_', 1)[0]
+        return table.get(prefix, default)
 
     def __init__(self, protocol_name, logger=None, env=None):
         self.protocol_name = protocol_name
         self.logger = logger or logging.getLogger(f"Generic-{protocol_name}")
         self.running = False
         self.env = env or _get_shared_env()
-        # Per-protocol nominal power
-        self.NOMINAL_POWER = self._NOMINAL_BY_PROTOCOL.get(protocol_name.lower(), 50000)
+        # Per-protocol nominal power — prefix match supports both 'solarize'
+        # and 'solarize_50_3' style protocol names.
+        self.NOMINAL_POWER = self._lookup_by_prefix(
+            self._NOMINAL_BY_PROTOCOL, protocol_name, default=50000)
 
         # Load register module dynamically
         self._module = self._load_module(protocol_name)
@@ -889,7 +906,8 @@ class GenericInverterSimulator:
         self.logger.info(f"[GENERIC] Loaded protocol '{protocol_name}' | "
                          f"MPPT={self.mppt_channels} STR={self.string_channels} FC={self.fc_code:02d}")
 
-    # Per-protocol display name + nominal power for read_model_info() registers
+    # Per-protocol display name (prefix match) for read_model_info() registers.
+    # Supports both 'solarize' and 'solarize_50_3' style protocol names.
     _PROTO_MODEL_NAME = {
         'solarize':  'SRPV-3-50-KS-SIM',
         'huawei':    'SUN2000-50KTL-SIM',
@@ -897,11 +915,13 @@ class GenericInverterSimulator:
         'sungrow':   'SG50CX-SIM',
         'ekos':      'EKOS-10K-SIM',
         'senergy':   'SE-50K-SIM',
-        'sofar':     'SOFAR-70KTL-SIM',
+        'sofar':     'SOFAR-50KTL-SIM',
         'solis':     'SOLIS-50K-SIM',
         'growatt':   'MOD-30KTL3-SIM',
         'cps':       'CPS-50KTL-SIM',
         'sunways':   'STT-30KTL-SIM',
+        'abb':       'ABB-50KTL-SIM',
+        'goodwe':    'GW-50KTL-SIM',
     }
 
     def _write_string_regs(self, base_addr, text, n_regs):
@@ -921,9 +941,10 @@ class GenericInverterSimulator:
         """Pre-populate DEVICE_MODEL/SERIAL_NUMBER/MPPT_COUNT/NOMINAL_POWER_*
         so RTU read_model_info() returns realistic per-protocol values."""
         proto = (self.protocol_name or 'solarize').lower()
-        model_name = self._PROTO_MODEL_NAME.get(proto, 'SRPV-3-50-KS-SIM')
-        # Stable serial: protocol prefix + zero padded
-        prefix = proto[:3].upper()
+        model_name = self._lookup_by_prefix(
+            self._PROTO_MODEL_NAME, proto, default='SRPV-3-50-KS-SIM')
+        # Stable serial: manufacturer prefix + zero padded
+        prefix = proto.split('_', 1)[0][:3].upper()
         # slave_id is set later by ModbusServerContext, use 0 placeholder for now
         # Use protocol_name hash as seed so each instance is distinct enough
         serial = f"{prefix}{abs(hash(proto)) % 100000000:08d}"
