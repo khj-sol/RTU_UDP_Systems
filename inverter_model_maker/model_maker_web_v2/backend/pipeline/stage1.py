@@ -2320,8 +2320,7 @@ def build_h01_match_table(categorized: dict, meta: dict) -> List[dict]:
     # 강제로 가져와 MODULE_CURRENT/TEMPERATER_AVE/DEBUG_DATA 같은 무관 레지스터를
     # voltage 로 잘못 매칭하는 원인이 되었음. 이름 기반 매칭 결과만 신뢰한다.
 
-    # 반대 키워드 차단: voltage 슬롯에 current/curr/전류 들어간 정의는 거부, 반대도 동일
-    # (Module Voltage/Module Current 같은 모호 이름이 mppt2/3 등에 잘못 매칭되는 것 방지)
+    # 반대 키워드 차단 (#1): voltage 슬롯에 current/curr/전류 들어간 정의는 거부, 반대도 동일
     def _opposite_keyword_reject(reg_obj, mtype: str) -> bool:
         if not reg_obj or not reg_obj.definition:
             return False
@@ -2335,12 +2334,45 @@ def build_h01_match_table(categorized: dict, meta: dict) -> List[dict]:
             has_i = any(k in dl for k in ['current', 'curr', 'ipv', '전류'])
             return has_v and not has_i
 
+    # #4 노이즈 차단: debug/temperat/reserved/dummy/fault/error/alarm/factory/calibration/test/avg
+    _NOISE_KEYWORDS = ('debug', 'temperat', 'reserved', 'dummy', 'fault', 'error',
+                       'alarm', 'warning', 'factory', 'calibrat', 'test',
+                       '_avg', ' avg', 'average')
+
+    def _is_noise(reg_obj) -> bool:
+        if not reg_obj or not reg_obj.definition:
+            return False
+        dl = reg_obj.definition.lower()
+        return any(k in dl for k in _NOISE_KEYWORDS)
+
+    # #3 채널번호 우선순위: 정의에 명시적 번호가 있는데 슬롯 번호와 다르면 거부
+    def _channel_num_mismatch(reg_obj, slot_n: int) -> bool:
+        if not reg_obj or not reg_obj.definition:
+            return False
+        dl = reg_obj.definition.lower()
+        # 추출 패턴: pv1, mppt1, dc voltage 1, voltage_1, reg_1, vpv1, ipv1, ppv1
+        nums = set()
+        for m in re.finditer(
+                r'(?:pv|mppt|reg|module|vpv|ipv|ppv|dc[\s_]*(?:voltage|current|power))[\s_]*(\d+)',
+                dl):
+            nums.add(int(m.group(1)))
+        for m in re.finditer(
+                r'(?:voltage|current|volt|curr|power|watt)[\s_]+(\d+)\b', dl):
+            nums.add(int(m.group(1)))
+        if not nums:
+            return False  # 번호 없음 → 거부 안 함 (Module Voltage 등 통과)
+        return slot_n not in nums
+
     for n in range(1, max_mppt + 1):
         for mtype in ['voltage', 'current']:
             field = f'mppt{n}_{mtype}'
             reg = _find_matched_reg(categorized, field)
             if _opposite_keyword_reject(reg, mtype):
-                reg = None  # 잘못된 매칭 → (없음) 처리
+                reg = None
+            elif _is_noise(reg):
+                reg = None
+            elif _channel_num_mismatch(reg, n):
+                reg = None
 
             # voltage인 경우 보정된 주소와 비교
             # current/curr/전류 키워드 가진 레지스터는 voltage 슬롯에 매칭 금지
@@ -2453,6 +2485,10 @@ def build_h01_match_table(categorized: dict, meta: dict) -> List[dict]:
         field = f'string{n}_current'
         reg = _find_matched_reg(categorized, field)
         if _opposite_keyword_reject(reg, 'current'):
+            reg = None
+        elif _is_noise(reg):
+            reg = None
+        elif _channel_num_mismatch(reg, n):
             reg = None
         if reg:
             rows.append(_make_pdf_match_row(field, reg))
