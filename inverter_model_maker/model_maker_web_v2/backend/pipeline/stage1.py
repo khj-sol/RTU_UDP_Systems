@@ -3908,7 +3908,13 @@ def _build_all_suggestions(h01_table: list, categorized: dict,
     def _model_score(reg):
         """Model 후보 점수: 높을수록 우선. 0이면 후보 아님."""
         nd = _info_norm(reg.definition)
+        # 길이 필터: PDF 문단이 잘못 추출된 노이즈 (>62자) 제외
+        if len(nd) > 62:
+            return 0
         if any(neg in nd for neg in _MODEL_NEG):
+            return 0
+        # serial number 가 포함된 정의는 시리얼 후보지 모델이 아님
+        if ' serial' in nd or ' sn ' in nd:
             return 0
         score = 0
         if any(kw in nd for kw in _MODEL_PRIMARY_KWS):
@@ -3922,6 +3928,9 @@ def _build_all_suggestions(h01_table: list, categorized: dict,
         # ASCII/STRING 타입은 model 의 강한 신호
         if (reg.data_type or '').upper() in ('STRING', 'STRINGING', 'ASCII'):
             score += 10
+        # 짧고 정확한 정의 보너스 (예: "Model H", "Device Model")
+        if len(nd) <= 22:
+            score += 5
         return score
 
     def _pick_model(regs):
