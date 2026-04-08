@@ -2399,7 +2399,11 @@ def build_h01_match_table(categorized: dict, meta: dict) -> List[dict]:
     def _channel_num_mismatch(reg_obj, slot_n: int) -> bool:
         if not reg_obj or not reg_obj.definition:
             return False
-        dl = reg_obj.definition.lower()
+        dl = reg_obj.definition.lower().replace('_', ' ')
+        # Kstar 패턴: "PV{m} String current {n}" — global flat index 사용
+        # (m,n) 자체는 슬롯 번호와 다르므로 검사 건너뜀
+        if re.search(r'pv\s*\d+\s+string\s+current', dl):
+            return False
         # 추출 패턴: pv1, mppt1, dc voltage 1, voltage_1, reg_1, vpv1, ipv1, ppv1
         nums = set()
         for m in re.finditer(
@@ -3390,6 +3394,32 @@ def run_stage1(
 
     # ── 정의 파일 fallback: definitions/{manufacturer}_definitions.json ──
     _apply_saved_definitions(categorized, manufacturer, log)
+
+    # ── Solis 패턴 후처리: explicit MPPT 가 있으면 mppt{n}_current (n>explicit_mppt_max)
+    #    레지스터의 h01_field 를 string{n}_current 로 재매핑
+    #    (assign_h01_field 는 explicit_mppt_max 를 모르므로 여기서 보정)
+    if has_explicit_mppt and explicit_mppt_max > 0:
+        _mppt_re = re.compile(r'^mppt(\d+)_(voltage|current|power)$')
+        relabeled = 0
+        for cat_regs in categorized.values():
+            for reg in cat_regs:
+                if not reg.h01_field:
+                    continue
+                mm = _mppt_re.match(reg.h01_field)
+                if not mm:
+                    continue
+                n = int(mm.group(1))
+                kind = mm.group(2)
+                if n > explicit_mppt_max:
+                    if kind == 'current':
+                        reg.h01_field = f'string{n}_current'
+                        relabeled += 1
+                    else:
+                        # voltage/power 는 슬롯 없음 → 매핑 제거
+                        reg.h01_field = ''
+                        relabeled += 1
+        if relabeled:
+            log(f'  Solis 후처리: {relabeled}개 레지스터를 string{{n}}_current 로 재매핑')
 
     h01_match_table = build_h01_match_table(categorized, meta)
 
