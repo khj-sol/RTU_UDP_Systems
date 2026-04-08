@@ -736,7 +736,7 @@ class RTUClient:
         scan_time = time.time() - scan_start
 
         if not finished:
-            self.logger.warning(f"IV Scan timeout ({poll_timeout}s) for INV{dev_num} — inverter may be offline or night mode")
+            self.logger.warning(f"IV Scan timeout ({poll_timeout}s) for INV{dev_num} - inverter may be offline or night mode")
             # Notify server of IV Scan failure
             try:
                 pkt, s = self.protocol.create_h05_event(

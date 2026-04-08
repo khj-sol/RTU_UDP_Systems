@@ -1441,15 +1441,24 @@ class GenericInverterSimulator:
             if val != self.operation_mode:
                 self.operation_mode = val
 
-        # IV Scan command (0x600D): 1=Start → set FINISHED after delay
+        # IV Scan command (0x600D): 1=Start → immediately advance to FINISHED.
+        # Triggers on every transition from non-ACTIVE to ACTIVE so repeated
+        # scans (after the previous one finished) work correctly.
         iv_cmd_addr = getattr(self.reg_map, 'IV_SCAN_COMMAND', 0x600D)
         iv_status_addr = getattr(self.reg_map, 'IV_SCAN_STATUS', 0x600D)
         val = self._get_reg(iv_cmd_addr)
-        if val and val[0] == IVScanCommand.ACTIVE and self.iv_scan_status == IVScanStatus.IDLE:
+        if val and val[0] == IVScanCommand.ACTIVE:
+            # Advance state machine: ACTIVE write → mark FINISHED so the RTU
+            # polling loop can read iv_status == FINISHED on its next poll.
             self.iv_scan_status = IVScanStatus.FINISHED
             fc = self.fc_code + 1 if self.fc_code == 4 else 3
             self.store.setValues(fc, iv_status_addr, [IVScanStatus.FINISHED])
             self.logger.info(f"[{self.protocol_name}] IV Scan -> FINISHED")
+        elif val and val[0] == IVScanCommand.NON_ACTIVE and self.iv_scan_status == IVScanStatus.FINISHED:
+            # RTU clears the command after reading IV data → reset to IDLE for next scan.
+            self.iv_scan_status = IVScanStatus.IDLE
+            fc = self.fc_code + 1 if self.fc_code == 4 else 3
+            self.store.setValues(fc, iv_status_addr, [IVScanStatus.IDLE])
 
 
 # =============================================================================

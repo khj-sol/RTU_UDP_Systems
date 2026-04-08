@@ -1273,11 +1273,15 @@ class ModbusHandlerHAT:
             status['active_power_pct'] = result[0] if result else 1000
 
             # IV Scan Status (0x600D): 0=Idle, 1=Running, 2=Finished
-            iv_scan_reg = getattr(self.RegMap, 'IV_SCAN_STATUS', None)
-            if iv_scan_reg is not None:
+            # Some MM v2 register files don't expose IV_SCAN_STATUS as a constant —
+            # fall back to IV_SCAN_COMMAND (Solarize uses the same register), or
+            # finally to the hard-coded 0x600D Solarize convention.
+            iv_scan_reg = getattr(self.RegMap, 'IV_SCAN_STATUS',
+                                  getattr(self.RegMap, 'IV_SCAN_COMMAND', 0x600D))
+            try:
                 result = self.master.read_holding_registers(iv_scan_reg, 1, self.slave_id)
                 status['iv_scan_status'] = result[0] if result else 0
-            else:
+            except Exception:
                 status['iv_scan_status'] = 0
             
             return status
@@ -1984,6 +1988,10 @@ class ModbusHandlerSerial:
     def write_control(self, control_type: int, value: int):
         """제어 명령 쓰기 — HAT 로직 위임."""
         return ModbusHandlerHAT.write_control(self, control_type, value)
+
+    def get_iv_scan_data(self, string_num):
+        """IV Scan 데이터 읽기 — HAT 로직 위임."""
+        return ModbusHandlerHAT.get_iv_scan_data(self, string_num)
 
     def read_inverter_data(self):
         """Read inverter data via pymodbus (same logic as HAT version)"""
