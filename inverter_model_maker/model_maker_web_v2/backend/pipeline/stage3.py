@@ -266,9 +266,8 @@ def _load_error_bits_from_reference(manufacturer: str) -> dict:
     # REF_ 파일 우선, 그 다음 신규 네이밍, 마지막으로 Solarize REF fallback
     patterns = glob.glob(os.path.join(COMMON_DIR, f'REF_{manufacturer}_*_registers.py'))
     patterns += glob.glob(os.path.join(COMMON_DIR, f'{manufacturer}_*_registers.py'))
-    patterns += [os.path.join(COMMON_DIR, f'REF_Solarize_PV_registers.py'),
-                 os.path.join(COMMON_DIR, 'Solarize_PV_50_registers.py'),
-                 os.path.join(COMMON_DIR, 'Solarize_PV_registers.py')]
+    patterns += [os.path.join(COMMON_DIR, 'REF_Solarize_PV_registers.py'),
+                 os.path.join(COMMON_DIR, 'Solarize_50_3_registers.py')]
 
     for fpath in patterns:
         if not os.path.exists(fpath):
@@ -2276,9 +2275,22 @@ def run_stage3(
     _pdf_fn = meta.get('원본 파일', '').upper()
     inverter_type = 'HYB' if any(k in _pdf_fn for k in ['HYB', 'HYBRID', '하이브리드']) else 'PV'
 
-    # 용량 (Stage 2에서 사용자 입력, '-' 이거나 비어있으면 생략)
-    _cap = meta.get('용량', '').strip()
-    capacity_str = f'_{_cap}' if _cap and _cap != '-' else ''
+    # 용량 (Stage 2에서 사용자 입력) — 파일명 규칙: kW 숫자만 사용
+    # 예: '50K' → '50', '60kw' → '60', '70 kW' → '70', '-' → '50' (fallback)
+    import re as _re
+    _cap_raw = (meta.get('용량', '') or '').strip()
+    _cap_match = _re.search(r'(\d+)', _cap_raw)
+    _cap_num = _cap_match.group(1) if _cap_match else '50'
+    capacity_str = _cap_num
+
+    # 전원 타입 (3상/2상/단상 → 3/2/1) — Stage 2의 Phase Type 메타데이터 사용
+    _phase_raw = (meta.get('Phase Type', '') or meta.get('phase_type', '') or '').strip().lower()
+    if any(k in _phase_raw for k in ('single', '단상', '1p', '1-phase', 'phase1')):
+        phase_num = '1'
+    elif any(k in _phase_raw for k in ('split', '2상', '2p', '2-phase', 'phase2')):
+        phase_num = '2'
+    else:
+        phase_num = '3'  # default 3상 (most PV inverters)
 
     # V2: IV/DER 판단 — 레지스터 유무 + 메타데이터 + 제조사 확정
     iv_scan = (
@@ -2350,9 +2362,11 @@ def run_stage3(
         log(f'    {"✓" if ok else "✗"} {check_name}')
 
     # ── 파일 저장 ──
-    # 모델 토큰이 있으면 파일명에 포함 (같은 제조사 복수 프로토콜 충돌 방지)
+    # 파일명 규칙: {Manufacturer}_{kW}_{phase}_registers.py
+    # 예: Solarize_50_3_registers.py, Kstar_60_3_registers.py
+    # 같은 제조사 복수 프로토콜은 model token 으로 충돌 방지
     _model_part = f'_{_model_token}' if _model_token else ''
-    output_name = f'{manufacturer}_{inverter_type}{_model_part}{capacity_str}_registers.py'
+    output_name = f'{manufacturer}{_model_part}_{capacity_str}_{phase_num}_registers.py'
     output_path = os.path.join(output_dir, output_name)
     with open(output_path, 'w', encoding='utf-8') as f:
         f.write(code)
