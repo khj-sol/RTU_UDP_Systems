@@ -356,6 +356,12 @@ def detect_channel_number(definition: str) -> Optional[tuple]:
                               'enable', 'disable', 'reset', 'control']):
         return None
 
+    # 채널 번호 상한 체크: 실제 인버터 최대 MPPT/String 은 32 (Solis PV100kW)
+    # 32 초과는 PDF parsing 오염 (셀 병합 오류로 붙은 잘못된 숫자)
+    MAX_CHANNEL = 32
+    def _check_n(n):
+        return 1 <= n <= MAX_CHANNEL
+
     # Kstar: PV{n} String current {m} → STRING
     m = PV_STRING_CURRENT_RE.search(definition)
     if m:
@@ -424,19 +430,31 @@ def detect_channel_number(definition: str) -> Optional[tuple]:
     # ('voltage'/'current' 가 N 앞에 위치, DC가 별도 단어)
     m = re.search(r'\bDC\s+(?:voltage|current|power)\s+(\d+)\b', definition, re.I)
     if m:
-        return ('MPPT', int(m.group(1)))
+        n = int(m.group(1))
+        return ('MPPT', n) if _check_n(n) else None
 
     # Deye 한글: "직류전압1", "직류전류3"
     m = re.search(r'직류(?:전압|전류|전력)\s*(\d+)', definition)
     if m:
-        return ('MPPT', int(m.group(1)))
+        n = int(m.group(1))
+        return ('MPPT', n) if _check_n(n) else None
 
     # Deye concat: "직류전압1Dc voltage 1" → 직류 패턴이 위에서 잡혀야 함
     # 만약 직류는 못 잡고 'voltage 1' 형식만 있으면 마지막에 시도
     m = re.search(r'\b(?:dc|direct\s*current)\s*(?:input\s+)?(?:voltage|current|power)\s+(\d+)',
                   definition, re.I)
     if m:
-        return ('MPPT', int(m.group(1)))
+        n = int(m.group(1))
+        return ('MPPT', n) if _check_n(n) else None
+
+    # DC_VOLTAGE_N / DC_CURRENT_N (underscore 형식) — 이름이 DC_VOLTAGE_{N}으로
+    # 직접 정규화된 경우. Central type fallback 전에 먼저 매칭해 잘못된 mppt1
+    # 매핑을 막음. N > 32 면 PDF 파싱 오염으로 간주해 None 반환.
+    m = re.search(r'\bDC[_\s]*(voltage|current|power|volt|curr)[_\s]*(\d+)\b',
+                  definition, re.I)
+    if m:
+        n = int(m.group(2))
+        return ('MPPT', n) if _check_n(n) else None
 
     # Deye 압축 형식: 'PV1_V', 'PV1_I', 'PV1V', 'PV1I', 'PV1 V_', 'PV1 I_'
     # PV{N}_V/PV{N}V → voltage, PV{N}_I/PV{N}I → current

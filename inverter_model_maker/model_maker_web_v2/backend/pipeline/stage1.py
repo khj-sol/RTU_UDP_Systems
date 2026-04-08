@@ -1454,17 +1454,21 @@ def assign_h01_field(reg: RegisterRow, synonym_db: dict,
                 return f'string{n}_current'
 
     # 0-1) Central type: 번호 없는 DC/PV/Input voltage/current → mppt1
+    # 단, 끝에 숫자가 오면 Central type 아님 (DC_VOLTAGE_43 같은 PDF 오염 방지
+    # + DC voltage 3 같은 multi-MPPT 는 이미 detect_channel_number 에서 잡혔어야 함)
     defn_ns = defn_lower.replace('_', ' ')
-    if re.search(r'\b(i dc|dc)\s*(voltage)', defn_ns) or \
-       re.search(r'\b(pv|input)\s+(voltage)\b', defn_ns) or \
-       re.search(r'dc전압', defn_ns):
-        if 'fault' not in defn_lower and 'high' not in defn_lower and 'low' not in defn_lower:
-            return 'mppt1_voltage'
-    if re.search(r'\b(i dc|dc)\s*(current)', defn_ns) or \
-       re.search(r'\b(pv|input)\s+(current)\b', defn_ns) or \
-       re.search(r'dc전류', defn_ns):
-        if 'fault' not in defn_lower:
-            return 'mppt1_current'
+    has_trailing_num = bool(re.search(r'\d+\s*$', defn_lower))
+    if not has_trailing_num:
+        if re.search(r'\b(i dc|dc)\s*(voltage)', defn_ns) or \
+           re.search(r'\b(pv|input)\s+(voltage)\b', defn_ns) or \
+           re.search(r'dc전압', defn_ns):
+            if 'fault' not in defn_lower and 'high' not in defn_lower and 'low' not in defn_lower:
+                return 'mppt1_voltage'
+        if re.search(r'\b(i dc|dc)\s*(current)', defn_ns) or \
+           re.search(r'\b(pv|input)\s+(current)\b', defn_ns) or \
+           re.search(r'dc전류', defn_ns):
+            if 'fault' not in defn_lower:
+                return 'mppt1_current'
 
     # 0-2) SMA EDMx 형식: "System voltage: Line conductor LN at PCC"
     #      "System current: Line conductor LN at PCC"
@@ -1874,6 +1878,10 @@ def build_h01_match_table(categorized: dict, meta: dict) -> List[dict]:
                     base_addr = min(n.address for n in dc_neighbors)
                 offset = r.address - base_addr
                 mppt_n = (offset // 2) + 1
+                # 채널 번호 유효성 체크: 1~32 벗어나면 재분류 건너뜀 (오염 방지)
+                if not (1 <= mppt_n <= 32):
+                    clean_alarms.append(r)
+                    continue
                 if offset % 2 == 0:  # 짝수 = voltage
                     r.h01_field = f'mppt{mppt_n}_voltage'
                     r.definition = f'DC_VOLTAGE_{mppt_n}'
