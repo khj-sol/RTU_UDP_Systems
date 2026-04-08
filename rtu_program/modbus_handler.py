@@ -311,7 +311,8 @@ _H01_FLOAT_CONVERTERS = {
     'frequency_to_01Hz': lambda v: int(v * 10),
     'power_to_W':        lambda v: int(v),
     'pf_raw':            lambda v: int(v * 1000),
-    'energy_kwh_to_Wh':  lambda v: int(v),
+    # FLOAT32 cumulative energy is already stored in kWh — convert to Wh
+    'energy_kwh_to_Wh':  lambda v: int(v * 1000),
     'raw':               lambda v: int(v),
 }
 _H01_DEFAULTS = {
@@ -333,7 +334,17 @@ def _init_reg_attrs(handler, reg_module):
     handler.scale = _normalize_scale(getattr(mod, 'SCALE', SCALE))
     handler.InvMode = getattr(mod, 'InverterMode', InverterMode)
     handler.reg_to_u32 = getattr(mod, 'registers_to_u32', registers_to_u32)
-    handler.reg_to_float32 = getattr(mod, 'registers_to_float32', None)
+
+    def _default_registers_to_float32(lo, hi):
+        """Universal IEEE-754 float32 decoder fallback when the register
+        module doesn't supply one. Words are passed as (lo, hi)."""
+        import struct as _s
+        try:
+            return _s.unpack('>f', _s.pack('>HH', int(hi) & 0xFFFF, int(lo) & 0xFFFF))[0]
+        except (TypeError, ValueError, _s.error):
+            return 0.0
+
+    handler.reg_to_float32 = getattr(mod, 'registers_to_float32', None) or _default_registers_to_float32
     handler.reg_data_types = getattr(mod, 'DATA_TYPES', None)
     # Find StatusConverter: scan module for any class ending with 'StatusConverter'.
     # This handles both {Brand}StatusConverter and {Brand}{N}StatusConverter patterns
@@ -561,6 +572,36 @@ class ModbusHandlerHAT:
                 continue
         return cache
 
+    # Aliases for which DATA_TYPES is sometimes missing in MM v2 generated files.
+    _DTYPE_ALIAS_FALLBACKS = {
+        'R_PHASE_VOLTAGE': ('L1_VOLTAGE',), 'R_VOLTAGE': ('L1_VOLTAGE',),
+        'S_PHASE_VOLTAGE': ('L2_VOLTAGE',), 'S_VOLTAGE': ('L2_VOLTAGE',),
+        'T_PHASE_VOLTAGE': ('L3_VOLTAGE', 'L2_VOLTAGE'),
+        'T_VOLTAGE': ('L3_VOLTAGE', 'L2_VOLTAGE'),
+        'R_PHASE_CURRENT': ('L1_CURRENT',), 'R_CURRENT': ('L1_CURRENT',),
+        'S_PHASE_CURRENT': ('L2_CURRENT',), 'S_CURRENT': ('L2_CURRENT',),
+        'T_PHASE_CURRENT': ('L3_CURRENT', 'L2_CURRENT'),
+        'T_CURRENT': ('L3_CURRENT', 'L2_CURRENT'),
+        'TOTAL_ENERGY': ('CUMULATIVE_ENERGY',),
+        'CUMULATIVE_ENERGY_LOW': ('CUMULATIVE_ENERGY',),
+    }
+
+    def _resolve_dtype(self, field_name):
+        """Look up the data type for a register attribute, walking through
+        aliases when DATA_TYPES is missing or None for the requested field.
+
+        Returns lowercase dtype string ('u16', 'u32', 's16', 's32',
+        'float32') — never None — so callers can safely call .lower().
+        """
+        dtypes = self.reg_data_types or {}
+        dt = dtypes.get(field_name)
+        if not dt:
+            for alt in self._DTYPE_ALIAS_FALLBACKS.get(field_name, ()):
+                dt = dtypes.get(alt)
+                if dt:
+                    break
+        return (dt or 'u16').lower()
+
     def _get_typed_from_cache(self, field_name, addr, cache):
         """Extract a typed value from the register cache.
 
@@ -568,7 +609,7 @@ class ModbusHandlerHAT:
         Handles FLOAT32/U32/S32/S16/U16 via DATA_TYPES.
         U32/S32는 u32_word_order에 따라 워드 순서 결정.
         """
-        dtype = (self.reg_data_types or {}).get(field_name, 'u16').lower()
+        dtype = self._resolve_dtype(field_name)
         if dtype == 'float32':
             w0 = cache.get(addr)
             w1 = cache.get(addr + 1)
@@ -606,7 +647,7 @@ class ModbusHandlerHAT:
         Uses reg_data_types to determine Float32/U32/S32/S16/U16 handling.
         U32/S32는 u32_word_order에 따라 워드 순서 결정.
         """
-        dtype = (self.reg_data_types or {}).get(field_name, 'u16')
+        dtype = self._resolve_dtype(field_name)
 
         if dtype == 'float32':
             result = self._read_reg(addr, 2)
@@ -678,7 +719,7 @@ class ModbusHandlerHAT:
                 """raw register value → H01 정수."""
                 if val is None:
                     return _H01_DEFAULTS.get(field_name, 0)
-                dtype = dtypes.get(field_name, 'u16').lower()
+                dtype = self._resolve_dtype(field_name)
                 if dtype == 'float32':
                     fn = _H01_FLOAT_CONVERTERS.get(conv_key, _H01_FLOAT_CONVERTERS['raw'])
                     return fn(val)
@@ -692,13 +733,16 @@ class ModbusHandlerHAT:
             data = {}
 
             # ── H01_FIELD_MAP 스칼라 필드 처리 ──────────────────────────────
+            # Note: H01_FIELD_MAP keys may have trailing spaces (Excel padding artifact);
+            # strip them so create_h01_inverter() can look them up correctly.
             for h01_key, (reg_attr, conv_key) in h01_map.items():
+                key = h01_key.strip()
                 addr = getattr(rm, reg_attr, None)
                 if addr is None:
-                    data[h01_key] = _H01_DEFAULTS.get(h01_key, 0)
+                    data[key] = _H01_DEFAULTS.get(key, 0)
                     continue
                 val = _read_field(reg_attr, addr, cache)
-                data[h01_key] = _convert(val, conv_key, reg_attr)
+                data[key] = _convert(val, conv_key, reg_attr)
 
             # ── Inverter Mode / Status 변환 ─────────────────────────────────
             raw_mode = data.get('mode', 0)
@@ -729,8 +773,8 @@ class ModbusHandlerHAT:
                 c_addr = getattr(rm, c_field, None)
                 v_val = _read_field(v_field, v_addr, cache)
                 c_val = _read_field(c_field, c_addr, cache) if c_addr is not None else None
-                v_dtype = dtypes.get(v_field, 'u16').lower()
-                c_dtype = dtypes.get(c_field, 'u16').lower()
+                v_dtype = self._resolve_dtype(v_field)
+                c_dtype = self._resolve_dtype(c_field)
                 mppt_v = (int((v_val or 0) * 10) if v_dtype == 'float32'
                           else int(v_val) if v_val else 0)
                 mppt_c = (int((c_val or 0) * 100) if c_dtype == 'float32'
@@ -1899,6 +1943,12 @@ class ModbusHandlerSerial:
             return self._read_input_reg(start, count)
         return self._read_reg(start, count)
 
+    # Reuse the alias-aware dtype resolver from HAT class so dynamic reads
+    # can handle MM v2 register files where DATA_TYPES is missing for some
+    # alias attributes (e.g. T_PHASE_VOLTAGE → L2_VOLTAGE).
+    _DTYPE_ALIAS_FALLBACKS = ModbusHandlerHAT._DTYPE_ALIAS_FALLBACKS
+    _resolve_dtype = ModbusHandlerHAT._resolve_dtype
+
     def _build_reg_cache(self, read_blocks):
         """Read all READ_BLOCKS and return {addr: value} cache."""
         return ModbusHandlerHAT._build_reg_cache(self, read_blocks)
@@ -2344,10 +2394,14 @@ class ModbusHandlerSerial:
         
         try:
             data = {}
-            
+
+            def _rd(addr, count):
+                """pymodbus 2.x/3.x 호환 read helper for relay/weather."""
+                return _pymodbus_call(self.client.read_holding_registers, addr, count, slave_id)
+
             # Read block 1: Phase voltage V1,V2,V3 + Current A1,A2,A3 (addr 6-17, 12 regs)
-            result = self.client.read_holding_registers(KDU300RegisterMap.V1, 12, slave=slave_id)
-            if not result.isError() and len(result.registers) >= 12:
+            result = _rd(KDU300RegisterMap.V1, 12)
+            if result is not None and not result.isError() and len(result.registers) >= 12:
                 data['r_voltage'] = registers_to_float(result.registers[0], result.registers[1])
                 data['s_voltage'] = registers_to_float(result.registers[2], result.registers[3])
                 data['t_voltage'] = registers_to_float(result.registers[4], result.registers[5])
@@ -2357,10 +2411,10 @@ class ModbusHandlerSerial:
             else:
                 self.logger.error("Failed to read relay voltage/current")
                 return None
-            
+
             # Read block 2: Active power W1,W2,W3,Total (addr 18-25, 8 regs)
-            result = self.client.read_holding_registers(KDU300RegisterMap.W1, 8, slave=slave_id)
-            if not result.isError() and len(result.registers) >= 8:
+            result = _rd(KDU300RegisterMap.W1, 8)
+            if result is not None and not result.isError() and len(result.registers) >= 8:
                 data['r_active_power'] = registers_to_float(result.registers[0], result.registers[1])
                 data['s_active_power'] = registers_to_float(result.registers[2], result.registers[3])
                 data['t_active_power'] = registers_to_float(result.registers[4], result.registers[5])
@@ -2368,35 +2422,35 @@ class ModbusHandlerSerial:
             else:
                 self.logger.error("Failed to read relay power")
                 return None
-            
+
             # Read block 3: Avg PF, Frequency (addr 48-51, 4 regs)
-            result = self.client.read_holding_registers(KDU300RegisterMap.AVG_PF, 4, slave=slave_id)
-            if not result.isError() and len(result.registers) >= 4:
+            result = _rd(KDU300RegisterMap.AVG_PF, 4)
+            if result is not None and not result.isError() and len(result.registers) >= 4:
                 data['avg_power_factor'] = registers_to_float(result.registers[0], result.registers[1])
                 data['frequency'] = registers_to_float(result.registers[2], result.registers[3])
             else:
                 self.logger.error("Failed to read relay PF/frequency")
                 return None
-            
+
             # Read block 4: Energy +Wh, -Wh (addr 52-55, 4 regs)
-            result = self.client.read_holding_registers(KDU300RegisterMap.POSITIVE_WH, 4, slave=slave_id)
-            if not result.isError() and len(result.registers) >= 4:
+            result = _rd(KDU300RegisterMap.POSITIVE_WH, 4)
+            if result is not None and not result.isError() and len(result.registers) >= 4:
                 data['received_energy'] = registers_to_float(result.registers[0], result.registers[1])
                 data['sent_energy'] = registers_to_float(result.registers[2], result.registers[3])
             else:
                 self.logger.error("Failed to read relay energy")
                 return None
-            
+
             # Read block 5: DO status (addr 92, 1 reg)
-            result = self.client.read_holding_registers(KDU300RegisterMap.DO_STATUS, 1, slave=slave_id)
-            if not result.isError() and len(result.registers) >= 1:
+            result = _rd(KDU300RegisterMap.DO_STATUS, 1)
+            if result is not None and not result.isError() and len(result.registers) >= 1:
                 data['do_status'] = result.registers[0]
             else:
                 data['do_status'] = 0
-            
+
             # Read block 6: DI1 status (addr 98, 1 reg)
-            result = self.client.read_holding_registers(KDU300RegisterMap.DI1, 1, slave=slave_id)
-            if not result.isError() and len(result.registers) >= 1:
+            result = _rd(KDU300RegisterMap.DI1, 1)
+            if result is not None and not result.isError() and len(result.registers) >= 1:
                 data['di_status'] = result.registers[0]
             else:
                 data['di_status'] = 0
@@ -2430,10 +2484,13 @@ class ModbusHandlerSerial:
         
         try:
             data = {}
-            
+
+            def _rd(addr, count):
+                return _pymodbus_call(self.client.read_holding_registers, addr, count, slave_id)
+
             # Read block 1: Air temp, humidity, pressure, wind speed, direction (addr 1-5, 5 regs)
-            result = self.client.read_holding_registers(SEM5046RegisterMap.AIR_TEMP, 5, slave=slave_id)
-            if not result.isError() and len(result.registers) >= 5:
+            result = _rd(SEM5046RegisterMap.AIR_TEMP, 5)
+            if result is not None and not result.isError() and len(result.registers) >= 5:
                 data['air_temp'] = raw_to_air_temp(result.registers[0])
                 data['air_humidity'] = raw_to_humidity(result.registers[1])
                 data['air_pressure'] = raw_to_pressure(result.registers[2])
@@ -2442,29 +2499,29 @@ class ModbusHandlerSerial:
             else:
                 self.logger.error("Failed to read weather basic data")
                 return None
-            
+
             # Read block 2: Module temp 1, Horizontal radiation, accum (addr 6-8, 3 regs)
-            result = self.client.read_holding_registers(SEM5046RegisterMap.MODULE_TEMP_1, 3, slave=slave_id)
-            if not result.isError() and len(result.registers) >= 3:
+            result = _rd(SEM5046RegisterMap.MODULE_TEMP_1, 3)
+            if result is not None and not result.isError() and len(result.registers) >= 3:
                 data['module_temp_1'] = raw_to_module_temp(result.registers[0])
                 data['horizontal_radiation'] = result.registers[1]
                 data['horizontal_accum'] = raw_to_accum_radiation(result.registers[2])
             else:
                 self.logger.error("Failed to read weather radiation data")
                 return None
-            
+
             # Read block 3: Inclined radiation, accum (addr 13-14, 2 regs)
-            result = self.client.read_holding_registers(SEM5046RegisterMap.INCLINED_RADIATION, 2, slave=slave_id)
-            if not result.isError() and len(result.registers) >= 2:
+            result = _rd(SEM5046RegisterMap.INCLINED_RADIATION, 2)
+            if result is not None and not result.isError() and len(result.registers) >= 2:
                 data['inclined_radiation'] = result.registers[0]
                 data['inclined_accum'] = raw_to_accum_radiation(result.registers[1])
             else:
                 self.logger.error("Failed to read weather inclined radiation")
                 return None
-            
+
             # Read block 4: Module temp 2,3,4 (addr 17-19, 3 regs)
-            result = self.client.read_holding_registers(SEM5046RegisterMap.MODULE_TEMP_2, 3, slave=slave_id)
-            if not result.isError() and len(result.registers) >= 3:
+            result = _rd(SEM5046RegisterMap.MODULE_TEMP_2, 3)
+            if result is not None and not result.isError() and len(result.registers) >= 3:
                 data['module_temp_2'] = raw_to_module_temp(result.registers[0])
                 data['module_temp_3'] = raw_to_module_temp(result.registers[1])
                 data['module_temp_4'] = raw_to_module_temp(result.registers[2])
@@ -3136,6 +3193,10 @@ class MultiDeviceHandler:
 
         if use_simulation:
             return ModbusHandlerSimulation(slave_id), "SIM"
+        elif self.use_tcp:
+            # TCP test mode — relay/weather over the same simulator endpoint
+            return ModbusHandlerTcp(self.tcp_host, self.tcp_port, slave_id,
+                                    shared_client=self._shared_pc_client), "TCP"
         elif self.use_cm4:
             return ModbusHandlerCM4(ch, br, slave_id), "CM4"
         elif self.use_hat:

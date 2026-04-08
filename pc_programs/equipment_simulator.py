@@ -986,6 +986,27 @@ class GenericInverterSimulator:
                 return addr
         return None
 
+    def _h01_addr(self, h01_field_key):
+        """Resolve an H01 field name (e.g. 'r_voltage') to its (addr, attr_name) via H01_FIELD_MAP.
+
+        H01_FIELD_MAP keys may have trailing spaces (Excel padding artifact);
+        match by stripped key. Returns (None, None) when the field isn't mapped.
+        """
+        fm = getattr(self._module, 'H01_FIELD_MAP', {}) or {}
+        target = h01_field_key.strip()
+        entry = None
+        for k, v in fm.items():
+            if k.strip() == target:
+                entry = v
+                break
+        if entry is None:
+            return None, None
+        reg_attr = entry[0]
+        addr = getattr(self.reg_map, reg_attr, None)
+        if addr is None or not isinstance(addr, int):
+            return None, reg_attr
+        return addr, reg_attr
+
     def _create_datastore(self):
         """Create Modbus datastore — FC03 holding register or FC04 input register."""
         block = ModbusLoggedHoldingBlock(
@@ -1097,24 +1118,69 @@ class GenericInverterSimulator:
             self._set_reg(low_addr + 1, [hi_word])
 
     def _smart_write(self, field_name, addr, value):
-        """DATA_TYPES를 보고 U16/U32/S32에 맞춰 자동 쓰기.
+        """DATA_TYPES를 보고 U16/U32/S32/FLOAT32에 맞춰 자동 쓰기.
 
         field_name: RegisterMap 속성명 (DATA_TYPES 키)
         addr: 시작 주소
-        value: 정수 값 (raw)
+        value: 정수 값 (raw, scaled). FLOAT32 일 경우 스케일을 역적용해 float 으로 변환.
+
+        DATA_TYPES 가 None 또는 빈 값일 때(별칭 필드 포함)는 U16 으로 폴백한다.
         """
         if addr is None:
             return
         dtypes = getattr(self._module, 'DATA_TYPES', {}) or {}
-        dt = dtypes.get(field_name, 'U16').upper()
-        if dt in ('U32', 'S32', 'FLOAT32'):
+        dt_raw = dtypes.get(field_name)
+        # DATA_TYPES may be missing for alias fields (e.g. R_PHASE_VOLTAGE = L1_VOLTAGE)
+        # — try the canonical alias target first.
+        if not dt_raw:
+            for alias_target in ('L1_VOLTAGE', 'L1_CURRENT', 'L2_VOLTAGE', 'L2_CURRENT',
+                                  'L3_VOLTAGE', 'L3_CURRENT'):
+                if dtypes.get(alias_target):
+                    dt_raw = dtypes.get(alias_target)
+                    break
+        dt = (dt_raw or 'U16').upper()
+        if dt == 'FLOAT32':
+            # Convert raw scaled int → physical float by applying the
+            # appropriate scale factor. Field name match is **most-specific
+            # first** so POWER_FACTOR and ENERGY don't accidentally pick the
+            # generic POWER scale.
+            fname = field_name.upper()
+            if 'POWER_FACTOR' in fname or 'PF' in fname:
+                scale = self.scale.get('power_factor', 0.001)
+            elif 'ENERGY' in fname or 'GENERATION' in fname:
+                # Cumulative energy values are already in kWh — no scaling.
+                scale = 1.0
+            elif 'FREQUENCY' in fname or 'FREQ' in fname:
+                scale = self.scale.get('frequency', 0.01)
+            elif 'VOLTAGE' in fname:
+                scale = self.scale.get('voltage', 0.1)
+            elif 'CURRENT' in fname:
+                scale = self.scale.get('current', 0.01)
+            elif 'POWER' in fname:
+                scale = self.scale.get('power', 0.1)
+            else:
+                scale = 1.0
+            try:
+                fval = float(value) * scale
+            except (TypeError, ValueError):
+                fval = 0.0
+            import struct as _struct
+            packed = _struct.pack('>f', fval)
+            hi, lo = _struct.unpack('>HH', packed)
+            if getattr(self._module, 'U32_WORD_ORDER', 'LH') == 'HL':
+                self._set_reg(addr, [hi])
+                self._set_reg(addr + 1, [lo])
+            else:
+                self._set_reg(addr, [lo])
+                self._set_reg(addr + 1, [hi])
+        elif dt in ('U32', 'S32'):
             self._write_u32(addr, value)
         elif dt == 'S16':
             v = int(value)
             if v < 0:
                 v = v + 65536
             self._set_reg(addr, [v & 0xFFFF])
-        else:  # U16
+        else:  # U16 (default)
             self._set_reg(addr, [int(value) & 0xFFFF])
 
     def _update_registers(self):
@@ -1201,48 +1267,52 @@ class GenericInverterSimulator:
                 self._smart_write(c_field, c_addr, str_c_raw)
 
         # --- AC phase data ---
-        ac_voltage_raw = int(380.0 / self._s_voltage) if ac_power_w > 0 else 0
+        # Grid voltage is always present (even at night when inverter is in standby).
+        # Add tiny noise for realism. 380V three-phase nominal.
+        ac_voltage_v = 380.0 + random.uniform(-1.5, 1.5)
+        ac_voltage_raw = int(ac_voltage_v / self._s_voltage)
         ac_freq_raw = int(env.frequency / self._s_freq)
         ac_power_raw = int(ac_power_w / self._s_power)
         pv_power_raw = int(pv_total_w / self._s_power)
 
-        # Phase voltages (try multiple naming conventions, DATA_TYPES-aware)
-        for fields in [('R_PHASE_VOLTAGE', 'L1_VOLTAGE', 'A_PHASE_VOLTAGE'),
-                       ('S_PHASE_VOLTAGE', 'L2_VOLTAGE', 'B_PHASE_VOLTAGE'),
-                       ('T_PHASE_VOLTAGE', 'L3_VOLTAGE', 'C_PHASE_VOLTAGE')]:
-            addr = self._find_addr(*fields)
-            self._smart_write(fields[0], addr, ac_voltage_raw)
+        # H01_FIELD_MAP-driven write helper: writes the value to whatever address
+        # the register file says the RTU will read for this H01 field. Falls back
+        # to legacy _find_addr() with the supplied alias names when the mapping
+        # is missing (older files without H01_FIELD_MAP).
+        def _h01_write(h01_key, value, *fallback_aliases):
+            addr, attr = self._h01_addr(h01_key)
+            if addr is None:
+                addr = self._find_addr(*fallback_aliases) if fallback_aliases else None
+                attr = fallback_aliases[0] if fallback_aliases else h01_key.upper()
+            if addr is not None:
+                self._smart_write(attr, addr, value)
 
-        # Phase currents
+        # Phase voltages — always written (grid voltage exists 24/7).
+        _h01_write('r_voltage', ac_voltage_raw, 'R_PHASE_VOLTAGE', 'L1_VOLTAGE', 'A_PHASE_VOLTAGE')
+        _h01_write('s_voltage', ac_voltage_raw, 'S_PHASE_VOLTAGE', 'L2_VOLTAGE', 'B_PHASE_VOLTAGE')
+        _h01_write('t_voltage', ac_voltage_raw, 'T_PHASE_VOLTAGE', 'L3_VOLTAGE', 'C_PHASE_VOLTAGE')
+
+        # Phase currents (only when generating power)
         apparent_w = math.sqrt(ac_power_w**2) if ac_power_w > 0 else 0
         phase_current_raw = int(apparent_w / 3 / 380.0 / self._s_current) if apparent_w > 0 else 0
-        for fields in [('R_PHASE_CURRENT', 'L1_CURRENT'),
-                       ('S_PHASE_CURRENT', 'L2_CURRENT'),
-                       ('T_PHASE_CURRENT', 'L3_CURRENT')]:
-            addr = self._find_addr(*fields)
-            self._smart_write(fields[0], addr, phase_current_raw)
+        _h01_write('r_current', phase_current_raw, 'R_PHASE_CURRENT', 'L1_CURRENT')
+        _h01_write('s_current', phase_current_raw, 'S_PHASE_CURRENT', 'L2_CURRENT')
+        _h01_write('t_current', phase_current_raw, 'T_PHASE_CURRENT', 'L3_CURRENT')
 
-        # Frequency
-        addr = self._find_addr('FREQUENCY')
-        self._smart_write('FREQUENCY', addr, ac_freq_raw)
+        # Frequency — always written
+        _h01_write('frequency', ac_freq_raw, 'FREQUENCY')
 
         # AC Power
-        addr = self._find_addr('AC_POWER', 'ACTIVE_POWER')
-        if addr is not None:
-            self._smart_write('AC_POWER', addr, ac_power_raw)
+        _h01_write('ac_power', ac_power_raw, 'AC_POWER', 'ACTIVE_POWER')
 
         # PV Power
-        addr = self._find_addr('PV_POWER')
-        if addr is not None:
-            self._smart_write('PV_POWER', addr, pv_power_raw)
+        _h01_write('pv_power', pv_power_raw, 'PV_POWER')
 
-        # Power factor
+        # Power factor — always written
         pf = self.power_factor_set / 1000.0
         pf = max(0.85, min(1.0, abs(pf)))
         pf_raw = int(pf * 1000)
-        addr = self._find_addr('POWER_FACTOR')
-        if addr is not None:
-            self._smart_write('POWER_FACTOR', addr, pf_raw)
+        _h01_write('power_factor', pf_raw, 'POWER_FACTOR')
 
         # --- DER-AVM Real-time Monitoring (0x03E8~0x03FD, S32) ---
         dea_pf = pf_raw
@@ -1265,11 +1335,16 @@ class GenericInverterSimulator:
             if dea_addr is not None:
                 self._write_u32(dea_addr, dea_val)
 
-        # Cumulative energy
+        # Cumulative energy — written via H01_FIELD_MAP so per-protocol register
+        # naming differences (ACCUMULATEDPOWERGENERATION, PV1ENERGY_TOTAL_LOW, etc.)
+        # are honored automatically.
         total_kwh = int(self.total_energy)
-        addr = self._find_addr('CUMULATIVE_ENERGY', 'CUMULATIVE_ENERGY_LOW', 'TOTAL_ENERGY')
-        if addr is not None:
-            self._write_u32(addr, total_kwh)
+        cum_addr, cum_attr = self._h01_addr('cumulative_energy')
+        if cum_addr is None:
+            cum_addr = self._find_addr('CUMULATIVE_ENERGY', 'CUMULATIVE_ENERGY_LOW', 'TOTAL_ENERGY')
+            cum_attr = 'CUMULATIVE_ENERGY'
+        if cum_addr is not None:
+            self._smart_write(cum_attr, cum_addr, total_kwh)
 
         # Accumulate energy
         if ac_power_w > 0:
@@ -1285,9 +1360,22 @@ class GenericInverterSimulator:
                 mode_val = 1 if self.on_off == 1 else 3
             self._set_reg(addr, [mode_val])
 
-        # Error codes
+        # Error codes — only write if address does NOT collide with a measurement
+        # field. Some MM v2 generated files reuse the same register address for
+        # ERROR_CODE2 and L1_VOLTAGE / FREQUENCY etc.; writing 0 there would
+        # corrupt the measurement we already wrote above.
+        _measurement_addrs = set()
+        for h01_key in ('r_voltage', 's_voltage', 't_voltage',
+                        'r_current', 's_current', 't_current',
+                        'frequency', 'power_factor', 'ac_power', 'pv_power',
+                        'cumulative_energy'):
+            a, _ = self._h01_addr(h01_key)
+            if a is not None:
+                _measurement_addrs.add(a)
         for name in ('ERROR_CODE1', 'ERROR_CODE2', 'ERROR_CODE3'):
             addr = self._find_addr(name)
+            if addr is None or addr in _measurement_addrs:
+                continue
             self._set_reg(addr, [0])
 
         # Temperature — from environment
