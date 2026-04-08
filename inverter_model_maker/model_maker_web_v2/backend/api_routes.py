@@ -764,6 +764,147 @@ def save_h01_mapping(session_id: str, body: dict):
         raise HTTPException(500, f'H01_MAPPING 저장 오류: {str(e)}')
 
 
+# ─── MPPT_MAPPING (Stage 2) ──────────────────────────────────────────────────
+
+@router.get('/mppt-mapping/{session_id}')
+def get_mppt_mapping(session_id: str):
+    """Stage2 Excel의 MPPT_MAPPING 시트를 읽어 JSON 반환"""
+    s = SessionStore.get(session_id)
+    if not s:
+        raise HTTPException(404, 'session not found')
+
+    stage2_excel = s.get('stage2_excel')
+    if not stage2_excel or not os.path.exists(stage2_excel):
+        raise HTTPException(400, 'Stage 2 not completed')
+
+    try:
+        import openpyxl
+        wb = openpyxl.load_workbook(stage2_excel, data_only=True)
+        if 'MPPT_MAPPING' not in wb.sheetnames:
+            raise HTTPException(404, 'MPPT_MAPPING sheet not found')
+
+        ws = wb['MPPT_MAPPING']
+        DATA_START = 4
+
+        seen = set()
+        name_to_addr: dict[str, str] = {}
+        name_to_fc: dict[str, str] = {}
+        for row_idx in range(DATA_START, ws.max_row + 1):
+            val = ws.cell(row=row_idx, column=8).value
+            if val:
+                v = str(val).strip()
+                if v:
+                    seen.add(v)
+            jname = ws.cell(row=row_idx, column=10).value
+            kfc = ws.cell(row=row_idx, column=11).value
+            laddr = ws.cell(row=row_idx, column=12).value
+            if jname:
+                nm = str(jname).strip()
+                if nm and nm not in name_to_addr:
+                    name_to_addr[nm] = str(laddr or '').strip()
+                    name_to_fc[nm] = str(kfc or '3').strip()
+        available_registers = sorted(seen)
+        available_with_fc = [
+            {'name': nm, 'addr': name_to_addr.get(nm, ''), 'fc': name_to_fc.get(nm, '3')}
+            for nm in available_registers
+        ]
+
+        # B열에 값이 있는 행만 동적으로 읽기
+        fields = []
+        for row in range(DATA_START, ws.max_row + 1):
+            field = str(ws.cell(row=row, column=2).value or '').strip()
+            if not field:
+                break
+            description = str(ws.cell(row=row, column=3).value or '').strip()
+            current_raw = str(ws.cell(row=row, column=4).value or '').strip()
+            current_clean = _parse_reg_display(current_raw)
+
+            match_source_raw = str(ws.cell(row=row, column=13).value or '').strip().lower()
+            if match_source_raw == 'handler':
+                is_matched = True
+                match_source = 'handler'
+            elif match_source_raw == 'der':
+                is_matched = True
+                match_source = 'der'
+            else:
+                is_matched = bool(current_clean) and current_clean in available_registers
+                match_source = 'pdf' if is_matched else ''
+
+            suggestions = []
+            for col in (5, 6, 7):
+                sv = ws.cell(row=row, column=col).value
+                if sv:
+                    clean = _parse_reg_display(str(sv).strip())
+                    if clean and clean not in suggestions:
+                        suggestions.append(clean)
+
+            fc_val = ws.cell(row=row, column=9).value
+            fc = int(fc_val) if fc_val else 3
+            current_addr = name_to_addr.get(current_clean, '') if current_clean else ''
+
+            fields.append({
+                'field': field,
+                'description': description,
+                'current_register': current_clean,
+                'current_raw': current_raw,
+                'is_matched': is_matched,
+                'match_source': match_source,
+                'suggestions': suggestions,
+                'fc': fc,
+                'current_addr': current_addr,
+            })
+
+        wb.close()
+        return {
+            'fields': fields,
+            'available_registers': available_registers,
+            'available_with_fc': available_with_fc,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f'MPPT_MAPPING 읽기 오류: {str(e)}')
+
+
+@router.post('/mppt-mapping/{session_id}')
+def save_mppt_mapping(session_id: str, body: dict):
+    """사용자가 수정한 MPPT 매핑을 Stage2 Excel에 저장"""
+    s = SessionStore.get(session_id)
+    if not s:
+        raise HTTPException(404, 'session not found')
+
+    stage2_excel = s.get('stage2_excel')
+    if not stage2_excel or not os.path.exists(stage2_excel):
+        raise HTTPException(400, 'Stage 2 not completed')
+
+    mappings = body.get('mappings', {})
+    try:
+        import openpyxl
+        wb = openpyxl.load_workbook(stage2_excel)
+        if 'MPPT_MAPPING' not in wb.sheetnames:
+            raise HTTPException(404, 'MPPT_MAPPING sheet not found')
+        ws = wb['MPPT_MAPPING']
+        DATA_START = 4
+        updated = 0
+        for row in range(DATA_START, ws.max_row + 1):
+            field = str(ws.cell(row=row, column=2).value or '').strip()
+            if not field:
+                break
+            if field in mappings:
+                ws.cell(row=row, column=4, value=mappings[field] or None)
+                ws.cell(row=row, column=13, value='pdf' if mappings[field] else '')
+                updated += 1
+        wb.save(stage2_excel)
+        wb.close()
+        return {'status': 'ok', 'updated': updated}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f'MPPT_MAPPING 저장 오류: {str(e)}')
+
+
 # ─── INFO_MAPPING (Stage 1) ──────────────────────────────────────────────────
 
 @router.get('/info-mapping/{session_id}')
