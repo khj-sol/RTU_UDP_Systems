@@ -3573,6 +3573,16 @@ def run_stage1(
         ws_iv.column_dimensions['D'].width = 12
         ws_iv.column_dimensions['E'].width = 10
 
+    # ═══════════════════════════════════════════════════════════════════
+    # Sheet INFO_MAPPING — Model/SN 수동 매핑 (Stage1 INFO 패널용)
+    # ═══════════════════════════════════════════════════════════════════
+    _info_match_for_sheet = suggestions.get('_info_match', {})
+    try:
+        _add_info_mapping_sheet(wb, _info_match_for_sheet, suggestions,
+                                all_regs_flat, openpyxl)
+    except Exception as _e:
+        log(f'INFO_MAPPING 시트 생성 실패: {_e}', 'warn')
+
     wb.save(output_path)
     wb.close()
 
@@ -3593,6 +3603,164 @@ def run_stage1(
         'info_match': info_match,
         'suggestions': suggestions,
     }
+
+
+def _add_info_mapping_sheet(wb, info_match: dict, suggestions: dict,
+                            all_regs: list, openpyxl_module) -> None:
+    """INFO_MAPPING 시트 추가 — Stage1 INFO 패널용 (Model + SN 수동 매핑).
+
+    구조 (H01_MAPPING 과 동일한 컬럼 규약):
+      A=No  B=field(model/sn)  C=설명  D=매칭된 레지스터(이름+주소)
+      E~G=추천 후보 1~3  H=전체 레지스터 목록(드롭다운 소스)
+      I=FC  J/K/L=숨김 메타데이터(name, fcs, addrs)  M=match_source
+    """
+    from openpyxl.styles import Font, PatternFill, Border, Side
+    from openpyxl.worksheet.datavalidation import DataValidation
+
+    ws = wb.create_sheet('INFO_MAPPING')
+
+    thin = Border(
+        left=Side(style='thin'), right=Side(style='thin'),
+        top=Side(style='thin'), bottom=Side(style='thin'))
+    hdr_font = Font(bold=True, color='FFFFFF')
+    hdr_fill = PatternFill('solid', fgColor='333333')
+    auto_fill  = PatternFill('solid', fgColor='D5F5E3')
+    empty_fill = PatternFill('solid', fgColor='FDECEA')
+    ref_fill   = PatternFill('solid', fgColor='EBF5FB')
+    suggest_fill = PatternFill('solid', fgColor='FFF9C4')
+
+    ws['A1'] = 'INFO_MAPPING — Model / Serial Number 수동 매핑'
+    ws['A1'].font = Font(bold=True, size=13)
+    ws['A2'] = ('※ D열에서 매핑할 레지스터를 선택하세요. '
+                'E~G열은 추천 후보, H열은 전체 INFO 후보 목록.')
+    ws['A2'].font = Font(italic=True, color='555555')
+
+    headers = ['No', 'Field', '설명', '매칭된 레지스터 (주소)',
+               '추천 후보 1', '추천 후보 2', '추천 후보 3',
+               '전체 레지스터 목록', 'FC']
+    for j, h in enumerate(headers, start=1):
+        cell = ws.cell(row=3, column=j, value=h)
+        cell.font = hdr_font
+        cell.fill = hdr_fill
+        cell.border = thin
+
+    INFO_FIELDS = [
+        ('model', 'Model 정보 (제조사/타입/제품명)'),
+        ('sn',    'Serial Number / Firmware Version'),
+    ]
+
+    matched_map = {
+        'model': info_match.get('matched_model'),
+        'sn':    info_match.get('matched_sn'),
+    }
+    suggest_map = {
+        'model': suggestions.get('info_model', []) or [],
+        'sn':    suggestions.get('info_sn', []) or [],
+    }
+
+    # 전체 후보 풀 (드롭다운 H열) — 모든 reg 의 이름 (주소 첫 1개만)
+    # 동시에 name → first addr_hex / fc 매핑 수집
+    name_to_addr: Dict[str, str] = {}
+    name_to_fc: Dict[str, str] = {}
+    name_to_def: Dict[str, str] = {}
+    for reg in all_regs:
+        if not reg.definition:
+            continue
+        nm = to_upper_snake(reg.definition)
+        if not nm or nm in name_to_addr:
+            continue
+        addr_hex = reg.address_hex if isinstance(reg.address, int) else (reg.address_hex or '')
+        name_to_addr[nm] = addr_hex
+        name_to_def[nm] = reg.definition
+        fc = str(getattr(reg, 'fc', '') or '').strip()
+        name_to_fc[nm] = fc if fc in ('3', '4') else '3'
+    avail_entries = sorted(name_to_addr.keys())
+
+    DATA_START = 4
+    n_fields = len(INFO_FIELDS)
+
+    for i, (field, desc) in enumerate(INFO_FIELDS):
+        row = DATA_START + i
+        ws.cell(row=row, column=1, value=i + 1).border = thin
+        ws.cell(row=row, column=2, value=field).border = thin
+        ws.cell(row=row, column=3, value=desc).border = thin
+
+        m = matched_map.get(field) or {}
+        match_name = m.get('name') or ''
+        match_addr = m.get('address') or ''
+        if match_name and match_addr:
+            display = f'{match_name} ({match_addr})'
+        elif match_name:
+            display = match_name
+        else:
+            display = ''
+
+        cell_d = ws.cell(row=row, column=4, value=display)
+        cell_d.border = thin
+        cell_d.fill = auto_fill if display else empty_fill
+
+        # 추천 후보 (E~G)
+        cands = suggest_map.get(field, [])
+        cand_clean = []
+        for c in cands:
+            defn = (c.get('definition') or '').strip()
+            addr = (c.get('addr') or '').strip()
+            if not defn:
+                continue
+            # 첫 번째 주소만 사용 (연속 그룹 0xXXXX~0xYYYY → 0xXXXX)
+            first_addr = addr.split('~')[0].strip().split(' ')[0]
+            nm = to_upper_snake(defn.split('...')[0])
+            cand_clean.append((nm, first_addr, defn))
+        for ci, (nm, addr, defn) in enumerate(cand_clean[:3]):
+            val = f'{nm} ({addr})' if addr else nm
+            c_e = ws.cell(row=row, column=5 + ci, value=val)
+            c_e.border = thin
+            c_e.fill = suggest_fill
+
+        # FC (I열) — 매칭된 레지스터의 FC 또는 기본 3
+        fc_val = '3'
+        if match_name and match_name in name_to_fc:
+            fc_val = name_to_fc[match_name]
+        ws.cell(row=row, column=9, value=int(fc_val)).border = thin
+
+        # M열 (숨김): 매칭 출처
+        ws.cell(row=row, column=13, value='pdf' if display else '')
+
+    # H열: 전체 후보 목록 (드롭다운 소스) + J/K/L 메타
+    for i, name in enumerate(avail_entries):
+        ws.cell(row=DATA_START + i, column=8, value=name).fill = ref_fill
+        ws.cell(row=DATA_START + i, column=10, value=name)
+        fc_n = name_to_fc.get(name, '3')
+        ws.cell(row=DATA_START + i, column=11, value=fc_n)
+        ws.cell(row=DATA_START + i, column=12, value=name_to_addr.get(name, ''))
+
+    # DataValidation: D열 드롭다운
+    last_avail_row = DATA_START + max(len(avail_entries), n_fields) - 1
+    last_data_row = DATA_START + n_fields - 1
+    if avail_entries:
+        dv = DataValidation(
+            type='list',
+            formula1=f'$H${DATA_START}:$H${last_avail_row}',
+            allow_blank=True,
+            showDropDown=False,
+        )
+        ws.add_data_validation(dv)
+        dv.add(f'D{DATA_START}:D{last_data_row}')
+
+    # 컬럼 너비 + 숨김
+    ws.column_dimensions['A'].width = 5
+    ws.column_dimensions['B'].width = 10
+    ws.column_dimensions['C'].width = 35
+    ws.column_dimensions['D'].width = 38
+    ws.column_dimensions['E'].width = 28
+    ws.column_dimensions['F'].width = 28
+    ws.column_dimensions['G'].width = 28
+    ws.column_dimensions['H'].width = 30
+    ws.column_dimensions['I'].width = 6
+    ws.column_dimensions['J'].hidden = True
+    ws.column_dimensions['K'].hidden = True
+    ws.column_dimensions['L'].hidden = True
+    ws.column_dimensions['M'].hidden = True
 
 
 def _build_all_suggestions(h01_table: list, categorized: dict,
@@ -3660,19 +3828,23 @@ def _build_all_suggestions(h01_table: list, categorized: dict,
         return False
 
     has_model = False
+    matched_model_reg = None
     for r in info_regs:
         if _is_model_def(r):
             has_model = True
+            matched_model_reg = r
             break
     if not has_model:
         for r in all_regs:
             if _is_model_def(r):
                 has_model = True
+                matched_model_reg = r
                 break
     if not has_model and _user_model_syns:
         for r in all_regs:
             if _name_key(r) in _user_model_syns:
                 has_model = True
+                matched_model_reg = r
                 break
 
     # SN: 시리얼번호 OR 펌웨어버전 (둘 다 인버터 식별 가능, 보통 ASCII)
@@ -3693,19 +3865,23 @@ def _build_all_suggestions(h01_table: list, categorized: dict,
         return False
 
     has_sn = False
+    matched_sn_reg = None
     for r in info_regs:
         if _is_sn_def(r):
             has_sn = True
+            matched_sn_reg = r
             break
     if not has_sn:
         for r in all_regs:
             if _is_sn_def(r):
                 has_sn = True
+                matched_sn_reg = r
                 break
     if not has_sn and _user_sn_syns:
         for r in all_regs:
             if _name_key(r) in _user_sn_syns:
                 has_sn = True
+                matched_sn_reg = r
                 break
 
     if not has_model:
@@ -3885,8 +4061,24 @@ def _build_all_suggestions(h01_table: list, categorized: dict,
             suggestions['iv_scan'] = _make_suggestion('iv_scan', cands)
             if log: log(f'  제안: IV Scan 후보 {len(cands)}개')
 
-    # INFO 매칭 여부 반환용
-    suggestions['_info_match'] = {'model': has_model, 'sn': has_sn}
+    # INFO 매칭 여부 반환용 — 매칭된 레지스터의 첫 주소 + definition 도 포함
+    def _reg_brief(r):
+        if r is None:
+            return None
+        return {
+            'definition': r.definition or '',
+            'name': to_upper_snake(r.definition) if r.definition else '',
+            'address': r.address_hex if isinstance(r.address, int) else (r.address_hex or ''),
+            'addr_int': r.address if isinstance(r.address, int) else None,
+            'data_type': r.data_type or '',
+        }
+
+    suggestions['_info_match'] = {
+        'model': has_model,
+        'sn': has_sn,
+        'matched_model': _reg_brief(matched_model_reg),
+        'matched_sn': _reg_brief(matched_sn_reg),
+    }
 
     return suggestions
 
