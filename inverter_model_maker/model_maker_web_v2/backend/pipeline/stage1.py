@@ -2214,16 +2214,29 @@ def build_h01_match_table(categorized: dict, meta: dict) -> List[dict]:
         energy_reg = _find_matched_reg(categorized, 'total_energy')
     rows.append(_make_pdf_match_row('cumulative_energy', energy_reg, 'Total Energy 미발견'))
 
-    # cumulative_energy_low (소수부/Wh/Low Byte) — 있으면 매핑, 없으면 N/A
+    # cumulative_energy_low (소수부/Wh/Low Byte) — 있으면 매핑, 없으면 cumulative_energy 에 alias
+    # 컨벤션: common/*_registers.py 에서 CUMULATIVE_ENERGY_LOW = CUMULATIVE_ENERGY (단일 U32/U16 인 경우)
     energy_low_reg = _find_matched_reg(categorized, 'cumulative_energy_low')
     if energy_low_reg:
         rows.append(_make_pdf_match_row('cumulative_energy_low', energy_low_reg))
+    elif energy_reg:
+        # 별도 소수부 레지스터가 없으면 cumulative_energy 와 동일 주소로 alias
+        rows.append({
+            'field': 'cumulative_energy_low', 'source': 'PDF_ALIAS',
+            'status': 'O',
+            'address': energy_reg.address_hex,
+            'definition': energy_reg.definition,
+            'type': energy_reg.data_type,
+            'unit': energy_reg.unit or '',
+            'scale': energy_reg.scale or '',
+            'note': 'cumulative_energy alias (단일 레지스터에 통합값)',
+        })
     else:
         rows.append({
             'field': 'cumulative_energy_low', 'source': 'PDF',
-            'status': '-', 'address': '-', 'definition': '-',
+            'status': 'X', 'address': '-', 'definition': '-',
             'type': '', 'unit': '', 'scale': '',
-            'note': '소수부 레지스터 없음 (단일 레지스터)',
+            'note': 'cumulative_energy 미발견 — alias 불가',
         })
 
     status_reg = _find_matched_reg(categorized, 'inverter_status', cat='STATUS')
