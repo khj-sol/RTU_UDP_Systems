@@ -3927,35 +3927,53 @@ def _build_all_suggestions(h01_table: list, categorized: dict,
                 break
 
     # SN: 시리얼번호 OR 펌웨어버전 (둘 다 인버터 식별 가능, 보통 ASCII)
-    _SN_KWS = [' serial', ' c serial', ' inverter sn ',
-               ' firmware', ' fw ver', ' fwver', ' fw no', ' fw[',
-               ' software version', ' soft version', ' soft ver',
-               ' software ver', ' sw ver', ' sw version',
-               ' control firmware']
+    # 1순위: 진짜 SN (serial/sn 인덱스), 2순위: firmware/software fallback
+    _SN_PRIMARY_KWS = [' serial', ' c serial', ' inverter sn ']
+    _SN_FALLBACK_KWS = [' firmware', ' fw ver', ' fwver', ' fw no', ' fw[',
+                        ' software version', ' soft version', ' soft ver',
+                        ' software ver', ' sw ver', ' sw version',
+                        ' control firmware']
+    # BMS/서브보드 등 인버터 본체가 아닌 보조 모듈은 SN 후보에서 제외
+    _SN_NEG = [' bms ', ' mcu ', ' control board', ' afci', ' epm ',
+               ' historical fault ', ' fault alert ', ' fault data ']
     # 'sn1' 'sn[' 같은 SN 인덱스 패턴 — 정규화된 토큰으로 단어경계 검사
     _SN_INDEX_RE = re.compile(r'\bsn\d+\b|\bsn\[')
 
-    def _is_sn_def(reg) -> bool:
+    def _sn_score(reg):
+        """SN 후보 점수: 높을수록 우선. 0이면 후보 아님."""
         nd = _info_norm(reg.definition)
-        if any(kw in nd for kw in _SN_KWS):
-            return True
-        if _SN_INDEX_RE.search(nd):
-            return True
-        return False
+        if any(neg in nd for neg in _SN_NEG):
+            return 0
+        score = 0
+        if any(kw in nd for kw in _SN_PRIMARY_KWS):
+            score = 100  # 진짜 SN
+        elif _SN_INDEX_RE.search(nd):
+            score = 95
+        elif any(kw in nd for kw in _SN_FALLBACK_KWS):
+            score = 50  # firmware fallback
+        if score == 0:
+            return 0
+        # ASCII 타입은 SN/firmware의 강한 신호
+        if (reg.data_type or '').upper() in ('STRING', 'STRINGING', 'ASCII'):
+            score += 10
+        return score
+
+    def _pick_sn(regs):
+        ranked = [(r, _sn_score(r)) for r in regs]
+        ranked = [(r, s) for r, s in ranked if s > 0]
+        if not ranked:
+            return None
+        ranked.sort(key=lambda x: -x[1])
+        return ranked[0][0]
 
     has_sn = False
-    matched_sn_reg = None
-    for r in info_regs:
-        if _is_sn_def(r):
-            has_sn = True
-            matched_sn_reg = r
-            break
+    matched_sn_reg = _pick_sn(info_regs)
+    if matched_sn_reg:
+        has_sn = True
     if not has_sn:
-        for r in all_regs:
-            if _is_sn_def(r):
-                has_sn = True
-                matched_sn_reg = r
-                break
+        matched_sn_reg = _pick_sn(all_regs)
+        if matched_sn_reg:
+            has_sn = True
     if not has_sn and _user_sn_syns:
         for r in all_regs:
             if _name_key(r) in _user_sn_syns:
