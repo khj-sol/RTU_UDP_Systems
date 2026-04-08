@@ -359,26 +359,63 @@ def _parse_register_row(row: list, col_map: dict) -> Optional[RegisterRow]:
     # V2: 주소 컬럼 인덱스 (col_map 또는 fallback에서 설정된 것)
     actual_addr_idx = col_map.get('addr')
 
+    # Deye 등 일부 PDF 표에는 Device type filter 컬럼 ('String', 'Hybird', 'MI')
+    # 이 있어 이름으로 오인되는 경우가 많음. 이런 값은 이름 후보에서 제외.
+    _TYPE_FILTER_WORDS = {
+        'string', 'hybird', 'hybrid', 'mi', 'microinverter',
+        'string inverter', 'storage', 'ess', 'all',
+        # Modbus function code 값
+        'r', 'rw', 'r/w', 'ro', 'w', 'wo',
+        # 기타 단일 약어
+        'r ', 'w ',
+    }
+
+    def _is_valid_name_cell(c: str) -> bool:
+        if not c:
+            return False
+        cl = c.strip().lower()
+        if not cl:
+            return False
+        if cl in _TYPE_FILTER_WORDS:
+            return False
+        # 너무 짧은 셀 (3자 미만) — SN/FW 만 예외
+        if len(cl) < 3 and cl.upper() not in ('SN', 'FW', 'PN'):
+            return False
+        # 순수 숫자 (행번호)
+        if re.match(r'^\d{1,5}$', cl):
+            return False
+        # 주소 패턴
+        if _ADDR_RE.fullmatch(cl):
+            return False
+        return True
+
     name = ''
     name_idx = col_map.get('name')
     if name_idx is not None and name_idx < len(row):
-        name = str(row[name_idx]).strip()
+        cand = str(row[name_idx]).strip()
+        if _is_valid_name_cell(cand):
+            name = cand
     if not name:
-        name = ''
+        # name 컬럼이 없거나 type filter 값이면 다른 셀 검사
+        # 가장 긴 유효 셀을 이름으로 (의미 있는 definition 선호)
+        best = ''
         for i, cell in enumerate(row):
             if i == actual_addr_idx:
                 continue
             c = str(cell).strip()
-            if not c or (len(c) <= 2 and c.upper() not in ('SN', 'FW', 'PN')):
-                continue
-            # V2: 숫자만 있는 셀은 행번호 — 이름이 아님
-            if re.match(r'^\d{1,5}$', c):
+            if not _is_valid_name_cell(c):
                 continue
             # 0x 주소 패턴도 건너뛰기
             if _ADDR_RE.fullmatch(c):
                 continue
-            name = c
-            break
+            # 타입 키워드 (U16, S32 등) 제외
+            if _TYPE_RE.fullmatch(c):
+                continue
+            # 가장 긴 셀 선호 — Deye 처럼 짧은 필터 셀 ('String') 대신
+            # '电网电압 A\nGrid voltage A' 같은 긴 의미 셀 선택
+            if len(c) > len(best):
+                best = c
+        name = best
     if not name:
         return None
 
@@ -1307,24 +1344,32 @@ _H01_REQUIRED_KEYWORDS = {
 
 # Phase-specific 필드는 타입 + phase 식별자 둘 다 필요
 # 예: s_current → 'curr' 만으로는 부족, 'l2'/'phase b'/'ib' 등 phase 식별자도 필수
+# 선간전압 (AB/BC/CA/VAB/VBC/VCA) 은 R/S/T 상전압과 구분 — line 키워드 금지
 _PHASE_SPECIFIC_REQUIRED = {
     'r_voltage': {
-        'type': ['volt', '전압', 'vac', 'uac', 'uab'],
+        'type': ['volt', '전압', 'vac'],
         'phase': [' l1 ', ' r ', 'phase a', ' ph a', ' a phase', 'van',
-                  ' u1 ', ' v1 ', ' ua ', 'uab', ' u a ', 'aphv', 'vpha',
-                  '1상', 'r상', 'a상', ' ab '],
+                  ' u1 ', ' v1 ', ' ua ', ' u a ', 'aphv', 'vpha',
+                  '1상', 'r상', 'a상', ' voltage a'],
+        # 선간/양극간 전압 금지
+        'neg': ['line voltage', ' ab ', ' ba ', 'uab', 'vab', 'u_ab', 'v_ab',
+                'phase ab', 'a-b', 'a_b', 'bus voltage', 'dc voltage'],
     },
     's_voltage': {
-        'type': ['volt', '전압', 'vac', 'uac', 'ubc'],
+        'type': ['volt', '전압', 'vac'],
         'phase': [' l2 ', ' s ', 'phase b', ' ph b', ' b phase', 'vbn',
-                  ' u2 ', ' v2 ', ' ub ', 'ubc', ' u b ', 'bphv', 'vphb',
-                  '2상', 's상', 'b상', ' bc '],
+                  ' u2 ', ' v2 ', ' ub ', ' u b ', 'bphv', 'vphb',
+                  '2상', 's상', 'b상', ' voltage b'],
+        'neg': ['line voltage', ' bc ', ' cb ', 'ubc', 'vbc', 'u_bc', 'v_bc',
+                'phase bc', 'b-c', 'b_c', 'bus voltage', 'dc voltage'],
     },
     't_voltage': {
-        'type': ['volt', '전압', 'vac', 'uac', 'uca'],
+        'type': ['volt', '전압', 'vac'],
         'phase': [' l3 ', ' t ', 'phase c', ' ph c', ' c phase', 'vcn',
-                  ' u3 ', ' v3 ', ' uc ', 'uca', ' u c ', 'cphv', 'vphc',
-                  '3상', 't상', 'c상', ' ca '],
+                  ' u3 ', ' v3 ', ' uc ', ' u c ', 'cphv', 'vphc',
+                  '3상', 't상', 'c상', ' voltage c'],
+        'neg': ['line voltage', ' ca ', ' ac ', 'uca', 'vca', 'u_ca', 'v_ca',
+                'phase ca', 'c-a', 'c_a', 'bus voltage', 'dc voltage'],
     },
     'r_current': {
         'type': ['curr', '전류', 'iac', 'amp'],
@@ -1364,8 +1409,12 @@ def _h01_semantic_valid(h01_field: str, reg_name_or_defn: str) -> bool:
     name_lower = ' ' + name_str.lower().replace('_', ' ') + ' '
 
     # Phase-specific: 타입 키워드 AND phase 식별자 모두 필요
+    # + negative 키워드 (선간전압 등) 는 거부
     phase_req = _PHASE_SPECIFIC_REQUIRED.get(h01_field)
     if phase_req:
+        neg = phase_req.get('neg', [])
+        if any(n in name_lower for n in neg):
+            return False
         has_type = any(t in name_lower for t in phase_req['type'])
         if not has_type:
             return False
@@ -1610,6 +1659,79 @@ _PV_VOLTAGE_POINT_RE = re.compile(r'PV(\d+)\s+Voltage\s+Point\s+(\d+)', re.I)
 _PV_CURRENT_POINT_RE = re.compile(r'PV(\d+)\s+Current\s+Point\s+(\d+)', re.I)
 # "occupying NNNN registers" 패턴
 _IV_TOTAL_REGS_RE = re.compile(r'occupying\s+(\d+)\s+registers', re.I)
+
+
+def _detect_phase_type(pages: list, registers: list) -> str:
+    """PDF 텍스트 + 레지스터 이름을 종합해 단상/삼상 판단.
+
+    Returns: 'single' | 'three' | 'both' | 'unknown'
+      - single: 단상 전용 (2선식)
+      - three: 삼상 전용
+      - both:  단상/삼상 공통 프로토콜 (런타임 구분 필요, 예: Deye SUN)
+      - unknown: 판단 불가
+    """
+    # 1) PDF 전체 텍스트 수집
+    full_text = ''
+    if pages:
+        for p in pages:
+            full_text += p.get('text', '') + '\n'
+    ft_lower = full_text.lower()
+
+    # 2) 키워드 카운트
+    three_kw_count = (
+        ft_lower.count('three-phase') + ft_lower.count('three phase') +
+        ft_lower.count('3-phase') + full_text.count('三相')
+    )
+    single_kw_count = (
+        ft_lower.count('single-phase') + ft_lower.count('single phase') +
+        ft_lower.count('1-phase') + ft_lower.count('split phase') +
+        ft_lower.count('two-wire') + ft_lower.count('2-wire') +
+        full_text.count('단상') + full_text.count('单相') +
+        full_text.count('両線') + full_text.count('两线')
+    )
+
+    # 3) 레지스터 기반 휴리스틱
+    # L1/L2/L3 또는 phase A/B/C 또는 Va/Vb/Vc 가 모두 있으면 삼상
+    # L1 만 있거나 Van 만 있으면 단상
+    reg_names = [str(getattr(r, 'definition', '') or '').lower() for r in registers]
+    reg_text = ' | '.join(reg_names)
+
+    has_l1 = bool(re.search(r'\bl1[_\s]*(volt|curr)|l_1[_\s]*(volt|curr)|'
+                             r'van|ua\b|u_a|phase[_\s]*a|a[_\s]*phase|'
+                             r'voltage[_\s]*a\b|grid[_\s]*voltage[_\s]*a\b|'
+                             r'r[_\s]*phase', reg_text))
+    has_l2 = bool(re.search(r'\bl2[_\s]*(volt|curr)|l_2[_\s]*(volt|curr)|'
+                             r'vbn|ub\b|u_b|phase[_\s]*b|b[_\s]*phase|'
+                             r'voltage[_\s]*b\b|grid[_\s]*voltage[_\s]*b\b|'
+                             r's[_\s]*phase', reg_text))
+    has_l3 = bool(re.search(r'\bl3[_\s]*(volt|curr)|l_3[_\s]*(volt|curr)|'
+                             r'vcn|uc\b|u_c|phase[_\s]*c|c[_\s]*phase|'
+                             r'voltage[_\s]*c\b|grid[_\s]*voltage[_\s]*c\b|'
+                             r't[_\s]*phase', reg_text))
+
+    reg_three = has_l1 and has_l2 and has_l3
+    reg_single_only = has_l1 and not has_l2 and not has_l3
+
+    # 4) 종합 판단
+    if three_kw_count > 0 and single_kw_count > 0:
+        # PDF 에 두 타입 모두 언급 — 공통 프로토콜 (Deye, Solis, Growatt 등)
+        if reg_three:
+            return 'both'  # 삼상 레지스터 있으나 단상 언급도 있음
+        return 'both'
+    if reg_three and (three_kw_count > 0 or single_kw_count == 0):
+        return 'three'
+    if reg_single_only and (single_kw_count > 0 or three_kw_count == 0):
+        return 'single'
+    if three_kw_count > 0 and three_kw_count > single_kw_count * 2:
+        return 'three'
+    if single_kw_count > 0 and single_kw_count > three_kw_count * 2:
+        return 'single'
+    # 레지스터 기반 최종 fallback
+    if reg_three:
+        return 'three'
+    if reg_single_only:
+        return 'single'
+    return 'unknown'
 
 
 def detect_iv_from_pdf(registers: List[RegisterRow], pages: list = None) -> dict:
@@ -2695,6 +2817,9 @@ def run_stage1(
     if max_mppt > 0 and max_string < max_mppt:
         max_string = max_mppt
 
+    # V2: 단상/삼상 감지 — PDF 텍스트 + 레지스터 이름 휴리스틱
+    phase_type = _detect_phase_type(pages, registers)
+
     # V2: IV Scan 지원 = IV 데이터 레지스터(Tracker/PV point)가 있어야 함
     # IV command(0x600D)만 있고 데이터 레지스터 없으면 미지원 (예: Huawei)
     iv_info = detect_iv_from_pdf(registers)
@@ -2716,6 +2841,7 @@ def run_stage1(
         'device_type': device_type,
         'max_mppt': max_mppt,
         'max_string': max_string,
+        'phase_type': phase_type,  # 'single' / 'three' / 'both' / 'unknown'
         'string_monitoring': max_string > max_mppt,  # True: String별 전류 모니터링 지원
         'iv_scan': iv_scan_supported and device_type == 'inverter',
         'iv_data_points': iv_info.get('data_points', 0),
@@ -2728,6 +2854,7 @@ def run_stage1(
     }
 
     log(f'  제조사: {manufacturer}, MPPT: {max_mppt}, String: {max_string}')
+    log(f'  상 타입: {phase_type}')
     if meta['iv_scan']:
         log(f'  IV Scan: Yes (command={meta["iv_command_addr"]}, '
             f'trackers={meta["iv_trackers"]}, data_points={meta["iv_data_points"]})')
