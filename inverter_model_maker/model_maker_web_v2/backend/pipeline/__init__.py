@@ -420,6 +420,24 @@ def detect_channel_number(definition: str) -> Optional[tuple]:
     if m:
         return ('MPPT', int(m.group(1)))
 
+    # Deye: "Dc voltage N" / "Dc current N" / "DC voltage N"
+    # ('voltage'/'current' 가 N 앞에 위치, DC가 별도 단어)
+    m = re.search(r'\bDC\s+(?:voltage|current|power)\s+(\d+)\b', definition, re.I)
+    if m:
+        return ('MPPT', int(m.group(1)))
+
+    # Deye 한글: "직류전압1", "직류전류3"
+    m = re.search(r'직류(?:전압|전류|전력)\s*(\d+)', definition)
+    if m:
+        return ('MPPT', int(m.group(1)))
+
+    # Deye concat: "직류전압1Dc voltage 1" → 직류 패턴이 위에서 잡혀야 함
+    # 만약 직류는 못 잡고 'voltage 1' 형식만 있으면 마지막에 시도
+    m = re.search(r'\b(?:dc|direct\s*current)\s*(?:input\s+)?(?:voltage|current|power)\s+(\d+)',
+                  definition, re.I)
+    if m:
+        return ('MPPT', int(m.group(1)))
+
     # Deye 압축 형식: 'PV1_V', 'PV1_I', 'PV1V', 'PV1I', 'PV1 V_', 'PV1 I_'
     # PV{N}_V/PV{N}V → voltage, PV{N}_I/PV{N}I → current
     # 단어 경계 처리: 끝이 영문자가 아니어야 함 (PV1_V vs PV1_VOLTAGE 구분)
