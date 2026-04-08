@@ -2315,18 +2315,10 @@ def build_h01_match_table(categorized: dict, meta: dict) -> List[dict]:
         if v_reg and isinstance(v_reg.address, int):
             mppt_v_addrs[n] = v_reg.address
 
-    # voltage 주소 연속성 검증: mppt1 기준으로 +2씩 패턴이면 벗어난 것 수정
-    if 1 in mppt_v_addrs and len(mppt_v_addrs) >= 2:
-        base = mppt_v_addrs[1]
-        # 연속 패턴(+2씩) 확인: mppt1=base, mppt2=base+2, mppt3=base+4, ...
-        consistent = sum(1 for n in range(1, max_mppt + 1)
-                         if n in mppt_v_addrs and mppt_v_addrs[n] == base + (n - 1) * 2)
-        if consistent >= 2:  # 2개 이상 연속 패턴이면
-            for n in range(1, max_mppt + 1):
-                expected = base + (n - 1) * 2
-                if n in mppt_v_addrs and mppt_v_addrs[n] != expected:
-                    # 주소가 패턴에서 벗어남 → expected 주소로 보정
-                    mppt_v_addrs[n] = expected
+    # 강제 +2 주소 보정 비활성화 (Deye 등에서 잘못된 주소를 덮어쓰는 부작용)
+    # 이전 로직은 mppt1 매칭만 있고 mppt2/3/4 매칭이 없을 때 base+2*(n-1) 주소를
+    # 강제로 가져와 MODULE_CURRENT/TEMPERATER_AVE/DEBUG_DATA 같은 무관 레지스터를
+    # voltage 로 잘못 매칭하는 원인이 되었음. 이름 기반 매칭 결과만 신뢰한다.
 
     for n in range(1, max_mppt + 1):
         for mtype in ['voltage', 'current']:
@@ -2334,6 +2326,7 @@ def build_h01_match_table(categorized: dict, meta: dict) -> List[dict]:
             reg = _find_matched_reg(categorized, field)
 
             # voltage인 경우 보정된 주소와 비교
+            # current/curr/전류 키워드 가진 레지스터는 voltage 슬롯에 매칭 금지
             if reg and mtype == 'voltage' and n in mppt_v_addrs and isinstance(reg.address, int):
                 if reg.address != mppt_v_addrs[n]:
                     # 보정된 주소에 해당하는 레지스터 찾기
@@ -2341,6 +2334,9 @@ def build_h01_match_table(categorized: dict, meta: dict) -> List[dict]:
                     for cat in ['MONITORING', 'ALARM', 'INFO']:
                         for r in categorized.get(cat, []):
                             if isinstance(r.address, int) and r.address == target:
+                                dl = (r.definition or '').lower()
+                                if any(k in dl for k in ['current', 'curr', '전류']):
+                                    continue
                                 reg = r
                                 break
                         if reg and isinstance(reg.address, int) and reg.address == target:
@@ -2366,11 +2362,15 @@ def build_h01_match_table(categorized: dict, meta: dict) -> List[dict]:
 
                 if need_fix:
                     # voltage 주소 +1 에서 current 찾기 (V/I 연속 쌍 패턴)
+                    # voltage/volt/전압 키워드 가진 레지스터는 current 슬롯에 매칭 금지
                     better = None
                     target_addr = v_addr + 1
                     for cat in ['MONITORING', 'ALARM', 'INFO']:
                         for r in categorized.get(cat, []):
                             if isinstance(r.address, int) and r.address == target_addr:
+                                dl = (r.definition or '').lower()
+                                if any(k in dl for k in ['voltage', 'volt', '전압']):
+                                    continue
                                 better = r
                                 break
                         if better: break
