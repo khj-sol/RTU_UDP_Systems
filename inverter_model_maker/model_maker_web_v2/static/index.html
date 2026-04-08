@@ -213,6 +213,18 @@
     .h01-row:last-child { border-bottom: none; }
     .h01-matched { color: #4ade80; font-family: 'Consolas', monospace; font-size: 11px; }
     .h01-unmatched { color: #f87171; font-family: 'Consolas', monospace; font-size: 11px; }
+    .h01-source-tag {
+      display: inline-block;
+      font-size: 9px;
+      padding: 1px 5px;
+      margin-left: 4px;
+      border-radius: 3px;
+      font-family: 'Segoe UI', sans-serif;
+      font-weight: 600;
+      vertical-align: middle;
+    }
+    .h01-tag-auto { background:#16a34a; color:#fff; }   /* PDF/HANDLER 자동매칭 */
+    .h01-tag-der  { background:#0891b2; color:#fff; }   /* DER 매칭 */
   </style>
 </head>
 <body>
@@ -1124,9 +1136,19 @@
       data.fields.forEach(f => {
         const row = document.createElement('div');
         row.className = 'h01-row';
+        // 매칭 출처 — 카운터 (updateH01Counter) 가 select.value 외에 이 값도 인정
+        row.dataset.matchSource = f.match_source || '';
         const cls = f.is_matched ? 'h01-matched' : 'h01-unmatched';
         const icon = f.is_matched ? '✓' : '✗';
         const sugg = f.suggestions || [];
+        // 매칭 출처 라벨: 'pdf'/'handler' → 자동매칭, 'der' → DER매칭
+        const ms = f.match_source || '';
+        let sourceTag = '';
+        if (ms === 'der') {
+          sourceTag = '<span class="h01-source-tag h01-tag-der">DER매칭</span>';
+        } else if (ms === 'handler' || ms === 'pdf') {
+          sourceTag = '<span class="h01-source-tag h01-tag-auto">자동매칭</span>';
+        }
 
         // current_register는 backend에서 이미 정리된 깨끗한 NAME
         const curName = f.current_register || '';
@@ -1149,7 +1171,7 @@
         const addrLabel = curAddr ? `<span class="h01-addr" data-field="${f.h01_field}" style="font-size:10px;color:#94a3b8;margin-left:4px;font-family:monospace">${curAddr}</span>` : `<span class="h01-addr" data-field="${f.h01_field}" style="font-size:10px;color:#94a3b8;margin-left:4px;font-family:monospace"></span>`;
 
         row.innerHTML = `
-          <div class="${cls}" title="${f.description}">${icon} ${f.h01_field}</div>
+          <div class="${cls}" title="${f.description}">${icon} ${f.h01_field}${sourceTag}</div>
           <select class="h01-select" data-field="${f.h01_field}"
                   onchange="onH01RegisterChange(this)"
                   style="padding:3px 6px;font-size:11px;flex:1"></select>
@@ -1168,8 +1190,12 @@
 
       updateH01Counter();
       const matched = data.fields.filter(f => f.is_matched).length;
+      const handlerCnt = data.fields.filter(f => f.match_source === 'handler').length;
+      const derCnt = data.fields.filter(f => f.match_source === 'der').length;
       const total = data.fields.length;
-      appendLog('s3', `H01 매핑 로드: ${matched}/${total} 자동매칭 — 미매칭 ${total - matched}개 수동 매핑 가능`,
+      const breakdown = (handlerCnt || derCnt)
+        ? ` (HANDLER ${handlerCnt}, DER ${derCnt})` : '';
+      appendLog('s3', `H01 매핑 로드: ${matched}/${total} 자동매칭${breakdown} — 미매칭 ${total - matched}개 수동 매핑 가능`,
                 matched === total ? 'ok' : 'warn');
     } catch (err) {
       table.innerHTML = `<span style="color:#f87171">H01 매핑 로드 오류: ${err.message}</span>`;
@@ -1301,10 +1327,15 @@
   }
 
   function updateH01Counter() {
-    const selects = document.querySelectorAll('.h01-select[data-field]');
+    const rows = document.querySelectorAll('#h01-mapping-table .h01-row');
     let mapped = 0;
-    selects.forEach(s => { if (s.value) mapped++; });
-    const total = selects.length;
+    rows.forEach(row => {
+      const sel = row.querySelector('.h01-select[data-field]');
+      const ms = row.dataset.matchSource || '';
+      // HANDLER/DER 자동 매칭은 dropdown 값 없어도 매핑된 것으로 인정
+      if (ms === 'handler' || ms === 'der' || (sel && sel.value)) mapped++;
+    });
+    const total = rows.length;
     const status = document.getElementById('h01-mapping-status');
     if (status) {
       const color = mapped === total ? '#4ade80' : (mapped >= total*0.75 ? '#fbbf24' : '#f87171');
@@ -1313,9 +1344,18 @@
   }
 
   async function saveH01Mapping() {
-    const selects = document.querySelectorAll('.h01-select[data-field]');
+    const rows = document.querySelectorAll('#h01-mapping-table .h01-row');
     const mappings = {};
-    selects.forEach(s => { mappings[s.dataset.field] = s.value; });
+    rows.forEach(row => {
+      const sel = row.querySelector('.h01-select[data-field]');
+      if (!sel) return;
+      const ms = row.dataset.matchSource || '';
+      // HANDLER/DER 자동 매칭 행은 dropdown 이 비어있어도 col D auto-fill 유지
+      // → 빈 값으로 덮어쓰지 않도록 사용자가 명시 선택한 경우만 전송
+      if (sel.value || (ms !== 'handler' && ms !== 'der')) {
+        mappings[sel.dataset.field] = sel.value;
+      }
+    });
     const fcSelects = document.querySelectorAll('.h01-fc[data-field]');
     const fc = {};
     fcSelects.forEach(s => { fc[s.dataset.field] = parseInt(s.value); });

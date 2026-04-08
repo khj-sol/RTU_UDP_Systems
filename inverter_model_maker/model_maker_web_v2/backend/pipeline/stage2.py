@@ -529,41 +529,49 @@ def _add_h01_mapping_sheet(wb, s1: dict, openpyxl_module) -> None:
     # 자동 매칭 빌드: h01_match 테이블 우선 사용 (Stage1 H01 매칭 결과)
     h01_auto: Dict[str, List[Tuple[str, str]]] = {}
     h01_fc: Dict[str, str] = {}  # h01_field → FC ('3' or '4')
+    # 매칭 출처 추적 (col M 기록용 + Stage3/UI 분류)
+    #   'pdf'     : PDF 일반/phase-aware 매칭 (PDF_LINE/PDF_PHASE/PDF_ALIAS_R/PDF)
+    #   'handler' : HANDLER 계산 매칭 (pv_voltage/current/power)
+    #   'der'     : DER-AVM 고정 주소 매칭 (DEA_*)
+    h01_source: Dict[str, str] = {}
     all_cats = (s1.get('monitoring', []) + s1.get('info', []) +
                 s1.get('status', []) + s1.get('alarm', []))
 
     # 1차: h01_match 테이블에서 매칭 정보 수집
-    # Phase C: DER 가상 주소(DEA_*)는 사용자 드롭다운 H열에 없으므로 D열 auto-populate에서 제외
-    # (Stage3의 alias generator가 자동 처리)
-    # PDF_LINE/PDF_PHASE/PDF_ALIAS_R 은 phase-aware 매칭 결과 — 모두 D열에 표시
+    # PDF/HANDLER/DER 모두 D열에 표시 (UI 가 source 별로 라벨링)
     for hm in s1.get('h01_match', []):
         field = hm.get('field', '').strip()
         status = hm.get('status', '')
         if not field or status not in ('O', '~'):
             continue
         source = hm.get('source', '')
-        if source == 'DER':
-            continue  # DEA_* 가상 주소 건너뛰기
         defn = hm.get('definition', '') or ''
         addr = hm.get('address', '') or ''
         name = to_upper_snake(defn) if defn and defn != '-' else ''
         if source == 'HANDLER':
             display_name = 'HANDLER'
             display_addr = ''
-        elif source == 'PDF_ALIAS_R':
-            # 단상/2상 alias — r 의 register 사용
+            src_kind = 'handler'
+        elif source == 'DER':
+            # DER-AVM 가상 주소 — der_name (예: DEA_TOTAL_ACTIVE_POWER) 표시
+            display_name = name or defn or 'DER'
+            display_addr = addr
+            src_kind = 'der'
+        elif source in ('PDF_LINE', 'PDF_PHASE', 'PDF_ALIAS_R'):
             display_name = name or defn
             display_addr = addr
-        elif source in ('PDF_LINE', 'PDF_PHASE'):
-            display_name = name or defn
-            display_addr = addr
+            src_kind = 'pdf'
         else:
             display_name = name or defn
             display_addr = addr
+            src_kind = 'pdf'
         if display_name:
             entries = h01_auto.setdefault(field, [])
             if not any(e[0] == display_name for e in entries):
                 entries.append((display_name, display_addr))
+            # 첫 번째 source 만 기록 (PDF > HANDLER > DER 우선순위 X — 등장 순서)
+            if field not in h01_source:
+                h01_source[field] = src_kind
 
     # 2차: reg.h01_field에서 추가 매칭 보완 + FC 수집
     for reg in all_cats:
@@ -646,6 +654,9 @@ def _add_h01_mapping_sheet(wb, s1: dict, openpyxl_module) -> None:
                     nm = ac['name']
                     if nm in name_to_fcs and not any(e[0] == nm for e in valid_matched):
                         valid_matched.append((nm, ac.get('addr_hex', '')))
+                        # PDF 후보 fallback — pdf 로 분류 (handler 보다 우선)
+                        if h01_source.get(field) in (None, '', 'handler'):
+                            h01_source[field] = 'pdf'
 
         # D열: semantic-valid 매칭만 표시 (세미콜론 구분)
         if valid_matched:
@@ -663,6 +674,10 @@ def _add_h01_mapping_sheet(wb, s1: dict, openpyxl_module) -> None:
         cell_d = ws.cell(row=row, column=4, value=matched_display)
         cell_d.border = thin
         cell_d.fill = auto_fill if valid_matched else empty_fill
+
+        # M열 (숨김): 매칭 출처 — 'pdf' / 'handler' / 'der' / ''
+        # API 및 UI 가 라벨링에 사용
+        ws.cell(row=row, column=13, value=h01_source.get(field, ''))
 
         # 추천 후보 (E~G열) — 이미 매칭된 것 제외 + semantic 검증 통과만
         matched_names = {e[0] for e in matched_list} | {n for n, _ in valid_matched}
@@ -753,9 +768,11 @@ def _add_h01_mapping_sheet(wb, s1: dict, openpyxl_module) -> None:
     ws.column_dimensions['H'].width = 35
     ws.column_dimensions['I'].width = 5
     # J/K/L: 숨김 메타데이터 (FC + 주소 맵)
+    # M: 숨김 메타데이터 (매칭 출처 pdf/handler/der)
     ws.column_dimensions['J'].hidden = True
     ws.column_dimensions['K'].hidden = True
     ws.column_dimensions['L'].hidden = True
+    ws.column_dimensions['M'].hidden = True
 
 
 # ─── Stage 2 메인 함수 ───────────────────────────────────────────────────────

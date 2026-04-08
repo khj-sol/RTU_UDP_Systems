@@ -653,8 +653,21 @@ def get_h01_mapping(session_id: str):
             current_raw = str(ws.cell(row=row, column=4).value or '').strip()
             # 깨끗한 register name 추출 (auto-fill 형식 "NAME (addr); ..." → NAME만)
             current_clean = _parse_reg_display(current_raw)
-            # 매칭 판정: clean name이 available 목록에 실제 존재해야 진짜 매칭
-            is_matched = bool(current_clean) and current_clean in available_registers
+            # M열: 매칭 출처 (Stage2 가 기록) — 'pdf' / 'handler' / 'der' / ''
+            match_source_raw = str(ws.cell(row=row, column=13).value or '').strip().lower()
+            # 매칭 판정:
+            #   pdf      → clean name 이 available 목록에 실제 존재해야 진짜 매칭
+            #   handler  → 항상 매칭 (HANDLER 계산 — pv_voltage/current/power)
+            #   der      → 항상 매칭 (DER-AVM 고정 주소)
+            if match_source_raw == 'handler':
+                is_matched = True
+                match_source = 'handler'
+            elif match_source_raw == 'der':
+                is_matched = True
+                match_source = 'der'
+            else:
+                is_matched = bool(current_clean) and current_clean in available_registers
+                match_source = 'pdf' if is_matched else ''
 
             # 추천 후보 (E~G열) — 동일하게 정리
             suggestions = []
@@ -685,6 +698,7 @@ def get_h01_mapping(session_id: str):
                 'current_register': current_clean,  # 깨끗한 이름만
                 'current_raw': current_raw,  # 원본 (디버깅용)
                 'is_matched': is_matched,
+                'match_source': match_source,  # 'pdf' / 'handler' / 'der' / ''
                 'suggestions': suggestions,
                 'fc': fc,
                 'fc_locked': fc_locked,
