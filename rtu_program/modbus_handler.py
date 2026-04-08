@@ -130,10 +130,10 @@ sys.path.append(libdir)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import importlib as _importlib
-from common.Solarize_PV_50kw_registers import RegisterMap, InverterMode, SCALE, registers_to_u32
+from common.Solarize_PV_50_registers import RegisterMap, InverterMode, SCALE, registers_to_u32
 
-# --- Solarize_PV_50kw_registers 모듈 참조 (fallback 용) ---
-import common.Solarize_PV_50kw_registers as _default_reg_module
+# --- Solarize_PV_50_registers 모듈 참조 (fallback 용) ---
+import common.Solarize_PV_50_registers as _default_reg_module
 # Kstar/Huawei 전용 import 제거됨 — 범용 핸들러가 동적 로딩으로 처리
 from common.REF_relay_registers import KDU300RegisterMap, registers_to_float, H01_RELAY_FIELD_MAP
 from common.REF_weather_registers import (
@@ -1261,7 +1261,7 @@ class ModbusHandlerHAT:
         try:
             _get_iv = getattr(self.reg_module, 'get_iv_string_mapping', None)
             if _get_iv is None:
-                from common.Solarize_PV_50kw_registers import get_iv_string_mapping as _get_iv
+                from common.Solarize_PV_50_registers import get_iv_string_mapping as _get_iv
 
             # Get register mapping for this string
             mappings = _get_iv()

@@ -87,7 +87,7 @@ except ImportError as e:
     print("Install: pip install pymodbus")
     sys.exit(1)
 
-from common.Solarize_PV_50kw_registers import (
+from common.Solarize_PV_50_registers import (
     RegisterMap, InverterMode, SCALE,
     generate_iv_voltage_data, generate_iv_current_data,
     get_iv_tracker_voltage_registers, get_iv_string_current_registers
@@ -95,7 +95,7 @@ from common.Solarize_PV_50kw_registers import (
 
 # IV Scan 상수 — 레지스터 파일에 없을 수 있으므로 시뮬레이터 자체 정의
 try:
-    from common.Solarize_PV_50kw_registers import IVScanCommand, IVScanStatus
+    from common.Solarize_PV_50_registers import IVScanCommand, IVScanStatus
 except ImportError:
     class IVScanCommand:
         NON_ACTIVE = 0
@@ -116,18 +116,18 @@ from common.REF_weather_registers import (
     accum_radiation_to_raw
 )
 from common.Kstar_PV_60kw_registers import RegisterMap as KstarRegisters
-from common.Huawei_PV_50kw_registers import RegisterMap as HuaweiRegisters
+from common.Huawei_PV_SUN2000MC_registers import RegisterMap as HuaweiRegisters
 try:
-    from common.Huawei_PV_50kw_registers import HuaweiStatusConverter
+    from common.Huawei_PV_SUN2000MC_registers import HuaweiStatusConverter
 except ImportError:
-    from common.Huawei_PV_50kw_registers import HuaweiPvStatusConverter as HuaweiStatusConverter
+    from common.Huawei_PV_SUN2000MC_registers import HuaweiPvStatusConverter as HuaweiStatusConverter
 try:
-    from common.Ekos_PV_10kw_registers import RegisterMap as EkosRegisters, InverterMode as EkosInverterMode
+    from common.Ekos_PV_50_registers import RegisterMap as EkosRegisters, InverterMode as EkosInverterMode
 except ImportError:
     EkosRegisters = None
     EkosInverterMode = None
 try:
-    from common.Sungrow_PV_50kw_registers import RegisterMap as SungrowRegisters, InverterMode as SungrowInverterMode
+    from common.Sungrow_PV_ti_registers import RegisterMap as SungrowRegisters, InverterMode as SungrowInverterMode
 except ImportError:
     SungrowRegisters = None
     SungrowInverterMode = None

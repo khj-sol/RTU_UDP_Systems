@@ -267,7 +267,7 @@ def _load_error_bits_from_reference(manufacturer: str) -> dict:
     patterns = glob.glob(os.path.join(COMMON_DIR, f'REF_{manufacturer}_*_registers.py'))
     patterns += glob.glob(os.path.join(COMMON_DIR, f'{manufacturer}_*_registers.py'))
     patterns += [os.path.join(COMMON_DIR, f'REF_Solarize_PV_registers.py'),
-                 os.path.join(COMMON_DIR, 'Solarize_PV_50kw_registers.py'),
+                 os.path.join(COMMON_DIR, 'Solarize_PV_50_registers.py'),
                  os.path.join(COMMON_DIR, 'Solarize_PV_registers.py')]
 
     for fpath in patterns:
