@@ -235,7 +235,7 @@ def _derive_model_token(pdf_filename: str, manufacturer: str) -> str:
     mfr_low = (manufacturer or '').lower()
     skip = {'pv', 'hyb', 'hybrid', 'modbus', 'protocol', 'rtu', 'rs485',
             'en', 'kr', 'korea', 'communication', 'interface', 'definitions',
-            'inverter', 'map'}
+            'inverter', 'map', 'test'}
     out_parts = []
     for p in parts:
         pl = p.lower()
