@@ -269,6 +269,22 @@
           </div>
         </div>
       </div>
+      <div id="info-mapping-area" style="display:none">
+        <div class="h01-mapping-section">
+          <h4 style="display:flex;justify-content:space-between;align-items:center">
+            <span>📋 INFO 매핑 (Model / SN)</span>
+            <span id="info-mapping-status" style="font-size:12px">-/-</span>
+          </h4>
+          <div style="font-size:11px;color:#9ca3af;margin-bottom:8px">
+            매칭된 Model/SN 레지스터를 확인하고 필요시 드롭다운으로 수정하세요.
+          </div>
+          <div id="info-mapping-table"></div>
+          <button class="run-btn" id="btn-save-info-mapping" onclick="saveInfoMapping()"
+                  style="background:#0891b2;color:#fff;margin-top:10px;padding:6px;font-size:12px">
+            💾 INFO 매핑 저장
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -304,6 +320,22 @@
         <div class="review-section">
           <h4>⚠ REVIEW 항목 — 사용자 판정 필요</h4>
           <div id="review-rows"></div>
+        </div>
+      </div>
+      <div id="mppt-mapping-area" style="display:none">
+        <div class="h01-mapping-section">
+          <h4 style="display:flex;justify-content:space-between;align-items:center">
+            <span>⚡ MPPT/String 매핑 (전압·전류)</span>
+            <span id="mppt-mapping-status" style="font-size:12px">-/-</span>
+          </h4>
+          <div style="font-size:11px;color:#9ca3af;margin-bottom:8px">
+            MPPT/String 전압·전류의 자동매칭을 확인하고 필요시 수정하세요.
+          </div>
+          <div id="mppt-mapping-table"></div>
+          <button class="run-btn" id="btn-save-mppt-mapping" onclick="saveMpptMapping()"
+                  style="background:#0891b2;color:#fff;margin-top:10px;padding:6px;font-size:12px">
+            💾 MPPT 매핑 저장
+          </button>
         </div>
       </div>
     </div>
@@ -383,11 +415,14 @@
               document.getElementById('card-s1').className = 'stage-card done';
               document.getElementById('card-s2').className = 'stage-card active';
               document.getElementById('btn-s2').disabled = false;
+              // INFO 매핑 패널 자동 로드
+              setTimeout(() => loadInfoMapping(), 100);
             }
             if (s.stage >= 2) {
               document.getElementById('card-s2').className = 'stage-card done';
               document.getElementById('card-s3').className = 'stage-card active';
               document.getElementById('btn-s3').disabled = false;
+              setTimeout(() => loadMpptMapping(), 100);
             }
             appendLog('s1', `[F5 복원] ${savedOrig} — 이전 작업을 이어서 실행할 수 있습니다.`, 'info');
             restored = true;
@@ -662,6 +697,9 @@
     if (msg.review_count > 0) {
       appendLog('s1', `REVIEW ${msg.review_count}개 — Stage 2에서 확인`, 'warn');
     }
+
+    // INFO 매핑 패널 자동 로드 (Stage 1 완료 시)
+    loadInfoMapping();
 
     // 제안 표시 (적용 후 재실행이면 건너뜀)
     const sugg = msg.suggestions || {};
@@ -981,6 +1019,7 @@
         `H01 ${fmtMatch(msg.h01_matched, msg.h01_total)}  |  DER ${fmtMatch(msg.der_matched, msg.der_total)}`;
     }
     loadH01Mapping(); // H01 매핑 확인 화면 표시 (Stage 3 버튼은 저장 후 활성화)
+    loadMpptMapping(); // MPPT/String 매핑 패널 표시 (Stage 2 카드)
   }
 
   function onStage3Done(msg) {
@@ -1106,6 +1145,161 @@
       // H01 매핑 확인 화면 표시 (Stage 3 버튼은 저장 후 활성화)
       loadH01Mapping();
     }
+  }
+
+  // ─── 공용 매핑 패널 (INFO/MPPT) ───────────────────────────────
+  // panelKey: 'info' or 'mppt' — DOM id 와 row class 구분용
+  async function loadSimpleMappingPanel(panelKey, endpoint, label) {
+    const area  = document.getElementById(`${panelKey}-mapping-area`);
+    const table = document.getElementById(`${panelKey}-mapping-table`);
+    const status = document.getElementById(`${panelKey}-mapping-status`);
+    if (!area || !table) return;
+    table.innerHTML = '<span style="color:#9ca3af;font-size:11px">불러오는 중...</span>';
+    area.style.display = 'block';
+
+    try {
+      const r = await fetch(`${API}/${endpoint}/${sessionId}`);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const data = await r.json();
+      const availList = data.available_with_fc || [];
+      // 이름 → 첫 주소 맵 (multiple address handling: 첫번째만)
+      const nameToAddr = {};
+      availList.forEach(it => {
+        const a = (it.addr || '').split('|')[0].split('~')[0].trim();
+        nameToAddr[it.name] = a;
+      });
+
+      table.innerHTML = '';
+      data.fields.forEach(f => {
+        const row = document.createElement('div');
+        row.className = `${panelKey}-row h01-row`;
+        row.dataset.field = f.field;
+        row.dataset.matchSource = f.match_source || '';
+
+        const cls = f.is_matched ? 'h01-matched' : 'h01-unmatched';
+        const icon = f.is_matched ? '✓' : '✗';
+        const ms = f.match_source || '';
+        let sourceTag = '';
+        if (ms === 'der') {
+          sourceTag = '<span class="h01-source-tag h01-tag-der">DER매칭</span>';
+        } else if (ms === 'handler' || ms === 'pdf') {
+          sourceTag = '<span class="h01-source-tag h01-tag-auto">자동매칭</span>';
+        }
+
+        const curName = f.current_register || '';
+        const sugg = f.suggestions || [];
+        // HANDLER 행은 dropdown 비우고 라벨만 표시
+        const isHandler = ms === 'handler';
+        const curAddr = f.current_addr || '';
+        const addrLabel = curAddr
+          ? `<span style="font-size:10px;color:#94a3b8;font-family:monospace">${curAddr}</span>`
+          : '<span></span>';
+
+        // 옵션 빌드 — 첫 주소만 표시
+        let opts = '<option value="">(없음)</option>';
+        if (sugg.length > 0) {
+          opts += '<optgroup label="── 추천 후보 ──">';
+          sugg.forEach(s => {
+            const a = nameToAddr[s] || '';
+            const lbl = a ? `${s} (${a})` : s;
+            const sa = s === curName ? ' selected' : '';
+            opts += `<option value="${s}"${sa}>${lbl}</option>`;
+          });
+          opts += '</optgroup>';
+        }
+        opts += '<optgroup label="── 전체 레지스터 ──">';
+        availList.forEach(it => {
+          const a = nameToAddr[it.name] || '';
+          const lbl = a ? `${it.name} (${a})` : it.name;
+          const sa = it.name === curName ? ' selected' : '';
+          opts += `<option value="${it.name}"${sa}>${lbl}</option>`;
+        });
+        opts += '</optgroup>';
+
+        const selectHtml = isHandler
+          ? `<span style="flex:1;font-size:11px;color:#fbbf24">HANDLER 계산</span>`
+          : `<select class="${panelKey}-select" data-field="${f.field}"
+                     onchange="updateSimpleMappingCounter('${panelKey}')"
+                     style="padding:3px 6px;font-size:11px;flex:1">${opts}</select>`;
+
+        row.innerHTML = `
+          <div class="${cls}" title="${f.description}">${icon} ${f.field}${sourceTag}</div>
+          ${selectHtml}
+          ${addrLabel}`;
+        table.appendChild(row);
+      });
+
+      updateSimpleMappingCounter(panelKey);
+      const matched = data.fields.filter(f => f.is_matched).length;
+      const total = data.fields.length;
+    } catch (err) {
+      table.innerHTML = `<span style="color:#f87171">${label} 매핑 로드 오류: ${err.message}</span>`;
+    }
+  }
+
+  function updateSimpleMappingCounter(panelKey) {
+    const rows = document.querySelectorAll(`#${panelKey}-mapping-table .${panelKey}-row`);
+    let mapped = 0;
+    rows.forEach(row => {
+      const sel = row.querySelector(`.${panelKey}-select`);
+      const ms = row.dataset.matchSource || '';
+      if (ms === 'handler' || ms === 'der' || (sel && sel.value)) mapped++;
+    });
+    const total = rows.length;
+    const status = document.getElementById(`${panelKey}-mapping-status`);
+    if (status) {
+      const color = mapped === total ? '#4ade80' : (mapped >= total*0.75 ? '#fbbf24' : '#f87171');
+      status.innerHTML = `<span style="color:${color};font-weight:700">${mapped}/${total}</span> 매핑됨`;
+    }
+  }
+
+  async function saveSimpleMappingPanel(panelKey, endpoint, label) {
+    const rows = document.querySelectorAll(`#${panelKey}-mapping-table .${panelKey}-row`);
+    const mappings = {};
+    rows.forEach(row => {
+      const sel = row.querySelector(`.${panelKey}-select`);
+      const ms = row.dataset.matchSource || '';
+      if (!sel) return;
+      // HANDLER/DER 자동 매칭 행은 빈값 전송 X
+      if (sel.value || (ms !== 'handler' && ms !== 'der')) {
+        mappings[sel.dataset.field] = sel.value;
+      }
+    });
+    const btn = document.getElementById(`btn-save-${panelKey}-mapping`);
+    if (btn) { btn.disabled = true; btn.textContent = '저장 중...'; }
+    try {
+      const r = await fetch(`${API}/${endpoint}/${sessionId}`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({mappings}),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const d = await r.json();
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = `✓ ${label} 매핑 저장됨 (${d.updated})`;
+        setTimeout(() => { btn.textContent = `💾 ${label} 매핑 저장`; }, 2000);
+      }
+    } catch (err) {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = `💾 ${label} 매핑 저장`;
+      }
+      alert(`${label} 매핑 저장 오류: ${err.message}`);
+    }
+  }
+
+  function loadInfoMapping() {
+    return loadSimpleMappingPanel('info', 'info-mapping', 'INFO');
+  }
+  function saveInfoMapping() {
+    return saveSimpleMappingPanel('info', 'info-mapping', 'INFO');
+  }
+  function loadMpptMapping() {
+    return loadSimpleMappingPanel('mppt', 'mppt-mapping', 'MPPT');
+  }
+  function saveMpptMapping() {
+    return saveSimpleMappingPanel('mppt', 'mppt-mapping', 'MPPT');
   }
 
   // ─── H01 매핑 ──────────────────────────────────────────────────
