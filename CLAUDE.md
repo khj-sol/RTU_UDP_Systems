@@ -10,6 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - worktree에서 작업 시: `git add → commit → push origin <branch> → cd main && git merge <branch> --no-edit`
 - V2 웹 서버가 main 디렉토리에서 실행되므로 merge까지 해야 반영됨
 - pyc 캐시 삭제도 자동 실행
+- **모델메이커 자동테스트는 반드시 main 디렉토리에서 실행**: worktree의 `inverter_model_maker/temp`, `results/`, `common/*_registers.py` 가 비어 있어 사용자가 배치파일로 실행한 결과(누적된 세션/캐시 사용)와 어긋남. 코드 수정 → merge 후 `cd /c/Users/kyuch/Solarize/CM4_4RS485/RTU_UDP/V2_0_0/inverter_model_maker` 에서 stage1/2/3 테스트 실행해야 `START_모델메이커_WEB_v2.bat` 과 동일 환경.
 - **모델**: claude-opus-4-6[1m] (Opus 4.6, 1M context) 기본 사용
 
 ## Project Overview
