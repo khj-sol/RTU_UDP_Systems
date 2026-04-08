@@ -1346,6 +1346,7 @@ def run_stage2(
     ws['A1'].font = title_font
     meta_items = [
         ('제조사', manufacturer), ('용량', capacity or '-'),
+        ('원본 파일', f'{basename}.pdf'),
         ('Phase Type', meta.get('phase_type', 'unknown')),
         ('MPPT', mppt_count),
         ('Total Strings', total_strings),
