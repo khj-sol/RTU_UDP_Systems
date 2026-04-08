@@ -1659,6 +1659,10 @@ _IV_STRING_CURRENT_RE = re.compile(
 # Kstar 형식: PV1 Voltage Point 1, PV1 Current Point 1
 _PV_VOLTAGE_POINT_RE = re.compile(r'PV(\d+)\s+Voltage\s+Point\s+(\d+)', re.I)
 _PV_CURRENT_POINT_RE = re.compile(r'PV(\d+)\s+Current\s+Point\s+(\d+)', re.I)
+# Solis 형식: IV_PV Voltage1, IV_PV Current1 (32 V/I 페어 단일 버퍼)
+# 정규화 후 IV_PV_VOLTAGE1 / IV_PV_CURRENT1 형태도 매칭
+_SOLIS_IV_VOLTAGE_RE = re.compile(r'IV[_\s]*PV[_\s]*Voltage\s*(\d+)', re.I)
+_SOLIS_IV_CURRENT_RE = re.compile(r'IV[_\s]*PV[_\s]*Current\s*(\d+)', re.I)
 # "occupying NNNN registers" 패턴
 _IV_TOTAL_REGS_RE = re.compile(r'occupying\s+(\d+)\s+registers', re.I)
 
@@ -2004,6 +2008,39 @@ def detect_iv_from_pdf(registers: List[RegisterRow], pages: list = None) -> dict
         m2 = _IV_TOTAL_REGS_RE.search(reg.comment or '')
         if m2:
             result['total_iv_regs'] = int(m2.group(1))
+
+    # 2-C) Solis 형식: IV_PV Voltage1~32 / IV_PV Current1~32 (단일 버퍼)
+    # 4 프레임 × 32 V/I 페어 = 128 points 를 FC06 으로 string 선택해 읽음
+    solis_v_map = {}  # {idx: voltage_addr}
+    solis_c_map = {}  # {idx: current_addr}
+    for reg in registers:
+        addr = reg.address if isinstance(reg.address, int) else parse_address(reg.address)
+        if addr is None:
+            continue
+        defn = reg.definition or ''
+        m = _SOLIS_IV_VOLTAGE_RE.search(defn)
+        if m:
+            solis_v_map[int(m.group(1))] = addr
+            continue
+        m = _SOLIS_IV_CURRENT_RE.search(defn)
+        if m:
+            solis_c_map[int(m.group(1))] = addr
+
+    if solis_v_map and solis_c_map:
+        result['format'] = 'solis'
+        result['supported'] = True
+        # Protocol note: 128 points per string via 4 frames × 32 pairs
+        result['data_points'] = 128
+        # 단일 가상 tracker (실제 string 은 FC06 으로 선택)
+        v_first = min(solis_v_map.keys())
+        c_first = min(solis_c_map.keys())
+        result['trackers'].append({
+            'tracker_num': 1,
+            'voltage_addr': solis_v_map[v_first],
+            'strings': [{'string_num': 1, 'current_addr': solis_c_map[c_first]}],
+        })
+        result['total_iv_regs'] = len(solis_v_map) + len(solis_c_map)
+        return result
 
     if pv_map:
         result['format'] = 'kstar'
