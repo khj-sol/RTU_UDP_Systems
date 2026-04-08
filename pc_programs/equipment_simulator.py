@@ -1315,23 +1315,29 @@ class GenericInverterSimulator:
         _h01_write('power_factor', pf_raw, 'POWER_FACTOR')
 
         # --- DER-AVM Real-time Monitoring (0x03E8~0x03FD, S32) ---
-        dea_pf = pf_raw
-        dea_freq = int(env.frequency * 10)  # 0.1Hz
-        dea_power = int(ac_power_w / 100)   # 0.1kW
-        dea_voltage = int(380 * 10) if ac_power_w > 0 else 0  # 0.1V
-        dea_current = int(ac_power_w / 3 / 380 * 10) if ac_power_w > 0 else 0  # 0.1A
-        for dea_name, dea_val in [
-            ('DEA_L1_CURRENT', dea_current), ('DEA_L2_CURRENT', dea_current),
-            ('DEA_L3_CURRENT', dea_current),
-            ('DEA_L1_VOLTAGE', dea_voltage), ('DEA_L2_VOLTAGE', dea_voltage),
-            ('DEA_L3_VOLTAGE', dea_voltage),
-            ('DEA_TOTAL_ACTIVE_POWER', dea_power),
-            ('DEA_REACTIVE_POWER', 0),
-            ('DEA_POWER_FACTOR', dea_pf),
-            ('DEA_FREQUENCY', dea_freq),
-            ('DEA_STATUS_FLAG', 1 if ac_power_w > 0 else 0),
+        # Mirrors the H01 baseline values so the dashboard "Monitor" line
+        # (sourced from H05 control_result) stays consistent with H01 cards.
+        # Voltage, frequency, and PF are always present (grid stays up at night);
+        # currents and active power follow ac_power_w.
+        dea_pf = pf_raw                                       # 0.001
+        dea_freq = int(env.frequency * 10)                    # 0.1 Hz
+        dea_power = int(ac_power_w / 100)                     # 0.1 kW (× 10)
+        dea_voltage = int(380 * 10)                           # 0.1 V (always present)
+        dea_current = int(ac_power_w / 3 / 380 * 10) if ac_power_w > 0 else 0  # 0.1 A
+        for dea_name_aliases, dea_val in [
+            (('DEA_L1_CURRENT', 'DEA_L1_CURRENT_LOW'), dea_current),
+            (('DEA_L2_CURRENT', 'DEA_L2_CURRENT_LOW'), dea_current),
+            (('DEA_L3_CURRENT', 'DEA_L3_CURRENT_LOW'), dea_current),
+            (('DEA_L1_VOLTAGE', 'DEA_L1_VOLTAGE_LOW'), dea_voltage),
+            (('DEA_L2_VOLTAGE', 'DEA_L2_VOLTAGE_LOW'), dea_voltage),
+            (('DEA_L3_VOLTAGE', 'DEA_L3_VOLTAGE_LOW'), dea_voltage),
+            (('DEA_TOTAL_ACTIVE_POWER', 'DEA_ACTIVE_POWER_LOW'), dea_power),
+            (('DEA_REACTIVE_POWER', 'DEA_REACTIVE_POWER_LOW'), 0),
+            (('DEA_POWER_FACTOR', 'DEA_POWER_FACTOR_LOW'), dea_pf),
+            (('DEA_FREQUENCY', 'DEA_FREQUENCY_LOW'), dea_freq),
+            (('DEA_STATUS_FLAG', 'DEA_STATUS_FLAG_LOW'), 1),
         ]:
-            dea_addr = self._find_addr(dea_name)
+            dea_addr = self._find_addr(*dea_name_aliases)
             if dea_addr is not None:
                 self._write_u32(dea_addr, dea_val)
 
