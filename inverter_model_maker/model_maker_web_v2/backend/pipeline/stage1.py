@@ -3008,6 +3008,11 @@ def run_stage1(
                 'MPPT1_VOLTAGE', 'MPPT1_CURRENT', 'MPPT2_VOLTAGE', 'MPPT2_CURRENT',
                 'ERROR_CODE1', 'ERROR_CODE2', 'ERROR_CODE3',
             }
+            # INFO 메타데이터 키워드 — 모델/시리얼/펌웨어 등은 ref 가
+            # ALARM/STRING_ABNORMAL 같은 잘못된 이름으로 덮지 않도록 보호
+            _INFO_META_KW = ('model', 'serial', 'firmware', 'version',
+                             'product', 'manufacturer', 'vendor', 'sn',
+                             'fw ver', 'sw ver', 'device type')
             for reg in registers:
                 addr = reg.address if isinstance(reg.address, int) else parse_address(reg.address)
                 if addr is None:
@@ -3021,6 +3026,18 @@ def run_stage1(
                     continue
                 std_candidates = [c for c in candidates if c in _STD]
                 ref_name = std_candidates[0] if std_candidates else candidates[0]
+
+                # STRING/ASCII 데이터 타입 또는 INFO 메타데이터 정의는
+                # ref enrichment 에서 제외 (Inverter Model information →
+                # PV_STRING_ABNORMAL 같은 stale ref 오염 방지)
+                _dtype_u = (reg.data_type or '').upper()
+                _def_l = (reg.definition or '').lower().replace('_', ' ')
+                if _dtype_u in ('STRING', 'STRINGING', 'ASCII', 'BCD'):
+                    skipped_conflict += 1
+                    continue
+                if any(kw in _def_l for kw in _INFO_META_KW):
+                    skipped_conflict += 1
+                    continue
 
                 # 타입 불일치 검사: Pac→CURRENT 같은 잘못된 치환 차단
                 orig_type = _reg_type_hint(reg.definition)
