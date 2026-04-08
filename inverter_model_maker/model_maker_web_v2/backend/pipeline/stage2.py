@@ -535,6 +535,7 @@ def _add_h01_mapping_sheet(wb, s1: dict, openpyxl_module) -> None:
     # 1차: h01_match 테이블에서 매칭 정보 수집
     # Phase C: DER 가상 주소(DEA_*)는 사용자 드롭다운 H열에 없으므로 D열 auto-populate에서 제외
     # (Stage3의 alias generator가 자동 처리)
+    # PDF_LINE/PDF_PHASE/PDF_ALIAS_R 은 phase-aware 매칭 결과 — 모두 D열에 표시
     for hm in s1.get('h01_match', []):
         field = hm.get('field', '').strip()
         status = hm.get('status', '')
@@ -549,6 +550,13 @@ def _add_h01_mapping_sheet(wb, s1: dict, openpyxl_module) -> None:
         if source == 'HANDLER':
             display_name = 'HANDLER'
             display_addr = ''
+        elif source == 'PDF_ALIAS_R':
+            # 단상/2상 alias — r 의 register 사용
+            display_name = name or defn
+            display_addr = addr
+        elif source in ('PDF_LINE', 'PDF_PHASE'):
+            display_name = name or defn
+            display_addr = addr
         else:
             display_name = name or defn
             display_addr = addr
@@ -1019,10 +1027,38 @@ def run_stage2(
         'data_points': iv_data_points,
     }
 
+    # Stage 2 PASS 판정: MPPT V/I + String V/I + IV(지원시) 모두 충족
+    # String V 는 optional — 대부분 인버터는 String 별 voltage 미지원
+    # (Growatt 등 일부만 제공). String V 가 0 이면 OK, 있는데 부족하면 fail.
+    fail_reasons = []
+    mv = stage2_validation['mppt_voltage']
+    mi = stage2_validation['mppt_current']
+    sv = stage2_validation['string_voltage']
+    si = stage2_validation['string_current']
+    if mv['found'] < mv['expected']:
+        fail_reasons.append(f"MPPT V {mv['found']}/{mv['expected']}")
+    if mi['found'] < mi['expected']:
+        fail_reasons.append(f"MPPT I {mi['found']}/{mi['expected']}")
+    # String V 는 0 이면 통과 (미지원), 1+ 이면 expected 충족 필요
+    if sv['found'] > 0 and sv['found'] < sv['expected']:
+        fail_reasons.append(f"String V {sv['found']}/{sv['expected']}")
+    # String I 도 동일하게 처리 (대부분 인버터 String 모니터링 없음)
+    if si['found'] > 0 and si['found'] < si['expected']:
+        fail_reasons.append(f"String I {si['found']}/{si['expected']}")
+    if iv_supported:
+        if not iv_command_found:
+            fail_reasons.append("IV 명령 레지스터 미발견")
+        if iv_result_found <= 0:
+            fail_reasons.append("IV 결과 레지스터 미발견")
+    stage2_validation['pass'] = len(fail_reasons) == 0
+    stage2_validation['fail_reasons'] = fail_reasons
+
     log(f'MPPT V: {stage2_validation["mppt_voltage"]["found"]}/{mppt_count}, '
         f'MPPT I: {stage2_validation["mppt_current"]["found"]}/{mppt_count}, '
         f'String V: {stage2_validation["string_voltage"]["found"]}/{total_strings}, '
         f'String I: {stage2_validation["string_current"]["found"]}/{total_strings}')
+    log(f'Stage 2 검증: {"✓ PASS" if stage2_validation["pass"] else "✗ WARN — " + ", ".join(fail_reasons)}',
+        'ok' if stage2_validation['pass'] else 'warn')
     if iv_supported:
         log(f'IV Scan: cmd {"✓" if iv_command_found else "✗"}, '
             f'result regs {iv_result_found}, trackers {iv_trackers}, '
@@ -1078,6 +1114,7 @@ def run_stage2(
     ws['A1'].font = title_font
     meta_items = [
         ('제조사', manufacturer), ('용량', capacity or '-'),
+        ('Phase Type', meta.get('phase_type', 'unknown')),
         ('MPPT', mppt_count),
         ('Total Strings', total_strings),
         ('String/MPPT (파생)', strings_per_mppt),
@@ -1263,6 +1300,9 @@ def run_stage2(
         'register_count': total_regs,
         'counts': counts,
         'stage2_validation': stage2_validation,
+        'stage2_pass': stage2_validation.get('pass', False),
+        'fail_reasons': stage2_validation.get('fail_reasons', []),
         'mppt_count': mppt_count,
         'total_strings': total_strings,
+        'phase_type': meta.get('phase_type', 'unknown'),
     }

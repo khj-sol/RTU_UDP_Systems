@@ -1347,29 +1347,31 @@ _H01_REQUIRED_KEYWORDS = {
 # 선간전압 (AB/BC/CA/VAB/VBC/VCA) 은 R/S/T 상전압과 구분 — line 키워드 금지
 _PHASE_SPECIFIC_REQUIRED = {
     'r_voltage': {
-        'type': ['volt', '전압', 'vac'],
+        'type': ['volt', '전압', 'vac', 'uab', 'vab'],
         'phase': [' l1 ', ' r ', 'phase a', ' ph a', ' a phase', 'van',
                   ' u1 ', ' v1 ', ' ua ', ' u a ', 'aphv', 'vpha',
-                  '1상', 'r상', 'a상', ' voltage a'],
-        # 선간/양극간 전압 금지
-        'neg': ['line voltage', ' ab ', ' ba ', 'uab', 'vab', 'u_ab', 'v_ab',
-                'phase ab', 'a-b', 'a_b', 'bus voltage', 'dc voltage'],
+                  '1상', 'r상', 'a상', ' voltage a',
+                  # V2: 선간전압 (A-B 간) 도 r_voltage 후보로 허용 —
+                  # 우선순위는 build_h01_match_table 에서 처리
+                  ' ab ', 'uab', 'vab', 'u_ab', 'v_ab', 'phase ab', 'a-b', 'a_b'],
+        # 진짜 차단할 것: DC/bus/battery 전압
+        'neg': ['bus voltage', 'dc voltage', 'pv voltage', 'battery'],
     },
     's_voltage': {
-        'type': ['volt', '전압', 'vac'],
+        'type': ['volt', '전압', 'vac', 'ubc', 'vbc'],
         'phase': [' l2 ', ' s ', 'phase b', ' ph b', ' b phase', 'vbn',
                   ' u2 ', ' v2 ', ' ub ', ' u b ', 'bphv', 'vphb',
-                  '2상', 's상', 'b상', ' voltage b'],
-        'neg': ['line voltage', ' bc ', ' cb ', 'ubc', 'vbc', 'u_bc', 'v_bc',
-                'phase bc', 'b-c', 'b_c', 'bus voltage', 'dc voltage'],
+                  '2상', 's상', 'b상', ' voltage b',
+                  ' bc ', 'ubc', 'vbc', 'u_bc', 'v_bc', 'phase bc', 'b-c', 'b_c'],
+        'neg': ['bus voltage', 'dc voltage', 'pv voltage', 'battery'],
     },
     't_voltage': {
-        'type': ['volt', '전압', 'vac'],
+        'type': ['volt', '전압', 'vac', 'uca', 'vca'],
         'phase': [' l3 ', ' t ', 'phase c', ' ph c', ' c phase', 'vcn',
                   ' u3 ', ' v3 ', ' uc ', ' u c ', 'cphv', 'vphc',
-                  '3상', 't상', 'c상', ' voltage c'],
-        'neg': ['line voltage', ' ca ', ' ac ', 'uca', 'vca', 'u_ca', 'v_ca',
-                'phase ca', 'c-a', 'c_a', 'bus voltage', 'dc voltage'],
+                  '3상', 't상', 'c상', ' voltage c',
+                  ' ca ', 'uca', 'vca', 'u_ca', 'v_ca', 'phase ca', 'c-a', 'c_a'],
+        'neg': ['bus voltage', 'dc voltage', 'pv voltage', 'battery'],
     },
     'r_current': {
         'type': ['curr', '전류', 'iac', 'amp'],
@@ -1661,13 +1663,167 @@ _PV_CURRENT_POINT_RE = re.compile(r'PV(\d+)\s+Current\s+Point\s+(\d+)', re.I)
 _IV_TOTAL_REGS_RE = re.compile(r'occupying\s+(\d+)\s+registers', re.I)
 
 
-def _detect_phase_type(pages: list, registers: list) -> str:
-    """PDF 텍스트 + 레지스터 이름을 종합해 단상/삼상 판단.
+# AC 전압/전류 후보 수집 — 상전압(phase) vs 선간전압(line) 분류
+# 사용자 요구: 둘 다 있으면 선간전압 우선
+_AC_PHASE_VOLT_PATS = [
+    # L1/L2/L3 표준 (Sungrow/Senergy/Solarize 등)
+    (re.compile(r'\bL([123])[_\s]*VOLTAGE\b', re.I), lambda m: int(m.group(1))),
+    (re.compile(r'\bL_?([123])[_\s]*VOLT', re.I), lambda m: int(m.group(1))),
+    # Vxn (Van/Vbn/Vcn) — 상-중성점간 전압
+    (re.compile(r'\bV([abc])N\b', re.I), lambda m: 'abc'.index(m.group(1).lower()) + 1),
+    # Phase A/B/C voltage (또는 reverse: voltage phase A)
+    (re.compile(r'\bphase[_\s]*([abc])[_\s]*volt', re.I),
+     lambda m: 'abc'.index(m.group(1).lower()) + 1),
+    (re.compile(r'\bvoltage[_\s]+([abc])\b', re.I),
+     lambda m: 'abc'.index(m.group(1).lower()) + 1),
+    # Vac1/Vac2/Vac3 (Goodwe/Growatt 단상 출력)
+    (re.compile(r'\bVac[_\s]*([123])\b', re.I), lambda m: int(m.group(1))),
+    # Ux/V_x (Huawei) — Ua, Ub, Uc 단독 (X N 없는 형식) — 너무 짧아 false positive 위험
+    # 'U a' / 'V a' 형태만 허용
+    (re.compile(r'\bU[_\s]([abc])\b', re.I),
+     lambda m: 'abc'.index(m.group(1).lower()) + 1),
+    # R/S/T phase voltage
+    (re.compile(r'\bR[_\s]*PHASE[_\s]*VOLT', re.I), lambda m: 1),
+    (re.compile(r'\bS[_\s]*PHASE[_\s]*VOLT', re.I), lambda m: 2),
+    (re.compile(r'\bT[_\s]*PHASE[_\s]*VOLT', re.I), lambda m: 3),
+    # Sunways: "Grid A phasevoltage" (공백 없음)
+    (re.compile(r'\bgrid[_\s]+([abc])[_\s]*phase[_\s]*volt', re.I),
+     lambda m: 'abc'.index(m.group(1).lower()) + 1),
+    # 'A_PHASE_VOLTAGE' / 'B_PHASE_VOLTAGE' / 'C_PHASE_VOLTAGE'
+    (re.compile(r'\b([abc])[_\s]*phase[_\s]*volt', re.I),
+     lambda m: 'abc'.index(m.group(1).lower()) + 1),
+    # SMA EDMx: "Line conductor LN at PCC" — already 'l1/l2/l3'
+]
+_AC_LINE_VOLT_PATS = [
+    # Uab/Vab/Ubc/Vbc/Uca/Vca — 선간전압
+    (re.compile(r'\b[UV]([abc])([abc])\b', re.I),
+     lambda m: {'ab': 1, 'bc': 2, 'ca': 3}.get(m.group(1).lower() + m.group(2).lower())),
+    (re.compile(r'\b[UV]_([abc])([abc])\b', re.I),
+     lambda m: {'ab': 1, 'bc': 2, 'ca': 3}.get(m.group(1).lower() + m.group(2).lower())),
+    # Phase AB / A-B / Line AB
+    (re.compile(r'\b(?:phase|line)[_\s]*([abc])[-_]?([abc])\b', re.I),
+     lambda m: {'ab': 1, 'bc': 2, 'ca': 3}.get(m.group(1).lower() + m.group(2).lower())),
+    # Grid voltage AB / Line voltage AB / Voltage AB
+    (re.compile(r'(?:grid|line)?[_\s]*voltage[_\s]+([abc])([abc])\b', re.I),
+     lambda m: {'ab': 1, 'bc': 2, 'ca': 3}.get(m.group(1).lower() + m.group(2).lower())),
+    # L1-L2 / L2-L3 / L3-L1
+    (re.compile(r'\bL1[-_]L2\b', re.I), lambda m: 1),
+    (re.compile(r'\bL2[-_]L3\b', re.I), lambda m: 2),
+    (re.compile(r'\bL3[-_]L1\b', re.I), lambda m: 3),
+]
+_AC_PHASE_CURR_PATS = [
+    (re.compile(r'\bL([123])[_\s]*CURRENT\b', re.I), lambda m: int(m.group(1))),
+    (re.compile(r'\bL_?([123])[_\s]*CURR', re.I), lambda m: int(m.group(1))),
+    (re.compile(r'\bI([abc])\b', re.I), lambda m: 'abc'.index(m.group(1).lower()) + 1),
+    (re.compile(r'\bI_([abc])\b', re.I), lambda m: 'abc'.index(m.group(1).lower()) + 1),
+    (re.compile(r'\bphase[_\s]*([abc])[_\s]*curr', re.I),
+     lambda m: 'abc'.index(m.group(1).lower()) + 1),
+    (re.compile(r'\bcurrent[_\s]+([abc])\b', re.I),
+     lambda m: 'abc'.index(m.group(1).lower()) + 1),
+    (re.compile(r'\bIac[_\s]*([123])\b', re.I), lambda m: int(m.group(1))),
+    (re.compile(r'\bR[_\s]*PHASE[_\s]*CURR', re.I), lambda m: 1),
+    (re.compile(r'\bS[_\s]*PHASE[_\s]*CURR', re.I), lambda m: 2),
+    (re.compile(r'\bT[_\s]*PHASE[_\s]*CURR', re.I), lambda m: 3),
+    # Sunways: "Grid A phasecurrent" (공백 없음)
+    (re.compile(r'\bgrid[_\s]+([abc])[_\s]*phase[_\s]*curr', re.I),
+     lambda m: 'abc'.index(m.group(1).lower()) + 1),
+    # 'A_PHASE_CURRENT' / 'B_PHASE_CURRENT' / 'C_PHASE_CURRENT'
+    (re.compile(r'\b([abc])[_\s]*phase[_\s]*curr', re.I),
+     lambda m: 'abc'.index(m.group(1).lower()) + 1),
+]
 
-    Returns: 'single' | 'three' | 'both' | 'unknown'
-      - single: 단상 전용 (2선식)
-      - three: 삼상 전용
-      - both:  단상/삼상 공통 프로토콜 (런타임 구분 필요, 예: Deye SUN)
+
+def _classify_ac_reg(definition: str, pats):
+    """definition 에서 phase 번호 (1/2/3) 추출. 매칭 안되면 None"""
+    for pat, conv in pats:
+        m = pat.search(definition)
+        if m:
+            try:
+                n = conv(m)
+                if n in (1, 2, 3):
+                    return n
+            except (ValueError, IndexError, AttributeError):
+                continue
+    return None
+
+
+def _collect_ac_voltage_candidates(registers: list) -> dict:
+    """AC 전압 레지스터를 상전압/선간전압으로 분류.
+
+    Returns:
+      {
+        'phase':  {1: [reg, ...], 2: [...], 3: [...]},
+        'line':   {1: [reg, ...], 2: [...], 3: [...]},
+      }
+    """
+    result = {'phase': {1: [], 2: [], 3: []}, 'line': {1: [], 2: [], 3: []}}
+    for reg in registers:
+        defn = reg.definition or ''
+        dl = defn.lower()
+        # DC/bus/battery 제외
+        if any(k in dl for k in ('bus voltage', 'dc voltage', 'pv voltage',
+                                  'battery', 'mppt', 'string', 'fault', 'set',
+                                  'limit', 'threshold')):
+            continue
+        # 1) 선간전압 우선 검사
+        n = _classify_ac_reg(defn, _AC_LINE_VOLT_PATS)
+        if n:
+            result['line'][n].append(reg)
+            continue
+        # 2) 상전압 검사
+        n = _classify_ac_reg(defn, _AC_PHASE_VOLT_PATS)
+        if n:
+            result['phase'][n].append(reg)
+    return result
+
+
+def _collect_ac_current_candidates(registers: list) -> dict:
+    """AC 전류 레지스터를 phase 번호(1/2/3) 별로 분류.
+    Returns: {1: [reg, ...], 2: [...], 3: [...]}
+    """
+    result = {1: [], 2: [], 3: []}
+    for reg in registers:
+        defn = reg.definition or ''
+        dl = defn.lower()
+        if any(k in dl for k in ('dc current', 'pv current', 'battery',
+                                  'mppt', 'string', 'fault', 'set',
+                                  'limit', 'threshold', 'leak', 'ground')):
+            continue
+        n = _classify_ac_reg(defn, _AC_PHASE_CURR_PATS)
+        if n:
+            result[n].append(reg)
+    return result
+
+
+def _pick_phase_voltage(candidates: dict, phase_n: int):
+    """phase_n 의 전압 후보 중 1개 선택. 선간전압 우선, 없으면 상전압.
+    Returns: (reg, source_type) where source_type in ('line', 'phase') or (None, None)
+    """
+    line_list = candidates.get('line', {}).get(phase_n, [])
+    phase_list = candidates.get('phase', {}).get(phase_n, [])
+    if line_list:
+        return (line_list[0], 'line')
+    if phase_list:
+        return (phase_list[0], 'phase')
+    return (None, None)
+
+
+def _pick_phase_current(candidates: dict, phase_n: int):
+    """phase_n 의 전류 후보 중 1개 선택."""
+    lst = candidates.get(phase_n, [])
+    if lst:
+        return (lst[0], 'phase')
+    return (None, None)
+
+
+def _detect_phase_type(pages: list, registers: list) -> str:
+    """PDF 텍스트 + 레지스터 이름을 종합해 인버터 전원 타입 판단.
+
+    Returns: 'single' | 'two' | 'three' | 'both' | 'unknown'
+      - single: 단상 (1-phase / 2-wire) — R(L1) 만 필요
+      - two:    2상 (split-phase, 미국 단상 2선식+중성선) — R,S (L1,L2) 필요
+      - three:  삼상 — R,S,T (L1,L2,L3) 모두 필요
+      - both:   단상/삼상 공통 프로토콜 (런타임 구분, 예: Deye SUN)
       - unknown: 판단 불가
     """
     # 1) PDF 전체 텍스트 수집
@@ -1680,57 +1836,72 @@ def _detect_phase_type(pages: list, registers: list) -> str:
     # 2) 키워드 카운트
     three_kw_count = (
         ft_lower.count('three-phase') + ft_lower.count('three phase') +
-        ft_lower.count('3-phase') + full_text.count('三相')
+        ft_lower.count('3-phase') + ft_lower.count('3 phase') +
+        full_text.count('三相')
+    )
+    two_kw_count = (
+        ft_lower.count('split-phase') + ft_lower.count('split phase') +
+        ft_lower.count('2-phase') + ft_lower.count('two-phase') +
+        ft_lower.count('two phase') + ft_lower.count('three-wire') +
+        ft_lower.count('3-wire') + full_text.count('2相') +
+        full_text.count('両相')
     )
     single_kw_count = (
         ft_lower.count('single-phase') + ft_lower.count('single phase') +
-        ft_lower.count('1-phase') + ft_lower.count('split phase') +
-        ft_lower.count('two-wire') + ft_lower.count('2-wire') +
+        ft_lower.count('1-phase') + ft_lower.count('two-wire') +
+        ft_lower.count('2-wire') +
         full_text.count('단상') + full_text.count('单相') +
         full_text.count('両線') + full_text.count('两线')
     )
 
     # 3) 레지스터 기반 휴리스틱
-    # L1/L2/L3 또는 phase A/B/C 또는 Va/Vb/Vc 가 모두 있으면 삼상
-    # L1 만 있거나 Van 만 있으면 단상
     reg_names = [str(getattr(r, 'definition', '') or '').lower() for r in registers]
     reg_text = ' | '.join(reg_names)
 
     has_l1 = bool(re.search(r'\bl1[_\s]*(volt|curr)|l_1[_\s]*(volt|curr)|'
                              r'van|ua\b|u_a|phase[_\s]*a|a[_\s]*phase|'
                              r'voltage[_\s]*a\b|grid[_\s]*voltage[_\s]*a\b|'
-                             r'r[_\s]*phase', reg_text))
+                             r'r[_\s]*phase|vac1|vac_r|iac1|iac_r', reg_text))
     has_l2 = bool(re.search(r'\bl2[_\s]*(volt|curr)|l_2[_\s]*(volt|curr)|'
                              r'vbn|ub\b|u_b|phase[_\s]*b|b[_\s]*phase|'
                              r'voltage[_\s]*b\b|grid[_\s]*voltage[_\s]*b\b|'
-                             r's[_\s]*phase', reg_text))
+                             r's[_\s]*phase|vac2|vac_s|iac2|iac_s', reg_text))
     has_l3 = bool(re.search(r'\bl3[_\s]*(volt|curr)|l_3[_\s]*(volt|curr)|'
                              r'vcn|uc\b|u_c|phase[_\s]*c|c[_\s]*phase|'
                              r'voltage[_\s]*c\b|grid[_\s]*voltage[_\s]*c\b|'
-                             r't[_\s]*phase', reg_text))
+                             r't[_\s]*phase|vac3|vac_t|iac3|iac_t', reg_text))
 
     reg_three = has_l1 and has_l2 and has_l3
-    reg_single_only = has_l1 and not has_l2 and not has_l3
+    reg_two = has_l1 and has_l2 and not has_l3
+    reg_single = has_l1 and not has_l2 and not has_l3
 
-    # 4) 종합 판단
+    # 4) 종합 판단 (우선순위: 키워드 2+ > 레지스터 > 키워드 1)
+    # 'both': PDF 에 single + three 모두 언급된 공통 프로토콜
     if three_kw_count > 0 and single_kw_count > 0:
-        # PDF 에 두 타입 모두 언급 — 공통 프로토콜 (Deye, Solis, Growatt 등)
-        if reg_three:
-            return 'both'  # 삼상 레지스터 있으나 단상 언급도 있음
         return 'both'
-    if reg_three and (three_kw_count > 0 or single_kw_count == 0):
-        return 'three'
-    if reg_single_only and (single_kw_count > 0 or three_kw_count == 0):
-        return 'single'
-    if three_kw_count > 0 and three_kw_count > single_kw_count * 2:
-        return 'three'
-    if single_kw_count > 0 and single_kw_count > three_kw_count * 2:
-        return 'single'
-    # 레지스터 기반 최종 fallback
+
+    # 명확한 삼상 (레지스터 + 키워드)
     if reg_three:
         return 'three'
-    if reg_single_only:
+    if three_kw_count > 0:
+        return 'three'
+
+    # 2상 (split-phase)
+    if reg_two and two_kw_count > 0:
+        return 'two'
+    if two_kw_count > 0:
+        return 'two'
+    if reg_two:
+        return 'two'
+
+    # 단상
+    if reg_single and single_kw_count > 0:
         return 'single'
+    if single_kw_count > 0:
+        return 'single'
+    if reg_single:
+        return 'single'
+
     return 'unknown'
 
 
@@ -1874,14 +2045,95 @@ _UNIT_SCALE_MAP = {
 
 
 def build_h01_match_table(categorized: dict, meta: dict) -> List[dict]:
-    """V2: H01 Body 전체 필드 매칭 상태 + 단위/타입 검증"""
+    """V2: H01 Body 전체 필드 매칭 상태 + 단위/타입 검증
+
+    Phase-aware r/s/t 매핑:
+      - 3상: r=L1, s=L2, t=L3 (선간전압 우선, 없으면 상전압)
+      - 2상: r=L1, s=L2, t=r (alias)
+      - 단상: r=L1, s=t=r (alias)
+      - both/unknown: 3상 시도 → 부족한 phase 는 r alias
+    """
     rows = []
     max_mppt = meta.get('max_mppt', 0)
     max_string = meta.get('max_string', 0)
+    phase_type = meta.get('phase_type', 'unknown')
 
-    # 1) DER 겹침 (9개) — 항상 O
+    # 0) Phase-aware r/s/t 후보 수집 + 매칭 결정
+    all_cats_for_phase = (categorized.get('MONITORING', []) +
+                          categorized.get('INFO', []) +
+                          categorized.get('STATUS', []))
+    v_cands = _collect_ac_voltage_candidates(all_cats_for_phase)
+    i_cands = _collect_ac_current_candidates(all_cats_for_phase)
+
+    # phase_picks[field] = (reg, source_str, note)
+    # source_str: 'PDF_LINE'/'PDF_PHASE'/'PDF_ALIAS_R'
+    phase_picks: dict = {}
+
+    def _make_phase_pick(metric: str, n: int, kind: str, candidates):
+        """metric='voltage'/'current', kind='line'/'phase', n=1/2/3"""
+        if metric == 'voltage':
+            reg, src = _pick_phase_voltage(candidates, n)
+        else:
+            reg, src = _pick_phase_current(candidates, n)
+        if reg is None:
+            return None
+        return (reg, 'PDF_LINE' if src == 'line' else 'PDF_PHASE')
+
+    def _resolve_phase_field(field_name: str, n: int, candidates, metric: str):
+        """단일 phase 매칭 시도. picks dict 에 결과 저장."""
+        result = _make_phase_pick(metric, n, '', candidates)
+        if result:
+            phase_picks[field_name] = (result[0], result[1], '')
+
+    # 3상/both/unknown: r/s/t 모두 시도
+    if phase_type in ('three', 'both', 'unknown'):
+        _resolve_phase_field('r_voltage', 1, v_cands, 'voltage')
+        _resolve_phase_field('s_voltage', 2, v_cands, 'voltage')
+        _resolve_phase_field('t_voltage', 3, v_cands, 'voltage')
+        _resolve_phase_field('r_current', 1, i_cands, 'current')
+        _resolve_phase_field('s_current', 2, i_cands, 'current')
+        _resolve_phase_field('t_current', 3, i_cands, 'current')
+    elif phase_type == 'two':
+        # r=L1, s=L2, t=r alias
+        _resolve_phase_field('r_voltage', 1, v_cands, 'voltage')
+        _resolve_phase_field('s_voltage', 2, v_cands, 'voltage')
+        _resolve_phase_field('r_current', 1, i_cands, 'current')
+        _resolve_phase_field('s_current', 2, i_cands, 'current')
+    elif phase_type == 'single':
+        # r 만, s/t=r alias
+        _resolve_phase_field('r_voltage', 1, v_cands, 'voltage')
+        _resolve_phase_field('r_current', 1, i_cands, 'current')
+
+    # alias 처리: 누락된 s/t 를 r 에 alias
+    for field, src_field in [('s_voltage', 'r_voltage'), ('t_voltage', 'r_voltage'),
+                              ('s_current', 'r_current'), ('t_current', 'r_current')]:
+        if field not in phase_picks and src_field in phase_picks:
+            src_reg, _src_kind, _ = phase_picks[src_field]
+            phase_picks[field] = (src_reg, 'PDF_ALIAS_R',
+                                   f'{phase_type} phase — {src_field} alias')
+
+    # 1) DER 겹침 (9개) — phase_picks 에 PDF 매칭 있으면 PDF row, 없으면 DER row
+    _PHASE_FIELDS = {'r_voltage', 's_voltage', 't_voltage',
+                     'r_current', 's_current', 't_current'}
     for h01_field, der_info in H01_DER_OVERLAP_FIELDS.items():
         expected_unit = H01_BASE_UNITS.get(h01_field, '')
+        # phase_picks 에 있으면 PDF 매칭 사용 (DER 보다 우선)
+        if h01_field in _PHASE_FIELDS and h01_field in phase_picks:
+            reg, src, note = phase_picks[h01_field]
+            addr_hex = getattr(reg, 'address_hex', '') or f'0x{reg.address:04X}'
+            rows.append({
+                'field': h01_field,
+                'source': src,  # 'PDF_LINE' / 'PDF_PHASE' / 'PDF_ALIAS_R'
+                'status': 'O',
+                'type': getattr(reg, 'data_type', 'U16') or 'U16',
+                'unit': getattr(reg, 'unit', '') or expected_unit,
+                'scale': getattr(reg, 'scale', '') or '',
+                'address': addr_hex,
+                'definition': reg.definition or '',
+                'note': note or ('선간전압 사용' if src == 'PDF_LINE'
+                                  else ('상전압 사용' if src == 'PDF_PHASE' else '')),
+            })
+            continue
         rows.append({
             'field': h01_field,
             'source': 'DER',

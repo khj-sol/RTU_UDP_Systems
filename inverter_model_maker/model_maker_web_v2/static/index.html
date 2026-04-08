@@ -638,11 +638,13 @@
     const snOk    = im.sn    === true;
     const modelMark = modelOk ? '✓' : '✗';
     const snMark    = snOk ? '✓' : '✗';
-    const level = (modelOk && snOk) ? 'ok' : (modelOk ? 'warn' : 'warn');
+    // Stage 1 PASS = Model + SN 모두 매칭
+    const stage1_pass = modelOk && snOk;
+    const level = stage1_pass ? 'ok' : 'warn';
     appendLog('s1',
-      `검증: Model ${modelMark}  SN ${snMark}` +
+      `Stage 1 검증: ${stage1_pass ? '✅ PASS' : '⚠ WARN'}  Model ${modelMark}  SN ${snMark}` +
       (!modelOk ? '  (모델명 레지스터 미발견)' : '') +
-      (modelOk && !snOk ? '  (SN 레지스터 미발견 — 메타데이터 대체 가능)' : ''),
+      (modelOk && !snOk ? '  (SN 레지스터 미발견)' : ''),
       level);
 
     if (msg.review_count > 0) {
@@ -937,6 +939,13 @@
         ivLvl);
     }
 
+    // Stage 2 최종 PASS 판정 (MPPT + String + IV)
+    const stage2_pass = msg.stage2_pass === true;
+    const fail_reasons = msg.fail_reasons || [];
+    appendLog('s2',
+      `Stage 2 검증: ${stage2_pass ? '✅ PASS' : '⚠ WARN — ' + fail_reasons.join(', ')}`,
+      stage2_pass ? 'ok' : 'warn');
+
     if (msg.review_count > 0 && msg.review_items && msg.review_items.length > 0) {
       appendLog('s2', `REVIEW ${msg.review_count}개 — 판정 후 H01 매핑 확인`, 'warn');
       showReview(msg.review_items);
@@ -979,11 +988,14 @@
 
     // Stage 3 검증: H01 매칭 + RTU 통신 검증
     const st4 = msg.stage4;
+    // Stage 4 PASS = 17/17 H01 + grade=PASS
+    const stage4_pass = msg.stage4_pass === true;
     if (st4) {
       const box = document.getElementById('stage4-result');
       const gradeEl = document.getElementById('stage4-grade');
       const detailsEl = document.getElementById('stage4-details');
-      const grade = st4.grade || '?';
+      // 명시적 stage4_pass 우선, 없으면 grade 사용
+      const grade = stage4_pass ? 'PASS' : (st4.grade || '?');
       const colors = {
         PASS: ['#16a34a', '#86efac', '✅'],
         WARN: ['#d97706', '#fbbf24', '⚠️'],
@@ -991,8 +1003,8 @@
       };
       const [bg, fg, icon] = colors[grade] || ['#475569', '#cbd5e1', '?'];
       box.style.borderColor = bg;
-      gradeEl.innerHTML = `<span style="color:${fg}">${icon} Stage 3 검증: ${grade}</span>` +
-        `  <span style="color:#9ca3af;font-weight:400">H01 매칭 · RTU 통신</span>`;
+      gradeEl.innerHTML = `<span style="color:${fg}">${icon} Stage 4 검증: ${grade}</span>` +
+        `  <span style="color:#9ca3af;font-weight:400">17 H01 표준 필드 · RTU 통신</span>`;
       // H01 매칭 상태
       const h01Pct = (st4.h01_pct || 0).toFixed(0);
       const h01Line = `① H01 매칭 <b style="color:${fg}">${st4.h01_resolved}/${st4.h01_total}</b> (${h01Pct}%)`;
@@ -1012,8 +1024,8 @@
       detailsEl.innerHTML = `${h01Line}<br>${rtuLine}${warnings}`;
       box.style.display = 'block';
       appendLog('s3',
-        `검증: H01 ${st4.h01_resolved}/${st4.h01_total}  RTU ${commOk ? '✓' : '✗'}  → ${grade}`,
-        grade === 'PASS' ? 'ok' : 'warn');
+        `Stage 4 검증: ${stage4_pass ? '✅ PASS' : '⚠ ' + grade}  H01 ${st4.h01_resolved}/${st4.h01_total}  RTU ${commOk ? '✓' : '✗'}`,
+        stage4_pass ? 'ok' : 'warn');
     }
   }
 

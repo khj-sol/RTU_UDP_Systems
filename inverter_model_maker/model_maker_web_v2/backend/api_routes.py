@@ -496,6 +496,9 @@ async def stage2_run(body: dict):
                 'review_count': result['review_count'],
                 'review_items': result.get('review_items', []),
                 'stage2_validation': result.get('stage2_validation', {}),
+                'stage2_pass': result.get('stage2_pass', False),
+                'fail_reasons': result.get('fail_reasons', []),
+                'phase_type': result.get('phase_type', 'unknown'),
                 'mppt_count': result.get('mppt_count', 0),
                 'total_strings': result.get('total_strings', 0),
             })
@@ -549,6 +552,8 @@ async def stage3_run(body: dict):
                 'filename': result['filename'],
                 'validation': result['validation'],
                 'stage4': result.get('stage4'),
+                'stage4_pass': result.get('stage4_pass', False),
+                'phase_type': result.get('phase_type', 'unknown'),
                 'synonym_added': result['synonym_added'],
                 'review_recorded': result['review_recorded'],
             })
