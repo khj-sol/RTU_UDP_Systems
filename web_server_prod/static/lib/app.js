@@ -31,31 +31,37 @@ const fmtTime = ts => {
   return d.toLocaleString('ko-KR');
 };
 const statusColor = s => s === 'online' ? 'bg-green-500' : s === 'offline' ? 'bg-red-500' : 'bg-yellow-500';
+// Model number → display name (matches common/*_registers.py and device_models.ini)
+// Naming rule: {Manufacturer}_{kW}_{phase}
 const MODEL_NAMES = {
-  1: 'Solarize 50K',
-  2: 'Huawei 50K',
-  3: 'Kstar 60K',
-  4: 'Sungrow',
-  5: 'Ekos 10K',
-  6: 'Senergy 50K',
-  7: 'Sofar 70KTL',
-  8: 'Solis 50K',
-  9: 'Growatt 30K',
-  10: 'CPS SCA-M',
-  11: 'Sunways 30K',
+  1:  'Solarize_50_3',
+  2:  'Huawei_50_3',
+  3:  'Kstar_60_3',
+  4:  'Sungrow_50_3',
+  5:  'Ekos_10_3',
+  6:  'Senergy_50_3',
+  7:  'Sofar_50_3',
+  8:  'Solis_50_3',
+  9:  'Growatt_30_3',
+  10: 'CPS_50_3',
+  11: 'Sunways_30_3',
+  12: 'ABB_50_3',
+  13: 'Goodwe_50_3',
 };
 const MODEL_COLORS = {
-  1: 'bg-blue-500',
-  2: 'bg-orange-500',
-  3: 'bg-purple-500',
-  4: 'bg-teal-600',
-  5: 'bg-green-500',
-  6: 'bg-cyan-500',
-  7: 'bg-yellow-500',
-  8: 'bg-red-500',
-  9: 'bg-lime-500',
+  1:  'bg-blue-500',
+  2:  'bg-orange-500',
+  3:  'bg-purple-500',
+  4:  'bg-teal-600',
+  5:  'bg-green-500',
+  6:  'bg-cyan-500',
+  7:  'bg-yellow-500',
+  8:  'bg-red-500',
+  9:  'bg-lime-500',
   10: 'bg-indigo-500',
   11: 'bg-pink-500',
+  12: 'bg-amber-600',
+  13: 'bg-rose-500',
 };
 const INVERTER_STATUS = {
   0x00: 'Initial',

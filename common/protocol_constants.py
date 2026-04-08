@@ -105,24 +105,40 @@ DEVICE_TYPE_NAMES = {
 }
 
 # =============================================================================
-# Device Model Numbers
+# Device Model Numbers — naming rule: {Manufacturer}_{kW}_{phase}
+# Matches common/{Manufacturer}_{kW}_{phase}_registers.py filename and
+# config/rs485_ch*.ini protocol = {manufacturer}_{kW}_{phase}
+# Model number → protocol assignment follows config/rs485_ch1.ini 'model ='
 # =============================================================================
-INV_MODEL_SOLARIZE_50K = 1      # Solarize 50K (solarize)
-INV_MODEL_HUAWEI_50K = 2        # Huawei 50K (huawei)
-INV_MODEL_KSTAR_60K = 3         # Kstar 60K (kstar)
-INV_MODEL_SUNGROW = 4           # Sungrow (sungrow)
-INV_MODEL_EKOS_10K = 5          # Ekos 10K (ekos)
-INV_MODEL_SENERGY_50K = 6       # Senergy 50K (senergy)
-INV_MODEL_SOFAR_70K = 7         # Sofar 70KTL (sofar)
-INV_MODEL_SOLIS_50K = 8         # Solis 50K (solis)
-INV_MODEL_GROWATT_30K = 9       # Growatt 30K (growatt)
-INV_MODEL_CPS = 10              # CPS SCA-M (cps)
-INV_MODEL_SUNWAYS_30K = 11      # Sunways 30K (sunways)
+INV_MODEL_SOLARIZE_50_3 = 1     # Solarize 50kW 3-phase  (solarize_50_3)
+INV_MODEL_HUAWEI_50_3 = 2       # Huawei 50kW 3-phase    (huawei_50_3)
+INV_MODEL_KSTAR_60_3 = 3        # Kstar 60kW 3-phase     (kstar_60_3)
+INV_MODEL_SUNGROW_50_3 = 4      # Sungrow 50kW 3-phase   (sungrow_50_3)
+INV_MODEL_EKOS_10_3 = 5         # Ekos 10kW 3-phase      (ekos_10_3)
+INV_MODEL_SENERGY_50_3 = 6      # Senergy 50kW 3-phase   (senergy_50_3)
+INV_MODEL_SOFAR_50_3 = 7        # Sofar 50kW 3-phase     (sofar_50_3)
+INV_MODEL_SOLIS_50_3 = 8        # Solis 50kW 3-phase     (solis_50_3)
+INV_MODEL_GROWATT_30_3 = 9      # Growatt 30kW 3-phase   (growatt_30_3)
+INV_MODEL_CPS_50_3 = 10         # CPS 50kW 3-phase       (cps_50_3)
+INV_MODEL_SUNWAYS_30_3 = 11     # Sunways 30kW 3-phase   (sunways_30_3)
+INV_MODEL_ABB_50_3 = 12         # ABB 50kW 3-phase       (abb_50_3)
+INV_MODEL_GOODWE_50_3 = 13      # Goodwe 50kW 3-phase    (goodwe_50_3)
 
-# Legacy aliases (backward compat)
-INV_MODEL_SOLARIZE = INV_MODEL_SOLARIZE_50K
-INV_MODEL_HUAWEI = INV_MODEL_HUAWEI_50K
-INV_MODEL_KSTAR = INV_MODEL_KSTAR_60K
+# Legacy aliases (backward compat with old code paths)
+INV_MODEL_SOLARIZE_50K = INV_MODEL_SOLARIZE_50_3
+INV_MODEL_HUAWEI_50K = INV_MODEL_HUAWEI_50_3
+INV_MODEL_KSTAR_60K = INV_MODEL_KSTAR_60_3
+INV_MODEL_SUNGROW = INV_MODEL_SUNGROW_50_3
+INV_MODEL_EKOS_10K = INV_MODEL_EKOS_10_3
+INV_MODEL_SENERGY_50K = INV_MODEL_SENERGY_50_3
+INV_MODEL_SOFAR_70K = INV_MODEL_SOFAR_50_3
+INV_MODEL_SOLIS_50K = INV_MODEL_SOLIS_50_3
+INV_MODEL_GROWATT_30K = INV_MODEL_GROWATT_30_3
+INV_MODEL_CPS = INV_MODEL_CPS_50_3
+INV_MODEL_SUNWAYS_30K = INV_MODEL_SUNWAYS_30_3
+INV_MODEL_SOLARIZE = INV_MODEL_SOLARIZE_50_3
+INV_MODEL_HUAWEI = INV_MODEL_HUAWEI_50_3
+INV_MODEL_KSTAR = INV_MODEL_KSTAR_60_3
 
 RELAY_MODEL_KDU300 = 1
 RELAY_MODEL_VIPAM3500C = 2
@@ -130,17 +146,19 @@ RELAY_MODEL_VIPAM3500C = 2
 WEATHER_MODEL_SEM5046 = 1
 
 INV_MODEL_NAMES = {
-    INV_MODEL_SOLARIZE_50K: "Solarize 50K",
-    INV_MODEL_HUAWEI_50K: "Huawei 50K",
-    INV_MODEL_KSTAR_60K: "Kstar 60K",
-    INV_MODEL_SUNGROW: "Sungrow",
-    INV_MODEL_EKOS_10K: "Ekos 10K",
-    INV_MODEL_SENERGY_50K: "Senergy 50K",
-    INV_MODEL_SOFAR_70K: "Sofar 70KTL",
-    INV_MODEL_SOLIS_50K: "Solis 50K",
-    INV_MODEL_GROWATT_30K: "Growatt 30K",
-    INV_MODEL_CPS: "CPS SCA-M",
-    INV_MODEL_SUNWAYS_30K: "Sunways 30K",
+    INV_MODEL_SOLARIZE_50_3: "Solarize_50_3",
+    INV_MODEL_HUAWEI_50_3:   "Huawei_50_3",
+    INV_MODEL_KSTAR_60_3:    "Kstar_60_3",
+    INV_MODEL_SUNGROW_50_3:  "Sungrow_50_3",
+    INV_MODEL_EKOS_10_3:     "Ekos_10_3",
+    INV_MODEL_SENERGY_50_3:  "Senergy_50_3",
+    INV_MODEL_SOFAR_50_3:    "Sofar_50_3",
+    INV_MODEL_SOLIS_50_3:    "Solis_50_3",
+    INV_MODEL_GROWATT_30_3:  "Growatt_30_3",
+    INV_MODEL_CPS_50_3:      "CPS_50_3",
+    INV_MODEL_SUNWAYS_30_3:  "Sunways_30_3",
+    INV_MODEL_ABB_50_3:      "ABB_50_3",
+    INV_MODEL_GOODWE_50_3:   "Goodwe_50_3",
 }
 
 # =============================================================================
