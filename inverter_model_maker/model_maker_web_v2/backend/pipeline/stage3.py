@@ -695,6 +695,21 @@ def _gen_register_map(regs_by_cat: dict, mppt: int, total_strings: int,
         if _cand:
             lines.append(f'    {"POWER_FACTOR":40s} = {_cand}')
             all_defined.add('POWER_FACTOR')
+    # POWER_FACTOR 영문 fuzzy: 'PF' substring (DER_/SET 제외)
+    if 'POWER_FACTOR' not in all_defined:
+        _cand = next((n for n in sorted(all_defined)
+                      if ('PF' in n or 'POWER_FACTOR' in n or 'POWERFACTOR' in n
+                          or 'COSPHI' in n or 'COS_PHI' in n)
+                      and not any(p in n for p in ('SET', 'DER_', 'L1', 'L2',
+                                                    'L3', 'LIMIT', 'TARGET'))),
+                     None)
+        if _cand:
+            lines.append(f'    {"POWER_FACTOR":40s} = {_cand}  # fuzzy fallback')
+            all_defined.add('POWER_FACTOR')
+    # POWER_FACTOR 마지막 fallback: 0x0000 더미 (없는 인버터)
+    if 'POWER_FACTOR' not in all_defined:
+        lines.append(f'    {"POWER_FACTOR":40s} = 0x0000  # fallback: 역률 레지스터 없음')
+        all_defined.add('POWER_FACTOR')
 
     # AC_POWER — 유효전력 레지스터 다양한 후보명 지원 (한글/영문/제조사별)
     if 'AC_POWER' not in all_defined:
@@ -728,6 +743,22 @@ def _gen_register_map(regs_by_cat: dict, mppt: int, total_strings: int,
             lines.append(f'    {"R_PHASE_VOLTAGE":40s} = S_PHASE_VOLTAGE  # L1 없음 → 단상 대체')
             all_defined.add('R_PHASE_VOLTAGE')
 
+    # Phase-aware S/T_PHASE_VOLTAGE alias 강제 (단상/2상 인버터)
+    # 단상: S = T = R, 2상: T = R
+    # 3상/both: R 만 있고 S/T 미발견시도 R alias (이름 매칭 실패 fallback)
+    _phase_type = regs_by_cat.get('_phase_type', 'three')
+    if _phase_type == 'single' and 'R_PHASE_VOLTAGE' in all_defined:
+        if 'S_PHASE_VOLTAGE' not in all_defined:
+            lines.append(f'    {"S_PHASE_VOLTAGE":40s} = R_PHASE_VOLTAGE  # 단상 — S=R alias')
+            all_defined.add('S_PHASE_VOLTAGE')
+        if 'T_PHASE_VOLTAGE' not in all_defined:
+            lines.append(f'    {"T_PHASE_VOLTAGE":40s} = R_PHASE_VOLTAGE  # 단상 — T=R alias')
+            all_defined.add('T_PHASE_VOLTAGE')
+    elif _phase_type == 'two' and 'R_PHASE_VOLTAGE' in all_defined:
+        if 'T_PHASE_VOLTAGE' not in all_defined:
+            lines.append(f'    {"T_PHASE_VOLTAGE":40s} = R_PHASE_VOLTAGE  # 2상 — T=R alias')
+            all_defined.add('T_PHASE_VOLTAGE')
+
     # T_PHASE_VOLTAGE — L3/C상 전압 후보, 없으면 S_PHASE_VOLTAGE로 대체
     if 'T_PHASE_VOLTAGE' not in all_defined:
         _found_t = False
@@ -758,6 +789,20 @@ def _gen_register_map(regs_by_cat: dict, mppt: int, total_strings: int,
         if not _found_rc and 'S_PHASE_CURRENT' in all_defined:
             lines.append(f'    {"R_PHASE_CURRENT":40s} = S_PHASE_CURRENT  # L1 없음 → 단상 대체')
             all_defined.add('R_PHASE_CURRENT')
+
+    # Phase-aware S/T_PHASE_CURRENT alias (단상/2상 인버터)
+    if _phase_type == 'single' and 'R_PHASE_CURRENT' in all_defined:
+        if 'S_PHASE_CURRENT' not in all_defined:
+            lines.append(f'    {"S_PHASE_CURRENT":40s} = R_PHASE_CURRENT  # 단상 — S=R alias')
+            all_defined.add('S_PHASE_CURRENT')
+        if 'T_PHASE_CURRENT' not in all_defined:
+            lines.append(f'    {"T_PHASE_CURRENT":40s} = R_PHASE_CURRENT  # 단상 — T=R alias')
+            all_defined.add('T_PHASE_CURRENT')
+    elif _phase_type == 'two' and 'R_PHASE_CURRENT' in all_defined:
+        if 'T_PHASE_CURRENT' not in all_defined:
+            lines.append(f'    {"T_PHASE_CURRENT":40s} = R_PHASE_CURRENT  # 2상 — T=R alias')
+            all_defined.add('T_PHASE_CURRENT')
+
     if 'S_PHASE_CURRENT' not in all_defined:
         for _sc in ['L2_CURRENT', 'S_CURRENT', 'PHASE_B_CURRENT', 'IB_CURRENT',
                     'B_PHASE_CURRENT', '전류종합',
@@ -786,6 +831,18 @@ def _gen_register_map(regs_by_cat: dict, mppt: int, total_strings: int,
         if not _found_tc2 and 'S_PHASE_CURRENT' in all_defined:
             lines.append(f'    {"T_PHASE_CURRENT":40s} = S_PHASE_CURRENT  # L3 없음 → 단상 대체')
             all_defined.add('T_PHASE_CURRENT')
+
+    # 마지막 fallback: R/S/T_PHASE_VOLTAGE/CURRENT 가 모두 없으면 R 가 있을 때
+    # S/T 를 R 로 alias (3상이지만 이름 매칭 실패한 인버터 — Sunways 등)
+    for _src, _targets in [
+        ('R_PHASE_VOLTAGE', ['S_PHASE_VOLTAGE', 'T_PHASE_VOLTAGE']),
+        ('R_PHASE_CURRENT', ['S_PHASE_CURRENT', 'T_PHASE_CURRENT']),
+    ]:
+        if _src in all_defined:
+            for _tgt in _targets:
+                if _tgt not in all_defined:
+                    lines.append(f'    {_tgt:40s} = {_src}  # 매칭 실패 → R alias fallback')
+                    all_defined.add(_tgt)
 
     # TOTAL_ENERGY — 누적 발전량 후보 (kWh/Wh 단위 구분은 modbus_handler가 처리)
     if 'TOTAL_ENERGY' not in all_defined:
@@ -2132,6 +2189,14 @@ def run_stage3(
 
     strings_per_mppt = total_strings // max(1, mppt_count) if mppt_count > 0 else 0
 
+    # Phase type — Stage2 meta 의 'Phase Type' 키에서 읽음 (default: 'three')
+    phase_type = (meta.get('Phase Type', '') or
+                  meta.get('phase_type', '') or 'three').strip().lower()
+    if phase_type not in ('single', 'two', 'three', 'both', 'unknown'):
+        phase_type = 'three'
+    # regs_by_cat 에 phase_type 저장 — _gen_register_map 에서 사용
+    regs_by_cat['_phase_type'] = phase_type
+
     # 프로토콜명 정규화 (긴 파일명 → 짧은 프로토콜명)
     protocol_name = manufacturer.lower()
     protocol_version = meta.get('프로토콜 버전', '')
@@ -2277,16 +2342,24 @@ def run_stage3(
 
     log('Stage 3 완료', 'ok')
 
+    # Stage 4 PASS 판정: 17개 표준 H01 필드 모두 resolve
+    h01_total_s4 = stage4.get('h01_total', 0)
+    h01_resolved_s4 = stage4.get('h01_resolved', 0)
+    stage4_pass = (h01_total_s4 > 0 and h01_resolved_s4 == h01_total_s4 and
+                   stage4.get('grade') == 'PASS')
+
     return {
         'output_path': output_path,
         'filename': output_name,
         'validation': validation,
         'stage4': stage4,
+        'stage4_pass': stage4_pass,
         'synonym_added': syn_added,
         'review_recorded': rv_recorded,
         'mppt_count': mppt_count,
         'total_strings': total_strings,
         'register_count': len(all_regs),
+        'phase_type': phase_type,
     }
 
 
