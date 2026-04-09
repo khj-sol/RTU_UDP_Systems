@@ -2392,6 +2392,8 @@ function ModbusTestTab({ rtus, selectedRtu }) {
   const [fc, setFc] = useState(3);
   const [addr, setAddr] = useState('0x0000');
   const [count, setCount] = useState(10);
+  const [dataType, setDataType] = useState('U16');
+  const [scale, setScale] = useState('1');
   const [writeVal, setWriteVal] = useState('0');
   const [writeVals, setWriteVals] = useState('');
   const [loading, setLoading] = useState(false);
@@ -2441,7 +2443,8 @@ function ModbusTestTab({ rtus, selectedRtu }) {
     try {
       const op = fc <= 4 ? 'READ' : 'WRITE';
       addLog(`> FC${String(fc).padStart(2,'0')} ${op} slave=${slaveId} addr=0x${a.toString(16).toUpperCase().padStart(4,'0')} count=${body.count || count}`);
-      await post('/control/modbus_test', body);
+      const sendResult = await post('/control/modbus_test', body);
+      if (sendResult?.tx_packet) addLog(`  TX: [${sendResult.tx_packet}]`);
       // Poll for result (RTU responds via H05, takes ~1-3s)
       let tries = 0;
       const poll = setInterval(async () => {
@@ -2456,6 +2459,7 @@ function ModbusTestTab({ rtus, selectedRtu }) {
             if (rc === 0) {
               const regs = r.result.registers || [];
               addLog(`< OK ${regs.length} registers: [${regs.map(v => '0x'+v.toString(16).toUpperCase().padStart(4,'0')).join(' ')}]`);
+              if (r.result.raw_hex) addLog(`  RX: [${r.result.raw_hex}]`);
             } else {
               addLog(`< ${rc === -1 ? 'TIMEOUT' : 'ERROR'} (rc=${rc})`);
             }
@@ -2533,6 +2537,23 @@ function ModbusTestTab({ rtus, selectedRtu }) {
           className: "bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-sm w-20"
         })),
 
+      /*#__PURE__*/React.createElement("div", null,
+        /*#__PURE__*/React.createElement("div", { className: "text-xs text-gray-500 mb-1" }, "Data Type"),
+        /*#__PURE__*/React.createElement("select", {
+          value: dataType, onChange: e => setDataType(e.target.value),
+          className: "bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-sm"
+        },
+          ['U16', 'S16', 'U32', 'S32', 'STRING'].map(t =>
+            /*#__PURE__*/React.createElement("option", { key: t, value: t }, t)))),
+
+      /*#__PURE__*/React.createElement("div", null,
+        /*#__PURE__*/React.createElement("div", { className: "text-xs text-gray-500 mb-1" }, "Scale"),
+        /*#__PURE__*/React.createElement("input", {
+          type: "text", value: scale, onChange: e => setScale(e.target.value),
+          className: "bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-sm w-20",
+          placeholder: "0.1"
+        })),
+
       fc === 6 && /*#__PURE__*/React.createElement("div", null,
         /*#__PURE__*/React.createElement("div", { className: "text-xs text-gray-500 mb-1" }, "Value (U16)"),
         /*#__PURE__*/React.createElement("input", {
@@ -2558,29 +2579,66 @@ function ModbusTestTab({ rtus, selectedRtu }) {
     // Result table
     result && result.result_code === 0 && result.registers && /*#__PURE__*/React.createElement(Card, null,
       /*#__PURE__*/React.createElement("div", { className: "text-sm font-medium mb-2 text-green-400" },
-        `FC${String(result.fc).padStart(2,'0')} Response — ${result.registers.length} registers from slave ${result.slave_id}`),
+        `FC${String(result.fc).padStart(2,'0')} Response — ${result.registers.length} registers from slave ${result.slave_id}`,
+        `  [${dataType} × ${scale}]`),
       /*#__PURE__*/React.createElement("div", { className: "overflow-auto", style: { maxHeight: '400px' } },
         /*#__PURE__*/React.createElement("table", { className: "w-full text-sm font-mono" },
           /*#__PURE__*/React.createElement("thead", null,
             /*#__PURE__*/React.createElement("tr", { className: "text-gray-400 border-b border-gray-700" },
-              ['Addr', 'Hex', 'U16', 'S16', 'ASCII'].map(h =>
+              ['Addr', 'Hex', 'Raw', 'Parsed', 'ASCII'].map(h =>
                 /*#__PURE__*/React.createElement("th", { key: h, className: "text-left px-2 py-1" }, h)))),
           /*#__PURE__*/React.createElement("tbody", null,
-            result.registers.map((v, i) => {
-              const regAddr = result.address + i;
-              const s16 = v >= 0x8000 ? v - 0x10000 : v;
-              const ch1 = (v >> 8) & 0xFF, ch2 = v & 0xFF;
-              const ascii = (ch1 >= 32 && ch1 < 127 ? String.fromCharCode(ch1) : '.') +
-                            (ch2 >= 32 && ch2 < 127 ? String.fromCharCode(ch2) : '.');
-              return /*#__PURE__*/React.createElement("tr", {
-                key: i, className: "border-b border-gray-800 hover:bg-gray-800"
-              },
-                /*#__PURE__*/React.createElement("td", { className: "px-2 py-0.5 text-gray-400" }, `0x${regAddr.toString(16).toUpperCase().padStart(4, '0')}`),
-                /*#__PURE__*/React.createElement("td", { className: "px-2 py-0.5 text-yellow-300" }, `0x${v.toString(16).toUpperCase().padStart(4, '0')}`),
-                /*#__PURE__*/React.createElement("td", { className: "px-2 py-0.5" }, v),
-                /*#__PURE__*/React.createElement("td", { className: "px-2 py-0.5" }, s16),
-                /*#__PURE__*/React.createElement("td", { className: "px-2 py-0.5 text-gray-500" }, ascii));
-            }))))),
+            (() => {
+              const regs = result.registers;
+              const sc = parseFloat(scale) || 1;
+              const rows = [];
+              const is32 = dataType === 'U32' || dataType === 'S32';
+              const isStr = dataType === 'STRING';
+              const step = is32 ? 2 : 1;
+              for (let i = 0; i < regs.length; i += step) {
+                const regAddr = result.address + i;
+                const v = regs[i];
+                let raw, parsed, hex, ascii;
+                if (is32 && i + 1 < regs.length) {
+                  const u32 = ((regs[i] & 0xFFFF) << 16) | (regs[i+1] & 0xFFFF);
+                  hex = `0x${u32.toString(16).toUpperCase().padStart(8, '0')}`;
+                  if (dataType === 'S32') {
+                    raw = u32 >= 0x80000000 ? u32 - 0x100000000 : u32;
+                  } else {
+                    raw = u32;
+                  }
+                  parsed = (raw * sc).toFixed(sc < 1 ? Math.max(1, -Math.floor(Math.log10(sc))) : 0);
+                  const c1 = (regs[i]>>8)&0xFF, c2 = regs[i]&0xFF, c3 = (regs[i+1]>>8)&0xFF, c4 = regs[i+1]&0xFF;
+                  ascii = [c1,c2,c3,c4].map(c => c>=32&&c<127?String.fromCharCode(c):'.').join('');
+                } else if (isStr) {
+                  hex = `0x${v.toString(16).toUpperCase().padStart(4,'0')}`;
+                  const c1 = (v>>8)&0xFF, c2 = v&0xFF;
+                  ascii = (c1>=32&&c1<127?String.fromCharCode(c1):'.')+(c2>=32&&c2<127?String.fromCharCode(c2):'.');
+                  raw = v;
+                  parsed = ascii;
+                } else {
+                  hex = `0x${v.toString(16).toUpperCase().padStart(4,'0')}`;
+                  if (dataType === 'S16') {
+                    raw = v >= 0x8000 ? v - 0x10000 : v;
+                  } else {
+                    raw = v;
+                  }
+                  parsed = (raw * sc).toFixed(sc < 1 ? Math.max(1, -Math.floor(Math.log10(sc))) : 0);
+                  const c1 = (v>>8)&0xFF, c2 = v&0xFF;
+                  ascii = (c1>=32&&c1<127?String.fromCharCode(c1):'.')+(c2>=32&&c2<127?String.fromCharCode(c2):'.');
+                }
+                rows.push(/*#__PURE__*/React.createElement("tr", {
+                  key: i, className: "border-b border-gray-800 hover:bg-gray-800"
+                },
+                  /*#__PURE__*/React.createElement("td", { className: "px-2 py-0.5 text-gray-400" },
+                    `0x${regAddr.toString(16).toUpperCase().padStart(4,'0')}${is32 ? '-'+(regAddr+1).toString(16).toUpperCase().padStart(4,'0') : ''}`),
+                  /*#__PURE__*/React.createElement("td", { className: "px-2 py-0.5 text-yellow-300" }, hex),
+                  /*#__PURE__*/React.createElement("td", { className: "px-2 py-0.5" }, raw),
+                  /*#__PURE__*/React.createElement("td", { className: "px-2 py-0.5 text-cyan-300 font-bold" }, parsed),
+                  /*#__PURE__*/React.createElement("td", { className: "px-2 py-0.5 text-gray-500" }, ascii)));
+              }
+              return rows;
+            })()))),
 
     result && result.result_code !== 0 && /*#__PURE__*/React.createElement(Card, null,
       /*#__PURE__*/React.createElement("div", { className: "text-red-400 text-sm" },
@@ -2596,7 +2654,7 @@ function ModbusTestTab({ rtus, selectedRtu }) {
       : logs.map((l, i) => /*#__PURE__*/React.createElement("div", { key: i, className: "mb-0.5" },
           /*#__PURE__*/React.createElement("span", { className: "text-gray-500" }, l.time, " "),
           /*#__PURE__*/React.createElement("span", {
-            className: l.msg.startsWith('>') ? 'text-blue-400' : l.msg.startsWith('<') ? 'text-green-400' : 'text-red-400'
+            className: l.msg.startsWith('>') ? 'text-blue-400' : l.msg.startsWith('<') ? 'text-green-400' : l.msg.startsWith('  TX:') || l.msg.startsWith('  RX:') ? 'text-gray-500 text-[10px]' : 'text-red-400'
           }, l.msg))))
   );
 }

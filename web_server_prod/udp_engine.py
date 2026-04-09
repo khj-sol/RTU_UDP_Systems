@@ -968,9 +968,12 @@ class UDPEngine:
                 # Store structured data for WebSocket broadcast
                 if not hasattr(self, '_modbus_test_results'):
                     self._modbus_test_results = {}
+                # Raw H05 packet hex for logging
+                raw_h05_hex = data.hex().upper()
                 self._modbus_test_results[rtu_id] = {
                     'fc': mb_fc, 'slave_id': mb_slave, 'address': mb_addr,
                     'result_code': mb_rc, 'count': mb_count, 'registers': regs,
+                    'raw_hex': raw_h05_hex,
                     'timestamp': int(time.time()),
                 }
 
@@ -1114,40 +1117,36 @@ class UDPEngine:
 
     def send_h03_modbus_test(self, rtu_id: int, fc: int, slave_id: int,
                               address: int, count: int,
-                              values: list = None) -> bool:
+                              values: list = None):
         """Send extended H03 for raw Modbus test (ctrl_type 20 or 21).
 
-        For read (FC03/FC04): values=None, count=register count
-        For write (FC06):     values=[single_value], count=1
-        For write (FC16):     values=[v1,v2,...], count=len(values)
+        Returns dict with 'ok' bool and 'packet_hex' string.
         """
         with self._lock:
             state = self.rtu_registry.get(rtu_id)
         if not state:
             logger.warning(f"send_h03_modbus_test: RTU {rtu_id} not found")
-            return False
+            return {'ok': False, 'packet_hex': ''}
 
         is_write = values is not None and len(values) > 0
         ctrl_type = CTRL_MODBUS_WRITE if is_write else CTRL_MODBUS_READ
         seq = self._next_seq()
-        # Standard H03 header (8 bytes)
         packet = struct.pack(H03_FORMAT,
                              VERSION_H03, seq, ctrl_type, DEVICE_INVERTER, 1, 0)
-        # Extended body: fc(1B) + slave_id(1B) + address(2B) + count(2B)
         packet += struct.pack('>BBHH', fc, slave_id, address, count)
-        # Write values
         if is_write:
             packet += struct.pack(f'>{count}H', *values[:count])
 
+        pkt_hex = packet.hex().upper()
         dest_port = state.port if state.port else self.rtu_port
         if self._safe_sendto(packet, (state.ip, dest_port)):
             self.stats['h03_sent'] += 1
             op = 'WRITE' if is_write else 'READ'
             logger.info(f"Sent H03 Modbus {op} to RTU:{rtu_id}: "
                         f"FC{fc:02d} slave={slave_id} addr=0x{address:04X} "
-                        f"count={count}")
-            return True
-        return False
+                        f"count={count} pkt=[{pkt_hex}]")
+            return {'ok': True, 'packet_hex': pkt_hex}
+        return {'ok': False, 'packet_hex': pkt_hex}
 
     def send_h07(self, rtu_id: int, ftp_host: str, ftp_port: int,
                  ftp_user: str, ftp_pass: str, ftp_path: str, filename: str) -> bool:

@@ -614,11 +614,12 @@ async def control_modbus_test(cmd: ModbusTestCommand):
 
     if not engine:
         raise HTTPException(503, "UDP engine not running")
-    ok = engine.send_h03_modbus_test(
+    result = engine.send_h03_modbus_test(
         cmd.rtu_id, cmd.function_code, cmd.slave_id,
         cmd.register_address, count, values)
-    if not ok:
+    if not result.get('ok'):
         raise HTTPException(404, f"RTU {cmd.rtu_id} not connected")
+    tx_hex = result.get('packet_hex', '')
 
     op = 'WRITE' if values else 'READ'
     # Save event
@@ -634,7 +635,8 @@ async def control_modbus_test(cmd: ModbusTestCommand):
             "function_code": cmd.function_code,
             "slave_id": cmd.slave_id,
             "address": f"0x{cmd.register_address:04X}",
-            "count": count}
+            "count": count,
+            "tx_packet": tx_hex}
 
 
 @router.get("/modbus_test/result/{rtu_id}")
