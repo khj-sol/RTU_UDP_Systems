@@ -2531,9 +2531,8 @@ function ModelMakerTab() {
 
 // ==== MAIN APP ====
 function App() {
-  const BASE_TABS = ['Overview', 'Devices', 'Control', 'History', 'Events', 'Firmware', 'Config', 'Stats', 'H1 Log'];
+  const TABS = ['Overview', 'Devices', 'Control', 'History', 'Events', 'Firmware', 'Config', 'Stats', 'H1 Log', 'Model Maker'];
   const [mmEnabled, setMmEnabled] = useState(false);
-  const TABS = mmEnabled ? [...BASE_TABS, 'Model Maker'] : BASE_TABS;
   const [tab, setTab] = useState('Overview');
   const [rtus, setRtus] = useState([]);
   const [selectedRtu, setSelectedRtu] = useState('');
@@ -2610,11 +2609,16 @@ function App() {
     const selRtuObj = rtus.find(r => String(r.rtu_id) === String(selectedRtu));
     const isRIP = selRtuObj && selRtuObj.rtu_type === 'RIP';
     const hiddenTabs = isRIP ? ['Firmware', 'Config'] : [];
-    return TABS.filter(t => !hiddenTabs.includes(t)).map(t => /*#__PURE__*/React.createElement("button", {
-      key: t,
-      onClick: () => setTab(t),
-      className: `px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${tab === t ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500'}`
-    }, t));
+    return TABS.filter(t => !hiddenTabs.includes(t)).map(t => {
+      const isDisabled = t === 'Model Maker' && !mmEnabled;
+      return /*#__PURE__*/React.createElement("button", {
+        key: t,
+        onClick: isDisabled ? undefined : () => setTab(t),
+        disabled: isDisabled,
+        className: `px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${isDisabled ? 'border-transparent text-gray-600 cursor-not-allowed opacity-50' : tab === t ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500'}`,
+        title: isDisabled ? 'Model Maker is disabled (config/ai_settings.ini: modelmaker=NO)' : ''
+      }, t);
+    });
   })())), /*#__PURE__*/React.createElement("main", {
     className: "max-w-7xl mx-auto p-4"
   }, tab === 'Overview' && /*#__PURE__*/React.createElement(OverviewTab, {
