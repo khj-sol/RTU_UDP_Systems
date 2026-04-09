@@ -171,15 +171,12 @@ async def websocket_endpoint(websocket: WebSocket):
 async def _handle_h01_async(rtu_id: int, device_key: tuple, parsed: dict):
     """Save H01 data to DB and broadcast via WebSocket."""
     dev_type, dev_num = device_key
-    logger.info(f"_handle_h01_async ENTER rtu={rtu_id} dev_type={dev_type} dev_num={dev_num}")
 
-    # Skip hidden (deleted) RTUs entirely — no DB update, no WS broadcast
     try:
         _rtu_check = await database.get_rtu(rtu_id)
     except Exception as e:
         logger.error(f"_handle_h01_async get_rtu failed: {type(e).__name__}: {e}")
         return
-    logger.info(f"_handle_h01_async got rtu_check: {_rtu_check is not None}")
     if _rtu_check and _rtu_check.get('hidden'):
         with engine._lock:
             engine.rtu_registry.pop(rtu_id, None)  # remove from memory too
@@ -231,8 +228,13 @@ async def _handle_h01_async(rtu_id: int, device_key: tuple, parsed: dict):
                 'detail': f"Device {dev_type}/{dev_num}: Communication restored",
             })
 
+    logger.info(f"_handle_h01_async PRE-SAVE rtu={rtu_id} dev_type={dev_type} dev_num={dev_num}")
     if dev_type == DEVICE_INVERTER:
-        await database.save_inverter_data(rtu_id, parsed)
+        try:
+            await database.save_inverter_data(rtu_id, parsed)
+        except Exception as e:
+            logger.error(f"_handle_h01_async save_inverter_data raised: {type(e).__name__}: {e}")
+            import traceback; logger.error(traceback.format_exc())
     elif dev_type == DEVICE_PROTECTION_RELAY:
         # Calculate inverter total AC power for PCC power flow
         inv_total_w = 0.0
