@@ -1313,9 +1313,12 @@ function HistoryTab({
     fetcher(`/rtus/${rtuId}/devices`).then(d => {
       const devs = pd(d);
       setDevices(devs);
-      if (devs.length > 0 && !deviceNum) {
-        setDeviceNum(String(devs[0].device_number));
-        setDeviceType(devs[0].device_type === 1 ? 'inverter' : devs[0].device_type === 5 ? 'weather' : 'relay');
+      // Sort numerically so the default pick is the lowest device number
+      // (e.g. INV#1 instead of whichever device the API happened to list first).
+      const sorted = devs.slice().sort((a, b) => (a.device_number || 0) - (b.device_number || 0));
+      if (sorted.length > 0 && !deviceNum) {
+        setDeviceNum(String(sorted[0].device_number));
+        setDeviceType(sorted[0].device_type === 1 ? 'inverter' : sorted[0].device_type === 5 ? 'weather' : 'relay');
       }
     }).catch(() => {});
   }, [rtuId]);
@@ -1482,7 +1485,7 @@ function HistoryTab({
     }
   }, /*#__PURE__*/React.createElement("option", {
     value: ""
-  }, "-- Device --"), devices.map(d => /*#__PURE__*/React.createElement("option", {
+  }, "-- Device --"), devices.slice().sort((a, b) => (a.device_number || 0) - (b.device_number || 0)).map(d => /*#__PURE__*/React.createElement("option", {
     key: d.device_number,
     value: d.device_number
   }, "#", d.device_number, " (", d.device_type === 1 ? MODEL_NAMES[d.model] || 'Inverter' : d.device_type === 5 ? 'Weather' : 'Relay', ")")))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
