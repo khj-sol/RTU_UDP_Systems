@@ -1186,7 +1186,10 @@ async def mm2_ai_settings_get():
     has_key = bool(key and key != 'YOUR_ANTHROPIC_API_KEY_HERE')
     # Return masked key for display (only last 8 chars visible)
     masked = ('*' * max(0, len(key) - 8) + key[-8:]) if has_key else ''
-    return {"has_key": has_key, "masked_key": masked, "model": model}
+    # modelmaker flag: YES=show tab, NO=hide tab
+    mm_flag = cp.get('claude_api', 'modelmaker', fallback='NO').strip().upper()
+    return {"has_key": has_key, "masked_key": masked, "model": model,
+            "modelmaker_enabled": mm_flag == 'YES'}
 
 
 @router.post("/mm2/ai-settings")
