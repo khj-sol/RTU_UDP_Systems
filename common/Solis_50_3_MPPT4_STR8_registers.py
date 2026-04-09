@@ -230,15 +230,68 @@ class ControlMode:
 
 
 class ErrorCode1:
-    BITS = {}
+    """Fault Code 01 (reg 3096, U16 bitfield)."""
+    BITS = {
+        0:  'GRID_AB_OVERVOLTAGE',
+        1:  'GRID_BC_OVERVOLTAGE',
+        2:  'GRID_CA_OVERVOLTAGE',
+        3:  'GRID_AB_UNDERVOLTAGE',
+        4:  'GRID_BC_UNDERVOLTAGE',
+        5:  'GRID_CA_UNDERVOLTAGE',
+        6:  'GRID_OVER_FREQUENCY',
+        7:  'GRID_UNDER_FREQUENCY',
+        8:  'GRID_UNBALANCE',
+        10: 'GRID_FREQ_FLUCTUATION',
+        11: 'GRID_PHASE_ABNORMAL',
+        12: 'NO_GRID',
+        13: 'GRID_REVERSE',
+        14: 'GRID_AB_TRANSIENT_OV',
+        15: 'HW_OVERCURRENT_SCREEN_FAIL',
+    }
 
 
 class ErrorCode2:
-    BITS = {}
+    """Fault Code 02 (reg 3097, U16 bitfield)."""
+    BITS = {
+        0:  'DC_OVER_VOLTAGE_01',
+        1:  'DC_OVER_VOLTAGE_02',
+        2:  'DC_REVERSE',
+        3:  'BUS_V_DETECT_INCONSISTENT',
+        4:  'DC_BUS_OVER_VOLTAGE',
+        5:  'DC_BUS_UNDER_VOLTAGE',
+        6:  'DC_BUS_UNBALANCE',
+        7:  'DC_BUS_V_DETECT_ABNORMAL',
+        8:  'GRID_AB_RMS_AVG_OV',
+        9:  'GRID_BC_RMS_AVG_OV',
+        10: 'GRID_CA_RMS_AVG_OV',
+        11: 'PV_MIDPOINT_GROUNDING',
+        12: 'DC_BOOST_FAULT',
+        13: 'DC_HW_OVERCURRENT',
+        14: 'GRID_CURRENT_TRACKING_FAULT',
+        15: 'GRID_V_RMS_INSTANT_OV',
+    }
 
 
 class ErrorCode3:
-    BITS = {}
+    """Fault Code 03 (reg 3098, U16 bitfield)."""
+    BITS = {
+        0:  'PHASE_A_RMS_OVERCURRENT',
+        1:  'PHASE_B_RMS_OVERCURRENT',
+        2:  'PHASE_C_RMS_OVERCURRENT',
+        3:  'DC1_AVG_OVERCURRENT',
+        4:  'DC2_AVG_OVERCURRENT',
+        5:  'AC_HW_OVERCURRENT',
+        6:  'DC_COMPONENT_OVER_LIMIT',
+        7:  'GRID_AB_OVERVOLTAGE_02',
+        8:  'GRID_BC_OVERVOLTAGE_02',
+        9:  'GRID_CA_OVERVOLTAGE_02',
+        10: 'GRID_AB_UNDERVOLTAGE_02',
+        11: 'GRID_BC_UNDERVOLTAGE_02',
+        12: 'GRID_CA_UNDERVOLTAGE_02',
+        13: 'GRID_OVER_FREQ_02',
+        14: 'GRID_UNDER_FREQ_02',
+        15: 'GRID_OV_03_LEVEL3',
+    }
 
 
 SCALE = {

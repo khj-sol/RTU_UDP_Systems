@@ -172,15 +172,61 @@ class ControlMode:
 
 
 class ErrorCode1:
-    BITS = {}
+    """FAULT1 (addr 0x0001, U16 bitfield)."""
+    BITS = {
+        0:  'GridOVP',
+        1:  'GridUVP',
+        2:  'GridOFP',
+        3:  'GridUFP',
+        4:  'PVUVP',
+        5:  'GridLVRT',
+        8:  'PVOVP',
+        9:  'IpvUnbalance',
+        10: 'PvConfigSetWrong',
+        11: 'GFCIFault',
+        12: 'PhaseSequenceFault',
+        13: 'HwBoostOCP',
+        14: 'HwAcOCP',
+        15: 'AcRmsOCP',
+    }
 
 
 class ErrorCode2:
-    BITS = {}
+    """FAULT2 (addr 0x0002, U16 bitfield)."""
+    BITS = {
+        0:  'HwADFaultIGrid',
+        1:  'HwADFaultDCI',
+        2:  'HwADFaultVGrid',
+        3:  'GFCIDeviceFault',
+        4:  'MChipFault',
+        5:  'HwAuxPowerFault',
+        6:  'BusVoltZeroFault',
+        7:  'IacRmsUnbalance',
+        8:  'BusUVP',
+        9:  'BusOVP',
+        10: 'VbusUnbalance',
+        11: 'DciOCP',
+        12: 'SwOCPInstant',
+        13: 'SwBOCPInstant',
+    }
 
 
 class ErrorCode3:
-    BITS = {}
+    """FAULT3 (addr 0x0003, U16 bitfield)."""
+    BITS = {
+        0:  'ConsistentFault_VGrid',
+        1:  'ConsistentFault_FGrid',
+        2:  'ConsistentFault_DCI',
+        3:  'ConsistentFault_GFCI',
+        4:  'SpiCommLose',
+        5:  'SciCommLose',
+        6:  'RelayTestFail',
+        7:  'PvIsoFault',
+        8:  'OverTempFault_Inv',
+        9:  'OverTempFault_Boost',
+        10: 'OverTempFault_Env',
+        11: 'PEConnectFault',
+    }
 
 
 SCALE = {

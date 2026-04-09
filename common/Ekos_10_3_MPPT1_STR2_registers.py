@@ -255,7 +255,18 @@ class ErrorCode2:
 
 
 class ErrorCode3:
-    BITS = {}
+    """GRID_STATUS_ALARM3 (reg 30103, U16 bitfield, Fault MAP)."""
+    BITS = {
+        0:  'GridOVR',
+        1:  'GridUVR',
+        2:  'GridOFR',
+        3:  'GridUFR',
+        4:  'GridFAIL',
+        5:  'GridEARTH',
+        6:  'GridRCMU',
+        11: 'GridSPD',
+        15: 'GridFaultAll',
+    }
 
 
 SCALE = {
