@@ -186,6 +186,7 @@ async def _handle_h01_async(rtu_id: int, device_key: tuple, parsed: dict):
 
     # Upsert RTU in database + detect online recovery
     rtu_state = engine.rtu_registry.get(rtu_id)
+    print(f"[DBG] rtu_state={rtu_state is not None}", flush=True)
     if rtu_state:
         # Atomic check+clear of the reconnect edge flag. Using an in-memory
         # flag under engine._lock avoids the race where many concurrent H01
@@ -204,7 +205,12 @@ async def _handle_h01_async(rtu_id: int, device_key: tuple, parsed: dict):
                 'detail': f"RTU resumed from {rtu_state.ip}:{rtu_state.port}",
             })
             logger.info(f"RTU {rtu_id} reconnected (was offline)")
-        await database.upsert_rtu(rtu_id, rtu_state.ip, rtu_state.port)
+        try:
+            await database.upsert_rtu(rtu_id, rtu_state.ip, rtu_state.port)
+        except Exception as e:
+            print(f"[DBG] upsert_rtu raised: {type(e).__name__}: {e}", flush=True)
+            return
+    print(f"[DBG] after upsert", flush=True)
 
     # Log backup recovery
     backup_flag = parsed.get('backup', 0)
@@ -230,7 +236,7 @@ async def _handle_h01_async(rtu_id: int, device_key: tuple, parsed: dict):
                 'detail': f"Device {dev_type}/{dev_num}: Communication restored",
             })
 
-    logger.info(f"_handle_h01_async PRE-SAVE rtu={rtu_id} dev_type={dev_type} dev_num={dev_num}")
+    print(f"[DBG] PRE-SAVE rtu={rtu_id} dev_type={dev_type} dev_num={dev_num}", flush=True)
     if dev_type == DEVICE_INVERTER:
         try:
             await database.save_inverter_data(rtu_id, parsed)
