@@ -185,11 +185,24 @@ async def stage1_upload(
     return {'saved': dest, 'filename': file.filename}
 
 
+def _load_ai_settings() -> dict:
+    """Load Claude API settings from config/ai_settings.ini."""
+    import configparser
+    cfg_path = os.path.join(PROJECT_ROOT, 'config', 'ai_settings.ini')
+    cp = configparser.ConfigParser()
+    cp.read(cfg_path, encoding='utf-8')
+    key = cp.get('claude_api', 'api_key', fallback='')
+    model = cp.get('claude_api', 'model', fallback='claude-sonnet-4-6')
+    if key and key != 'YOUR_ANTHROPIC_API_KEY_HERE':
+        return {'api_key': key, 'model': model}
+    return {}
+
+
 @router.post('/stage1/run')
 async def stage1_run(body: dict):
     """
     Stage 1 실행
-    body: {session_id, filename, device_type}
+    body: {session_id, filename, device_type, use_ai?}
     """
     sid = body.get('session_id')
     s = SessionStore.get(sid)
@@ -197,11 +210,18 @@ async def stage1_run(body: dict):
         raise HTTPException(404, 'session not found')
 
     device_type = body.get('device_type', 'inverter')
+    use_ai = body.get('use_ai', False)
     uploaded = s.get('uploaded_file')
     if not uploaded or not os.path.exists(uploaded):
         raise HTTPException(400, 'no file uploaded')
 
     work_dir = SessionStore.get_work_dir(sid)
+
+    # Load AI settings if AI mode requested
+    ai_settings = _load_ai_settings() if use_ai else {}
+    if use_ai and not ai_settings:
+        raise HTTPException(400, 'AI mode requested but no API key configured. '
+                            'Set your Claude API key in the dashboard Model Maker tab.')
 
     # 이전 태스크 취소 후 새 태스크 실행
     SessionStore.cancel_running_task(sid)
@@ -231,7 +251,8 @@ async def stage1_run(body: dict):
 
             progress = _make_progress_callback(sid, 's1', asyncio.get_running_loop())
             result = await _run_in_thread(
-                run_stage1, uploaded, work_dir, device_type, progress)
+                run_stage1, uploaded, work_dir, device_type, progress,
+                ai_settings if use_ai else None)
 
             # 태스크 취소로 인해 세션이 리셋된 경우 이벤트 전송 생략
             if SessionStore.get(sid) is None:

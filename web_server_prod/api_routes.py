@@ -1169,6 +1169,44 @@ async def mm2_start():
         return {"status": "error", "detail": str(e)}
 
 
+@router.get("/mm2/ai-settings")
+async def mm2_ai_settings_get():
+    """Read AI settings from config/ai_settings.ini."""
+    import configparser
+    cfg_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            'config', 'ai_settings.ini')
+    cp = configparser.ConfigParser()
+    cp.read(cfg_path, encoding='utf-8')
+    key = cp.get('claude_api', 'api_key', fallback='')
+    model = cp.get('claude_api', 'model', fallback='claude-sonnet-4-6')
+    has_key = bool(key and key != 'YOUR_ANTHROPIC_API_KEY_HERE')
+    # Return masked key for display (only last 8 chars visible)
+    masked = ('*' * max(0, len(key) - 8) + key[-8:]) if has_key else ''
+    return {"has_key": has_key, "masked_key": masked, "model": model}
+
+
+@router.post("/mm2/ai-settings")
+async def mm2_ai_settings_save(request: Request):
+    """Save AI settings to config/ai_settings.ini."""
+    import configparser
+    data = await request.json()
+    api_key = data.get('api_key', '').strip()
+    model = data.get('model', 'claude-sonnet-4-6').strip()
+    if not api_key:
+        raise HTTPException(status_code=400, detail="API key is required")
+    cfg_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            'config', 'ai_settings.ini')
+    cp = configparser.ConfigParser()
+    cp.read(cfg_path, encoding='utf-8')
+    if not cp.has_section('claude_api'):
+        cp.add_section('claude_api')
+    cp.set('claude_api', 'api_key', api_key)
+    cp.set('claude_api', 'model', model)
+    with open(cfg_path, 'w', encoding='utf-8') as f:
+        cp.write(f)
+    return {"status": "saved", "model": model}
+
+
 @router.post("/mm2/stop")
 async def mm2_stop():
     """Stop Model Maker v2 server."""

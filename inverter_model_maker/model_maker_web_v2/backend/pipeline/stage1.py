@@ -2936,18 +2936,108 @@ def _parse_sunspec_text_registers(pages: list) -> list:
 
 # ─── Stage 1 메인 ───────────────────────────────────────────────────────────
 
+def _run_ai_pdf_extraction(pdf_path: str, ai_settings: dict,
+                           progress: 'ProgressCallback' = None) -> List[Dict]:
+    """Use Claude API to extract register tables from PDF text.
+
+    Sends the first ~100 pages of PDF text to Claude with a structured
+    prompt requesting Modbus register table extraction. Returns a list
+    of register dicts compatible with the normal stage1 table format.
+    """
+    import anthropic
+
+    def log(msg, level='info'):
+        if progress:
+            progress(msg, level)
+
+    log('[AI] PDF 텍스트 추출 중...')
+    pages = extract_pdf_text_and_tables(pdf_path, log=log)
+    # Build text for Claude (limit ~200K chars to fit context)
+    full_text = '\n\n'.join(
+        f'--- Page {p["page"]} ---\n{p["text"]}'
+        for p in pages[:100]
+    )[:200000]
+
+    log(f'[AI] Claude API 호출 중... (model={ai_settings["model"]}, {len(full_text)} chars)')
+    client = anthropic.Anthropic(api_key=ai_settings['api_key'])
+
+    prompt = f"""You are a Modbus protocol expert. Extract ALL register definitions from this inverter protocol document.
+
+For each register, output a JSON object with these fields:
+- "address": hex string like "0x1037"
+- "name": register name in UPPER_SNAKE_CASE (English)
+- "data_type": one of "U16", "S16", "U32", "S32", "FLOAT32", "STRING"
+- "scale": numeric scale factor (e.g., 0.1, 0.01, 1)
+- "unit": physical unit (e.g., "V", "A", "W", "Hz", "kWh", "°C", "")
+- "fc": function code (3 or 4)
+- "rw": "R" or "RW"
+- "description": short English description
+
+Rules:
+1. Include ALL registers: monitoring, status, error codes, device info, control
+2. For 32-bit registers, use the LOW word address
+3. Detect if error/fault registers are bitfields — if so add "bits" field with {{bit_num: "BIT_NAME"}}
+4. Detect inverter mode/status register — add "modes" field with {{value: "MODE_NAME"}}
+5. Output ONLY a JSON array, no other text
+
+PDF Document:
+{full_text}"""
+
+    response = client.messages.create(
+        model=ai_settings['model'],
+        max_tokens=16000,
+        messages=[{"role": "user", "content": prompt}],
+    )
+
+    ai_text = response.content[0].text if response.content else ''
+    log(f'[AI] 응답 수신: {len(ai_text)} chars, tokens={response.usage.input_tokens}+{response.usage.output_tokens}')
+
+    # Parse JSON from response
+    try:
+        # Find JSON array in response
+        start = ai_text.find('[')
+        end = ai_text.rfind(']') + 1
+        if start >= 0 and end > start:
+            registers = json.loads(ai_text[start:end])
+        else:
+            registers = json.loads(ai_text)
+        log(f'[AI] {len(registers)}개 레지스터 추출 완료')
+    except json.JSONDecodeError as e:
+        log(f'[AI] JSON 파싱 실패: {e}', 'error')
+        registers = []
+
+    return registers
+
+
 def run_stage1(
     input_path: str,
     output_dir: str,
     device_type: str = 'inverter',
     progress: ProgressCallback = None,
+    ai_settings: dict = None,
 ) -> dict:
-    """Stage 1: PDF/Excel → Stage 1 Excel (MAPPING_RULES_V2)"""
+    """Stage 1: PDF/Excel → Stage 1 Excel (MAPPING_RULES_V2)
+
+    When ai_settings is provided (dict with api_key and model), Claude API
+    is used to extract registers from the PDF as a supplementary source.
+    The AI-extracted registers are merged with the rule-based extraction
+    (AI fills gaps where rule-based parsing missed registers).
+    """
     def log(msg, level='info'):
         if progress:
             progress(msg, level)
     openpyxl = get_openpyxl()
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+
+    # AI mode: extract registers via Claude API first
+    ai_registers = []
+    if ai_settings and os.path.splitext(input_path)[1].lower() == '.pdf':
+        try:
+            ai_registers = _run_ai_pdf_extraction(input_path, ai_settings, progress)
+            log(f'[AI] {len(ai_registers)}개 AI 추출 레지스터 (rule-based와 병합 예정)')
+        except Exception as e:
+            log(f'[AI] AI 추출 실패: {type(e).__name__}: {e}', 'error')
+            log('[AI] rule-based 모드로 폴백합니다', 'warn')
 
     log('레퍼런스 로딩 중...')
     synonym_db = load_synonym_db()
@@ -3086,6 +3176,36 @@ def run_stage1(
                     registers.append(tr)
                     existing_addrs.add(tr.address)
             log(f'  병합 후: {len(registers)}개 레지스터')
+
+    # ── AI-extracted registers merge ───────────────────────────────────
+    if ai_registers:
+        existing_addrs = {r.address for r in registers if isinstance(r.address, int)}
+        ai_added = 0
+        for ar in ai_registers:
+            try:
+                addr_str = ar.get('address', '')
+                addr = int(addr_str, 16) if isinstance(addr_str, str) else int(addr_str)
+                if addr in existing_addrs:
+                    continue
+                name = ar.get('name', f'AI_REG_{addr:#06x}')
+                dt = ar.get('data_type', 'U16')
+                scale = ar.get('scale', 1)
+                unit = ar.get('unit', '')
+                fc = int(ar.get('fc', 3))
+                desc = ar.get('description', '')
+                rw = ar.get('rw', 'R')
+                registers.append(RegisterRow(
+                    address=addr, definition=name, data_type=dt,
+                    scale=str(scale), unit=unit, fc=fc, rw=rw,
+                    description=f'[AI] {desc}',
+                    page=0, raw_row=None,
+                ))
+                existing_addrs.add(addr)
+                ai_added += 1
+            except (ValueError, TypeError):
+                continue
+        if ai_added:
+            log(f'[AI] {ai_added}개 레지스터 병합 (rule-based에 없던 주소)')
 
     if not registers:
         raise NotRegisterMapError(
