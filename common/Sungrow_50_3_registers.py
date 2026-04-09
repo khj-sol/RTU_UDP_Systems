@@ -143,15 +143,6 @@ class RegisterMap:
     IV_SCAN_STATUS                           = 0x600D
 
 
-    # --- Simulator/RTU compatible device info registers ---
-    # Standardized at 0x1A00 (model, 16 regs = 32 bytes) and 0x1A10 (serial,
-    # 8 regs = 16 bytes) so the equipment simulator's _populate_device_info
-    # can write string data without colliding with measurement registers.
-    # Matches the Solarize/Senergy/CPS convention for consistent behavior.
-    DEVICE_MODEL                             = 0x1A00
-    DEVICE_SERIAL_NUMBER                     = 0x1A10
-
-
 class InverterMode:
     """Sungrow work state (0x5038). PDF Appendix 1."""
     INITIAL  = 0x0000

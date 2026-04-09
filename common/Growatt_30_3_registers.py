@@ -22,8 +22,8 @@ class RegisterMap:
     COM_ADDRESS                              = 0x001E
     DTC                                      = 0x002B
     TP                                       = 0x002C
-    DEVICE_MODEL                             = 0x1A00
-    DEVICE_SERIAL_NUMBER                     = 0x1A10
+    DEVICE_MODEL                             = MODULE_H
+    DEVICE_SERIAL_NUMBER                     = SERIAL_NUMBER
     FIRMWARE_VERSION                         = FW_VERSION
 
     # Status (FC04 input 0x0000)
