@@ -251,6 +251,7 @@ class RegisterMap:
     IV_STRING2_1_CURRENT_BASE             = 0x8180
 
     IV_SCAN_DATA_POINTS                      = 64
+    IV_SCAN_V_MIN                            = 200  # V, start voltage for sim IV curve
     IV_TRACKER_BLOCK_SIZE                    = 0x140  # 5 x 64 registers per tracker
 
 

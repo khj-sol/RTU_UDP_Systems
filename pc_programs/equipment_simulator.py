@@ -1114,7 +1114,22 @@ class GenericInverterSimulator:
             self.store.setValues(fc, addr, [self.on_off])
 
     def _init_iv_scan_data(self):
-        """Pre-generate IV scan curve data into registers (0x8000+)."""
+        """Pre-generate IV scan curve data into registers (0x8000+).
+
+        String voltage sweep:
+          V_min  = register file IV_SCAN_V_MIN (Solarize/Senergy 200V,
+                   Kstar 250V — protocol-specific real operating window)
+          Voc    = current MPPT voltage × 1.2 (dynamic, reflects live PV
+                   voltage at scan time — Voc is ~1.2× the MPP voltage
+                   for crystalline silicon cells)
+          N      = register file IV_SCAN_DATA_POINTS (64 or 100)
+        Points are evenly spaced from V_min to Voc per string. Current
+        follows an exponential IV drop approximation so near V_min the
+        current is near Isc and at Voc it drops to ~0 A.
+
+        Called once at startup AND again on every IV scan trigger so the
+        Voc reflects the current MPPT voltage when the scan runs.
+        """
         get_iv_v = getattr(self._module, 'generate_iv_voltage_data', None)
         get_iv_i = getattr(self._module, 'generate_iv_current_data', None)
         get_iv_v_regs = getattr(self._module, 'get_iv_tracker_voltage_registers', None)
@@ -1122,11 +1137,30 @@ class GenericInverterSimulator:
         if not all([get_iv_v, get_iv_i, get_iv_v_regs, get_iv_i_regs]):
             return
         fc = 4 if self.fc_code == 4 else 3  # FC03=hr, FC04=ir
+
+        # Per-protocol V_min: inverter-specific real-world string start
+        # voltage. Solarize/Senergy = 200V, Kstar = 250V. Default 200V
+        # for protocols without the constant.
+        v_min_default = int(getattr(self.reg_map, 'IV_SCAN_V_MIN', 200))
+
         strings_per_mppt = max(self.string_channels // max(self.mppt_channels, 1), 1)
         for mppt_idx in range(1, self.mppt_channels + 1):
-            voc = 42.0 + mppt_idx * 0.5
-            isc = 10.5 - mppt_idx * 0.3
-            v_min = voc * 0.3
+            # Current MPPT voltage in V. self._pv_v_nom is in 0.1V units.
+            try:
+                mppt_v_v = self._pv_v_nom[mppt_idx - 1] / 10.0
+            except (IndexError, AttributeError):
+                mppt_v_v = 400.0
+            # Voc = MPPT (MPP) voltage × 1.2 — typical crystalline Si ratio.
+            voc = mppt_v_v * 1.2
+            v_min = float(v_min_default)
+            if v_min >= voc:
+                # Safety: if V_min accidentally exceeds Voc (e.g. shaded
+                # panel dropped MPP below 200/250V), shrink V_min to 30%
+                # of Voc so the curve still has a meaningful range.
+                v_min = voc * 0.3
+            # Nominal Isc: scale per MPPT with tiny decay so each string
+            # curve looks slightly different.
+            isc = 11.0 - mppt_idx * 0.15
             try:
                 v_info = get_iv_v_regs(mppt_idx)
                 v_data = get_iv_v(voc, v_min, v_info['count'])
@@ -1545,15 +1579,16 @@ class GenericInverterSimulator:
             if val != self.operation_mode:
                 self.operation_mode = val
 
-        # IV Scan command (0x600D): 1=Start → immediately advance to FINISHED.
-        # Triggers on every transition from non-ACTIVE to ACTIVE so repeated
-        # scans (after the previous one finished) work correctly.
+        # IV Scan command (0x600D): 1=Start → regenerate curve data from
+        # the current MPPT voltage, then immediately advance to FINISHED.
+        # Regeneration here (instead of only at startup) ensures Voc tracks
+        # live PV conditions: Voc = current MPPT voltage × 1.2.
         iv_cmd_addr = getattr(self.reg_map, 'IV_SCAN_COMMAND', 0x600D)
         iv_status_addr = getattr(self.reg_map, 'IV_SCAN_STATUS', 0x600D)
         val = self._get_reg(iv_cmd_addr)
         if val and val[0] == IVScanCommand.ACTIVE:
-            # Advance state machine: ACTIVE write → mark FINISHED so the RTU
-            # polling loop can read iv_status == FINISHED on its next poll.
+            # Regenerate IV curve with up-to-date Voc = MPPT voltage × 1.2
+            self._init_iv_scan_data()
             self.iv_scan_status = IVScanStatus.FINISHED
             fc = 4 if self.fc_code == 4 else 3  # FC03=hr, FC04=ir
             self.store.setValues(fc, iv_status_addr, [IVScanStatus.FINISHED])

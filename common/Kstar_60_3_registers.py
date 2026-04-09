@@ -133,6 +133,7 @@ class RegisterMap:
     IV_SCAN_STATUS                           = 0x0C36  # U16 (reg 3126)
     IV_SCAN_COMMAND                          = 0x0FC3  # U16 (internal reg 4035)
     IV_SCAN_DATA_POINTS                      = 100
+    IV_SCAN_V_MIN                            = 250  # V, start voltage for sim IV curve
     IV_TRACKER_BLOCK_SIZE                    = 200  # 100 points * 2 (V, I pairs per point)
 
     # IV scan data regions per PDF:
