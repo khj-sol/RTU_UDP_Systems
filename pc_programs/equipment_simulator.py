@@ -1223,14 +1223,37 @@ class GenericInverterSimulator:
             return
         dtypes = getattr(self._module, 'DATA_TYPES', {}) or {}
         dt_raw = dtypes.get(field_name)
-        # DATA_TYPES may be missing for alias fields (e.g. R_PHASE_VOLTAGE = L1_VOLTAGE)
-        # — try the canonical alias target first.
+        # DATA_TYPES may be missing for alias fields (e.g. R_PHASE_VOLTAGE = L1_VOLTAGE,
+        # PV_POWER = PV1_INPUT_POWER). Map common alias names to a canonical
+        # target whose data type IS in DATA_TYPES.
         if not dt_raw:
-            for alias_target in ('L1_VOLTAGE', 'L1_CURRENT', 'L2_VOLTAGE', 'L2_CURRENT',
-                                  'L3_VOLTAGE', 'L3_CURRENT'):
-                if dtypes.get(alias_target):
-                    dt_raw = dtypes.get(alias_target)
-                    break
+            fname = field_name.upper()
+            # Power aliases — fall through to ACTIVE_POWER / PV1 / MPPT1 type
+            if fname in ('PV_POWER', 'DC_POWER'):
+                for t in ('PV1_POWER', 'PV1_INPUT_POWER', 'MPPT1_POWER',
+                          'ACTIVE_POWER', 'AC_POWER'):
+                    if dtypes.get(t):
+                        dt_raw = dtypes.get(t)
+                        break
+            elif fname in ('R_PHASE_VOLTAGE', 'S_PHASE_VOLTAGE', 'T_PHASE_VOLTAGE',
+                           'R_VOLTAGE', 'S_VOLTAGE', 'T_VOLTAGE'):
+                for t in ('L1_VOLTAGE', 'PHASE_A_VOLTAGE'):
+                    if dtypes.get(t):
+                        dt_raw = dtypes.get(t)
+                        break
+            elif fname in ('R_PHASE_CURRENT', 'S_PHASE_CURRENT', 'T_PHASE_CURRENT',
+                           'R_CURRENT', 'S_CURRENT', 'T_CURRENT'):
+                for t in ('L1_CURRENT', 'PHASE_A_CURRENT'):
+                    if dtypes.get(t):
+                        dt_raw = dtypes.get(t)
+                        break
+            else:
+                # Generic L1_* fallback for any voltage/current alias
+                for alias_target in ('L1_VOLTAGE', 'L1_CURRENT', 'L2_VOLTAGE', 'L2_CURRENT',
+                                      'L3_VOLTAGE', 'L3_CURRENT'):
+                    if dtypes.get(alias_target):
+                        dt_raw = dtypes.get(alias_target)
+                        break
         dt = (dt_raw or 'U16').upper()
         if dt == 'FLOAT32':
             # Convert raw scaled int → physical float by applying the

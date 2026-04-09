@@ -113,7 +113,12 @@ class RegisterMap:
     PV2_POWER                                = MPPT2_POWER
     PV3_POWER                                = MPPT3_POWER
     PV_VOLTAGE                               = PV1_VOLTAGE
-    PV_POWER                                 = ACTIVE_POWER
+    # PV_POWER (total DC input) — CPS PDF V4.16 doesn't expose a single
+    # register for total PV power (only per-MPPT at 0x1012/0x1016/0x101A).
+    # Allocate a synthetic 2-reg slot at 0x7100 so the simulator can write
+    # the sum and the RTU can read it back without colliding with AC power.
+    PV_POWER                                 = 0x7100
+    PV_POWER_HIGH                            = 0x7101
 
     # Temperature (0x101C, S16)
     INNER_TEMP                               = 0x101C
@@ -271,7 +276,7 @@ DATA_TYPES = {
     'L1_CURRENT': 'U16', 'L2_CURRENT': 'U16', 'L3_CURRENT': 'U16',
     'PHASE_A_POWER': 'U32', 'PHASE_B_POWER': 'U32', 'PHASE_C_POWER': 'U32',
     'PHASE_A_FREQUENCY': 'U16', 'PHASE_B_FREQUENCY': 'U16', 'PHASE_C_FREQUENCY': 'U16',
-    'ACTIVE_POWER': 'U32', 'AC_POWER': 'U32', 'REACTIVE_POWER': 'S32',
+    'ACTIVE_POWER': 'U32', 'AC_POWER': 'U32', 'PV_POWER': 'U32', 'REACTIVE_POWER': 'S32',
     'POWER_FACTOR': 'S16', 'FREQUENCY': 'U16',
     'INNER_TEMP': 'S16', 'INTERNAL_TEMP': 'S16',
     'INVERTER_MODE': 'U16', 'DEVICE_STATUS': 'U16', 'OPERATING_STATE': 'U16',
