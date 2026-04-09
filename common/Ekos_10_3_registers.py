@@ -250,14 +250,17 @@ class ErrorCode3:
 
 
 SCALE = {
-    # Ekos uses Float32 for everything — handled by FLOAT32 converters.
-    # Values are in physical units (V, A, W, Hz, kWh).
-    'voltage':             1.0,
-    'current':             1.0,
-    'power':               1.0,
-    'frequency':           1.0,
-    'power_factor':        0.01,
-    'energy_to_kwh':       0.001,    # Ekos cumulative is Wh Float32 → /1000 for kWh
+    # Ekos uses Float32 for measurements. The simulator writes with these
+    # scales to convert its internal "raw 0.1V / 0.01A" values to the
+    # physical float stored in registers (e.g. raw 3800 × 0.1 = 380.0 V).
+    # The RTU reader's Float32 H01 converters then undo the scale back to
+    # H01 integer form.
+    'voltage':             0.1,
+    'current':             0.01,
+    'power':               0.1,
+    'frequency':           0.01,
+    'power_factor':        0.001,
+    'energy_to_kwh':       1.0,
     'dea_current':         0.1,
     'dea_voltage':         0.1,
     'dea_active_power':    0.1,
