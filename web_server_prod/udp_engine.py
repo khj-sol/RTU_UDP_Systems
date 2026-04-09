@@ -1226,6 +1226,10 @@ class UDPEngine:
                     'last_seen': state.last_seen,
                     'status': status,
                     'device_count': len(state.devices),
+                    'devices_on': sum(1 for d in state.devices.values()
+                                      if not d.get('error') and d.get('body_type', -1) >= 0),
+                    'devices_off': sum(1 for d in state.devices.values()
+                                       if d.get('error') or d.get('body_type', -1) < 0),
                     'total_solar_power': total_solar,
                     'total_grid_power': total_grid,
                     'has_grid_device': has_grid_device,
