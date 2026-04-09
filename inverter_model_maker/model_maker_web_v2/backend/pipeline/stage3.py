@@ -2314,7 +2314,41 @@ def run_stage3(
     # ErrorCode BITS 로딩
     error_bits = _load_error_bits_from_reference(manufacturer)
     if error_bits:
-        log(f'  ErrorCode BITS: {list(error_bits.keys())} 로드')
+        log(f'  ErrorCode BITS (reference): {list(error_bits.keys())} 로드')
+
+    # AI extra data 로딩 (Stage 1 AI 모드에서 저장한 bits/modes/fault_codes)
+    ai_json_path = os.path.join(output_dir, '_ai_extra_data.json')
+    if os.path.exists(ai_json_path):
+        try:
+            import json as _json
+            with open(ai_json_path, 'r', encoding='utf-8') as _f:
+                ai_extra = _json.load(_f)
+            # Merge AI-extracted alarm BITS into error_bits (AI fills gaps)
+            alarm_regs_sorted = sorted(
+                regs_by_cat.get('ALARM', []),
+                key=lambda r: r.address if isinstance(r.address, int) else 0)
+            for i, reg in enumerate(alarm_regs_sorted, start=1):
+                cls_name = f'ErrorCode{i}'
+                if cls_name in error_bits and error_bits[cls_name]:
+                    continue  # Reference already has BITS, don't override
+                addr_hex = f'0x{reg.address:04X}' if isinstance(reg.address, int) else ''
+                ai_entry = ai_extra.get(addr_hex, {})
+                if ai_entry.get('bits'):
+                    error_bits[cls_name] = {int(k): v for k, v in ai_entry['bits'].items()}
+                    log(f'  ErrorCode BITS (AI): {cls_name} = {len(error_bits[cls_name])} bits')
+                elif ai_entry.get('fault_codes'):
+                    # Enum-type faults: store as FAULT_CODE_TABLE (not BITS)
+                    error_bits[f'{cls_name}_TABLE'] = {int(k): v for k, v in ai_entry['fault_codes'].items()}
+                    log(f'  Fault code table (AI): {cls_name} = {len(error_bits[f"{cls_name}_TABLE"])} codes')
+            # Also extract InverterMode mapping from AI data
+            for addr_hex, data in ai_extra.items():
+                if data.get('modes'):
+                    # Store for _gen_inverter_mode to use
+                    regs_by_cat['_ai_modes'] = {int(k): v for k, v in data['modes'].items()}
+                    log(f'  InverterMode (AI): {len(regs_by_cat["_ai_modes"])} modes')
+                    break
+        except Exception as _e:
+            log(f'  AI extra data load failed: {_e}', 'warn')
 
     # RegisterMap에 제조사명 전달
     regs_by_cat['_manufacturer'] = manufacturer

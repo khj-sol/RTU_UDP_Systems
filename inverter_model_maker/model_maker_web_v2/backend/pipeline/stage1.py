@@ -2966,7 +2966,7 @@ Extract ALL register definitions from this inverter protocol document and output
 
 ## Required JSON fields for each register:
 - "address": hex string like "0x1037"
-- "name": register name in UPPER_SNAKE_CASE (English)
+- "name": register name in UPPER_SNAKE_CASE (English). Use the STANDARD NAMES below when applicable.
 - "data_type": one of "U16", "S16", "U32", "S32", "FLOAT32", "STRING"
 - "scale": numeric scale factor (e.g., 0.1, 0.01, 1)
 - "unit": physical unit (e.g., "V", "A", "W", "Hz", "kWh", "degC", "")
@@ -2975,53 +2975,116 @@ Extract ALL register definitions from this inverter protocol document and output
 - "description": short English description
 - "category": one of "MONITORING", "CONTROL", "STATUS", "ALARM", "DEVICE_INFO"
 
+## STANDARD REGISTER NAMES — USE THESE EXACT NAMES:
+
+### AC Grid (per-phase):
+L1_VOLTAGE, L2_VOLTAGE, L3_VOLTAGE (or PHASE_A/B/C_VOLTAGE)
+L1_CURRENT, L2_CURRENT, L3_CURRENT (or PHASE_A/B/C_CURRENT)
+PHASE_A_POWER, PHASE_B_POWER, PHASE_C_POWER (if per-phase power exists)
+FREQUENCY (grid frequency, use the first/primary one)
+
+### Per-MPPT DC input (for N MPPT channels):
+PV1_VOLTAGE, PV1_CURRENT, MPPT1_POWER
+PV2_VOLTAGE, PV2_CURRENT, MPPT2_POWER
+PV3_VOLTAGE, PV3_CURRENT, MPPT3_POWER (etc.)
+
+### Per-String currents (if available in PDF):
+STRING1_CURRENT, STRING2_CURRENT, ... STRING_N_CURRENT
+
+### Power totals:
+ACTIVE_POWER or AC_POWER — total AC output power (W)
+REACTIVE_POWER — total reactive power (Var)
+POWER_FACTOR — grid power factor (signed, scale 0.001)
+PV_POWER — total DC input power (if separate register exists)
+
+### Energy:
+CUMULATIVE_ENERGY or TOTAL_ENERGY — lifetime energy (kWh)
+DAILY_ENERGY — today's energy (kWh or Wh, specify unit)
+
+### Temperature:
+INNER_TEMP or INTERNAL_TEMP — inverter internal temperature
+
+### Status:
+INVERTER_MODE or DEVICE_STATUS — operating state register
+
+### Error/Alarm:
+ERROR_CODE1, ERROR_CODE2, ERROR_CODE3 — fault/alarm registers
+
+### Device info:
+DEVICE_MODEL — model name/number
+DEVICE_SERIAL_NUMBER — serial number
+FIRMWARE_VERSION or SOFTWARE_VERSION
+
+### Control (writable):
+INVERTER_ON_OFF — remote on/off (0=run, 1=stop or vice versa)
+ACTIVE_POWER_LIMIT — power curtailment (0-1000 = 0-100.0%)
+POWER_FACTOR_SET — PF setpoint (S16, -1000 to 1000 = -1.0 to 1.0)
+REACTIVE_POWER_PCT — reactive power percentage
+
 ## CRITICAL extraction rules:
 
 ### 1. Monitoring registers (category: "MONITORING")
-Extract ALL of these if present in PDF:
-- Per-phase AC: voltage (R/S/T or L1/L2/L3), current, power, frequency
-- Per-MPPT: PV voltage, PV current, MPPT power (for EACH MPPT channel)
-- Total: AC power, reactive power, power factor, daily energy, cumulative energy
-- Temperature: internal/ambient/heatsink temperature
-- Generation time, peak power
+Extract ALL of these if present in PDF. This is the MOST IMPORTANT category.
+Include every per-MPPT voltage/current/power register (PV1, PV2, PV3...).
+Include every per-string current register if available.
 
 ### 2. Control registers (category: "CONTROL") — VERY IMPORTANT
-Look for holding registers (FC03 or FC06) that are writable (RW):
-- ON/OFF or remote shutdown command register
-- Active power limit/curtailment (typically 0-100% or 0-1000)
+Look for holding registers (FC03/FC06) that are writable (RW):
+- ON/OFF or remote shutdown command
+- Active power limit / curtailment percentage
 - Reactive power setting / percentage
-- Power factor setting (typically -1000 to 1000 = -1.0 to 1.0)
+- Power factor setting
 - Operating mode / regulation code
-These are often in a SEPARATE section titled "Control", "Command", "Setting", "Write registers", or "Holding registers (RW)".
+These are often in a SEPARATE section titled "Control", "Command", "Setting",
+"Write registers", or "Holding registers (RW)".
 Mark these with "rw": "RW".
 
 ### 3. Error/Alarm/Fault registers (category: "ALARM")
 - Extract ALL error/alarm/fault code registers
 - If the register is a BITFIELD (each bit = different fault), add a "bits" field:
   "bits": {{"0": "BIT_0_NAME", "1": "BIT_1_NAME", ...}}
-  Extract the full bit definition table from the PDF appendix or fault code table.
+  Extract the COMPLETE bit definition table from the PDF appendix or fault code table.
+  Include ALL defined bits, not just a few examples.
 - If the register is an ENUM (single value = one fault code), add a "fault_codes" field:
   "fault_codes": {{"2": "Grid overvoltage", "3": "Grid undervoltage", ...}}
+  Include ALL fault codes from the appendix table.
 
 ### 4. Status/Mode register (category: "STATUS")
 - Find the inverter operating mode/status register
 - Add a "modes" field mapping numeric values to mode names:
   "modes": {{"0": "INITIAL", "1": "STANDBY", "3": "ON_GRID", "5": "FAULT", "9": "SHUTDOWN"}}
+  Use values from PDF, but normalize names to: INITIAL, STANDBY, ON_GRID, FAULT, SHUTDOWN
 
 ### 5. Device information (category: "DEVICE_INFO")
-- Model name/number (often STRING type, multiple consecutive registers)
-- Serial number
-- Firmware version
-- Rated power, rated voltage, rated frequency
-- MPPT count, string count
+- Model name/number (often STRING type spanning multiple registers)
+- Serial number (STRING type)
+- Firmware/software version
+- For STRING types, add "length" field with register count (e.g., 8 = 16 chars)
 
 ### 6. For 32-bit registers (U32/S32):
-- Use the LOW word address (first register)
-- The HIGH word is address+1
+- Use the LOW word address (first register address)
+- Do NOT create separate entries for HIGH word
 
-### 7. STRING type registers:
-- Use the starting address
-- Add "length" field with number of registers (e.g., 8 for 16-char string)
+### 7. SCALE values:
+Use the PDF's documented scale factor. Common conventions:
+- Voltage: 0.1 (1 raw = 0.1V), Current: 0.01 (1 raw = 0.01A)
+- Power: 0.1 or 1 (check unit: W vs kW), Frequency: 0.01 (1 raw = 0.01Hz)
+- Power factor: 0.001, Temperature: 0.1 or 1, Energy: varies
+
+## COMPLETENESS CHECK:
+Before outputting, verify you have extracted:
+- [ ] At least 3 AC voltage registers (L1/L2/L3 or R/S/T)
+- [ ] At least 3 AC current registers
+- [ ] FREQUENCY register
+- [ ] ACTIVE_POWER or AC_POWER
+- [ ] POWER_FACTOR
+- [ ] CUMULATIVE_ENERGY
+- [ ] INVERTER_MODE / DEVICE_STATUS
+- [ ] At least 1 ERROR_CODE register
+- [ ] Per-MPPT voltage & current for each MPPT
+- [ ] INNER_TEMP
+- [ ] At least 1 writable CONTROL register (ON/OFF or power limit)
+If any are missing, search the PDF again more carefully.
 
 ## Output format:
 Output ONLY a valid JSON array. No markdown, no explanation, no code blocks.
@@ -3142,10 +3205,14 @@ def run_stage1(
         log('[AI] Rule-based 파싱 건너뜀 — AI 추출 결과로 직접 진행')
         # AI 결과를 RegisterRow 형식으로 변환
         registers = []
+        _ai_extra_data = {}  # addr -> {bits, modes, fault_codes}
         for ar in ai_registers:
             try:
                 addr_str = ar.get('address', '')
-                addr = int(addr_str, 16) if isinstance(addr_str, str) else int(addr_str)
+                if isinstance(addr_str, str):
+                    addr = int(addr_str, 16) if addr_str.startswith('0x') else int(addr_str)
+                else:
+                    addr = int(addr_str)
                 name = ar.get('name', f'AI_REG_{addr:#06x}')
                 dt = ar.get('data_type', 'U16')
                 scale = ar.get('scale', 1)
@@ -3153,14 +3220,68 @@ def run_stage1(
                 fc = int(ar.get('fc', 3))
                 desc = ar.get('description', '')
                 rw = ar.get('rw', 'R')
+                cat = ar.get('category', 'MONITORING')
+                # Map AI category to V2 categories
+                cat_map = {
+                    'DEVICE_INFO': 'INFO', 'STATUS': 'STATUS',
+                    'ALARM': 'ALARM', 'CONTROL': 'DER_CONTROL',
+                    'MONITORING': 'MONITORING',
+                }
+                category = cat_map.get(cat, 'MONITORING')
+                # Preserve AI extra data (bits, modes, fault_codes)
+                extra = {}
+                if ar.get('bits'):
+                    extra['bits'] = ar['bits']
+                if ar.get('modes'):
+                    extra['modes'] = ar['modes']
+                if ar.get('fault_codes'):
+                    extra['fault_codes'] = ar['fault_codes']
+                if ar.get('length'):
+                    extra['length'] = ar['length']
+                if extra:
+                    _ai_extra_data[addr] = extra
+                # Build value_definitions string for bits/modes
+                vd = ''
+                if ar.get('modes'):
+                    vd = '; '.join(f'{k}={v}' for k, v in ar['modes'].items())
+                elif ar.get('bits'):
+                    vd = '; '.join(f'bit{k}={v}' for k, v in sorted(ar['bits'].items(), key=lambda x: int(x[0])))
+                elif ar.get('fault_codes'):
+                    vd = '; '.join(f'{k}={v}' for k, v in list(ar['fault_codes'].items())[:20])
                 registers.append(RegisterRow(
                     address=addr, definition=name, data_type=dt,
                     scale=str(scale), unit=unit, fc=fc, rw=rw,
-                    description=desc, page=0, raw_row=None,
+                    comment=desc, category=category,
+                    value_definitions=vd,
                 ))
             except (ValueError, TypeError):
                 continue
-        log(f'[AI] {len(registers)}개 레지스터 → Stage 1 처리 진행')
+
+        # Count categories
+        cats = {}
+        for r in registers:
+            cats[r.category] = cats.get(r.category, 0) + 1
+        cat_summary = ', '.join(f'{k}={v}' for k, v in sorted(cats.items()))
+        log(f'[AI] {len(registers)}개 레지스터 ({cat_summary})')
+        log(f'[AI] bits/modes/fault_codes: {len(_ai_extra_data)}개 레지스터에 추가 데이터')
+
+        # Save AI extra data (bits/modes/fault_codes) as JSON for Stage 3
+        if _ai_extra_data:
+            ai_json_path = os.path.join(output_dir, '_ai_extra_data.json')
+            # Convert int keys to strings for JSON serialization
+            serializable = {}
+            for addr, data in _ai_extra_data.items():
+                key = f'0x{addr:04X}'
+                serializable[key] = {}
+                for field, val in data.items():
+                    if isinstance(val, dict):
+                        serializable[key][field] = {str(k): v for k, v in val.items()}
+                    else:
+                        serializable[key][field] = val
+            with open(ai_json_path, 'w', encoding='utf-8') as f:
+                json.dump(serializable, f, indent=2, ensure_ascii=False)
+            log(f'[AI] Extra data saved: {ai_json_path}')
+
         # pages는 빈 리스트 — _detect_phase_type 등에서 안전하게 동작
         # manufacturer 추출을 위해 최소한의 설정
         manufacturer = basename.split('_')[0].split('-')[0].split(' ')[0]
