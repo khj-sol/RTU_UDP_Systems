@@ -525,8 +525,8 @@
     clearLog('s1');
     // Show AI mode status immediately in log
     if (_aiMode) {
-      appendLog('s1', '🤖 AI Mode ON — Claude API로 PDF 분석을 보강합니다', 'ok');
-      appendLog('s1', '  Rule-based 파싱 + AI 추출 병합 모드', 'info');
+      appendLog('s1', '🤖 AI Mode — Claude API가 직접 PDF를 파싱합니다', 'ok');
+      appendLog('s1', '  Rule-based 건너뜀 → AI 추출 → Stage 2/3 진행', 'info');
     } else {
       appendLog('s1', 'Rule-based 파싱 모드 (AI Mode OFF)', 'info');
     }
