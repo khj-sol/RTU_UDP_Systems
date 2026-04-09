@@ -249,7 +249,8 @@ class RTUClient:
 
         # Heartbeat
         self.last_heartbeat_time = time.time()
-        self._last_rtu_info_time = 0.0   # force first H05 RTU Info at startup
+        # _last_rtu_info_time removed: periodic H05 RTU Info is no longer sent.
+        # RTU Info is only emitted in response to an explicit H03 CTRL_RTU_INFO.
         self._last_inv_info_time = {}    # {dev_num: last_send_ts} for periodic inverter info
         self._inv_info_interval  = 600.0 # 10 min between periodic inverter info per device
 
@@ -1398,22 +1399,12 @@ class RTUClient:
                     sent_packets.append((seq, packet))
             time.sleep(DEVICE_SEND_INTERVAL)
 
-        # ── Phase 1.5: H05 RTU Info (Body Type 1) — 1분 간격 ──────────
+        # ── Phase 1.5: (removed) periodic H05 RTU Info ───────────────
+        # Previously this block sent H05 body_type=1 every 60 seconds so the
+        # server DB stayed up-to-date without a manual CTRL_RTU_INFO request.
+        # Removed at user request — RTU Info is now ONLY sent in response to
+        # an explicit H03 ctrl_type=2 (CTRL_RTU_INFO) request from the server.
         now = time.time()
-        if now - self._last_rtu_info_time >= 60.0:
-            try:
-                rtu_info = {
-                    'model': get_rtu_model_name(),
-                    'phone': str(self.rtu_id),
-                    'serial': str(self.rtu_id),
-                    'firmware': RTUClient.VERSION,
-                }
-                pkt, s = self.protocol.create_h05_rtu_info(rtu_info)
-                self._send_udp_no_ack(pkt)
-                self.logger.info(f"H05 RTU Info sent (seq={s}) [periodic 60s]")
-                self._last_rtu_info_time = now
-            except Exception as e:
-                self.logger.error(f"H05 RTU Info error: {e}")
 
         # ── Phase 1.6: H05 Inverter Model Info (Body Type 11) — 인버터별 10분 간격 ──
         for inv in self.inverters:
