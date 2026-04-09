@@ -1920,8 +1920,8 @@ function ConfigTab({
   const [pushFiles, setPushFiles] = useState([]);
   const [pushLoading, setPushLoading] = useState(false);
   const [pushResult, setPushResult] = useState(null);
-  const [localMode, setLocalMode] = useState(() => localStorage.getItem('rtu_config_local_mode') === 'true');
-  const effectiveIp = localMode ? 'localhost' : rtuIp;
+  // localMode state removed — effectiveIp is now computed directly from
+  // the RTU IP input: empty or localhost → local, otherwise → SSH push.
 
   // Load saved RTU SSH IP from localStorage (NAT 환경에서 UDP source IP와 다를 수 있음)
   useEffect(() => {
@@ -1934,9 +1934,7 @@ function ConfigTab({
   useEffect(() => {
     if (rtuIp) localStorage.setItem('rtu_ssh_ip', rtuIp);
   }, [rtuIp]);
-  useEffect(() => {
-    localStorage.setItem('rtu_config_local_mode', String(localMode));
-  }, [localMode]);
+  // localMode useEffect removed — no more localStorage toggle.
 
   // Auto-load files on tab entry
   useEffect(() => { loadFiles(); }, []);
@@ -1991,7 +1989,8 @@ function ConfigTab({
     }
   };
 
-  // Push to RTU: effectiveIp 기준 (Local=시뮬레이터, Remote=SSH)
+  // Push to RTU: uses rtuIp if filled, otherwise localhost (local sim)
+  const effectiveIp = rtuIp.trim() || 'localhost';
   const openPushPanel = async () => {
     setPushPanel(true);
     setPushResult(null);
@@ -2021,6 +2020,24 @@ function ConfigTab({
     setPushLoading(false);
   };
 
+  // Open any local file via browser file picker (for files outside project)
+  const openFileRef = useRef(null);
+  const openLocalFile = () => {
+    if (openFileRef.current) openFileRef.current.click();
+  };
+  const handleLocalFileOpen = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      setContent(reader.result);
+      setSelPath('[local] ' + file.name);
+      setStatus(`Opened: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`);
+    };
+    reader.readAsText(file);
+    e.target.value = '';  // reset so same file can be re-opened
+  };
+
   // Group files by directory
   const grouped = {};
   files.forEach(f => {
@@ -2031,34 +2048,32 @@ function ConfigTab({
   });
 
   return /*#__PURE__*/React.createElement("div", null,
+    /*#__PURE__*/React.createElement("input", {
+      type: "file", ref: openFileRef, style: { display: 'none' },
+      accept: ".py,.ini,.json,.txt,.cfg,.yaml,.yml,.md,.csv",
+      onChange: handleLocalFileOpen
+    }),
     /*#__PURE__*/React.createElement("div", {
       className: "flex gap-3 mb-2 items-center flex-wrap"
     },
       /*#__PURE__*/React.createElement("span", { className: "text-gray-400 text-sm" }, "RTU IP:"),
       /*#__PURE__*/React.createElement("input", {
-        className: localMode ? "bg-gray-700 rounded px-3 py-1.5 text-sm w-40 opacity-40 cursor-not-allowed" : "bg-gray-700 rounded px-3 py-1.5 text-sm w-40",
-        value: localMode ? 'localhost' : rtuIp,
-        onChange: e => { if (!localMode) setRtuIp(e.target.value); },
-        placeholder: "172.30.1.40",
-        disabled: localMode
-      }),
-      /*#__PURE__*/React.createElement("button", {
-        onClick: () => setLocalMode(m => !m),
-        className: localMode ? "bg-orange-600 hover:bg-orange-500 px-3 py-1.5 rounded text-sm font-semibold" : "bg-gray-600 hover:bg-gray-500 px-3 py-1.5 rounded text-sm font-semibold",
-        title: localMode ? "\uB85C\uCEEC \ubaa8\uB4DC: PC \ub85c\ucec8 \ud30c\uc77c \uc9c1\uc811 \uc77d\uae30" : "\uc6d0\uaca9 \ubaa8\uB4DC: SSH\ub85c RTU\uc5d0 \uc811\uc18d"
-      }, localMode ? "\uD83C\uDFE0 Local" : "\uD83C\uDF10 Remote")
+        className: "bg-gray-700 rounded px-3 py-1.5 text-sm w-40",
+        value: rtuIp,
+        onChange: e => setRtuIp(e.target.value),
+        placeholder: "172.30.1.40"
+      })
     ),
     /*#__PURE__*/React.createElement("div", {
       className: "flex gap-3 mb-4 items-center flex-wrap"
     },
       /*#__PURE__*/React.createElement("button", {
-        onClick: loadFiles,
-        disabled: loading,
-        className: "bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded text-sm disabled:opacity-50"
-      }, "\uD83D\uDCC2 Open Files"),
+        onClick: openLocalFile,
+        className: "bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded text-sm"
+      }, "\uD83D\uDCC2 Open File"),
       /*#__PURE__*/React.createElement("button", {
         onClick: saveFile,
-        disabled: !selPath,
+        disabled: !selPath || selPath.startsWith('[local]'),
         className: "bg-green-600 hover:bg-green-500 px-4 py-2 rounded text-sm disabled:opacity-50"
       }, "\uD83D\uDCBE Save"),
       /*#__PURE__*/React.createElement("button", {
@@ -2077,11 +2092,11 @@ function ConfigTab({
       },
         /*#__PURE__*/React.createElement("span", {
           className: "text-sm font-bold text-teal-400"
-        }, "\uD83D\uDCE4 PC \u2192 RTU \uc804\uc1a1 \ubaa9\ub85d  (", localMode ? "\uD83C\uDFE0 Local" : "\uD83C\uDF10 Remote: " + rtuIp, ")"),
+        }, "\uD83D\uDCE4 PC \u2192 RTU \uc804\uc1a1 \ubaa9\ub85d  (", effectiveIp === 'localhost' ? "\uD83C\uDFE0 Local" : "\uD83C\uDF10 " + effectiveIp, ")"),
         /*#__PURE__*/React.createElement("div", { className: "flex gap-2" },
           !pushResult && /*#__PURE__*/React.createElement("button", {
             onClick: doPushToRtu,
-            disabled: pushLoading || (!localMode && !rtuIp) || pushFiles.length === 0,
+            disabled: pushLoading || pushFiles.length === 0,
             className: "bg-teal-600 hover:bg-teal-500 px-3 py-1 rounded text-xs disabled:opacity-50"
           }, pushLoading ? "\uc804\uc1a1 \uc911..." : "\uc804\uc1a1 & \uc7ac\uc2dc\uc791"),
           /*#__PURE__*/React.createElement("button", {
