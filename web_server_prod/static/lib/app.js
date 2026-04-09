@@ -2531,7 +2531,9 @@ function ModelMakerTab() {
 
 // ==== MAIN APP ====
 function App() {
-  const TABS = ['Overview', 'Devices', 'Control', 'History', 'Events', 'Firmware', 'Config', 'Stats', 'H1 Log', 'Model Maker'];
+  const BASE_TABS = ['Overview', 'Devices', 'Control', 'History', 'Events', 'Firmware', 'Config', 'Stats', 'H1 Log'];
+  const [mmEnabled, setMmEnabled] = useState(false);
+  const TABS = mmEnabled ? [...BASE_TABS, 'Model Maker'] : BASE_TABS;
   const [tab, setTab] = useState('Overview');
   const [rtus, setRtus] = useState([]);
   const [selectedRtu, setSelectedRtu] = useState('');
@@ -2540,6 +2542,8 @@ function App() {
 
   useEffect(() => {
     fetcher('/health').then(d => { if (d?.version) setServerVersion('v' + d.version); }).catch(() => {});
+    // Check modelmaker flag from ai_settings.ini
+    fetcher('/mm2/ai-settings').then(d => { setMmEnabled(!!d?.modelmaker_enabled); }).catch(() => {});
   }, []);
 
   // Load RTUs
