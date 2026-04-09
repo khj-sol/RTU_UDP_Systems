@@ -28,7 +28,9 @@ class RegisterMap:
     L2_N_PHASE_VOLTAGE_OF_LOAD               = 0x1324  # U16, scale V 0.1
     L3_N_PHASE_VOLTAGE_OF_LOAD               = 0x1325  # U16, scale V 0.1
     DEVICE_MODEL_NAME                        = 0x1A00  # STRINGING
+    DEVICE_MODEL                             = DEVICE_MODEL_NAME
     DEVICE_SERIAL_NUMBER                     = 0x1A10  # STRINGING
+    SERIAL_NUMBER                            = DEVICE_SERIAL_NUMBER
     MASTER_FIRMWARE_VERSION                  = 0x1A1C  # STRINGING
     SLAVE_FIRMWARE_VERSION                   = 0x1A26  # STRINGING
     NOMINAL_VOLTAGE                          = 0x1A44  # U16
@@ -47,6 +49,9 @@ class RegisterMap:
     PV_STRING_REVERSE                        = 0x0005  # STRINGING
     REG_0X07                                 = 0x0007  # U16
     PV_STRING_COUNT                          = 0x0008  # U16
+    MPPT_COUNT                               = 4
+    NOMINAL_POWER_LOW                        = 0x0017
+    NOMINAL_POWER_HIGH                       = 0x0018
     SOFTWARE_INCOMPATIBILITY                 = 0x000B  # U16
     INTERNAL_STORAGE_ERROR                   = 0x000C  # U16
     L2_VOLTAGE                               = 0x000D  # U16
@@ -758,32 +763,12 @@ READ_BLOCKS = [
     {'start': 0x0000, 'count':  39, 'fc': 3},
     {'start': 0x1001, 'count':  96, 'fc': 3},
     {'start': 0x1300, 'count':  57, 'fc': 3},
-    {'start': 0x1A3B, 'count':   1, 'fc': 3},
+    {'start': 0x1A00, 'count':  32, 'fc': 3},  # DEVICE_MODEL(16) + SERIAL(8) + FW(8)
     {'start': 0x8100, 'count':   1, 'fc': 3},
     {'start': 0x8240, 'count':   1, 'fc': 3},
     {'start': 0x8380, 'count':   1, 'fc': 3},
     {'start': 0x8480, 'count':   1, 'fc': 3},
     {'start': 0x84C0, 'count':   1, 'fc': 3},
-    {'start': 0x8540, 'count':   1, 'fc': 3},
-    {'start': 0x8580, 'count':   1, 'fc': 3},
-    {'start': 0x85C0, 'count':   1, 'fc': 3},
-    {'start': 0x8600, 'count':   1, 'fc': 3},
-    {'start': 0x8680, 'count':   1, 'fc': 3},
-    {'start': 0x86C0, 'count':   1, 'fc': 3},
-    {'start': 0x8700, 'count':   1, 'fc': 3},
-    {'start': 0x8740, 'count':   1, 'fc': 3},
-    {'start': 0x87C0, 'count':   1, 'fc': 3},
-    {'start': 0x8800, 'count':   1, 'fc': 3},
-    {'start': 0x8840, 'count':   1, 'fc': 3},
-    {'start': 0x8880, 'count':   1, 'fc': 3},
-    {'start': 0x8900, 'count':   1, 'fc': 3},
-    {'start': 0x8940, 'count':   1, 'fc': 3},
-    {'start': 0x8980, 'count':   1, 'fc': 3},
-    {'start': 0x89C0, 'count':   1, 'fc': 3},
-    {'start': 0x8A40, 'count':   1, 'fc': 3},
-    {'start': 0x8A80, 'count':   1, 'fc': 3},
-    {'start': 0x8AC0, 'count':   1, 'fc': 3},
-    {'start': 0x8B00, 'count':   1, 'fc': 3},
 ]
 
 
@@ -791,17 +776,17 @@ READ_BLOCKS = [
 # H01 출력 필드 → RegisterMap 속성명 매핑
 # modbus_handler._read_inverter_data_dynamic()이 이 매핑을 사용한다.
 DATA_PARSER = {
-    'mode                ': 'INVERTER_MODE',
-    'r_voltage           ': 'L1_VOLTAGE',
-    's_voltage           ': 'L2_VOLTAGE',
-    't_voltage           ': 'L3_VOLTAGE',
-    'r_current           ': 'L1_CURRENT',
-    's_current           ': 'L2_CURRENT',
-    't_current           ': 'L3_CURRENT',
-    'frequency           ': 'FREQUENCY',
-    'ac_power            ': 'AC_POWER',
-    'cumulative_energy   ': 'CUMULATIVE_ENERGY',
-    'alarm1              ': 'ERROR_CODE1',
+    'mode': 'INVERTER_MODE',
+    'r_voltage': 'L1_VOLTAGE',
+    's_voltage': 'L2_VOLTAGE',
+    't_voltage': 'L3_VOLTAGE',
+    'r_current': 'L1_CURRENT',
+    's_current': 'L2_CURRENT',
+    't_current': 'L3_CURRENT',
+    'frequency': 'FREQUENCY',
+    'ac_power': 'AC_POWER',
+    'cumulative_energy': 'CUMULATIVE_ENERGY',
+    'alarm1': 'ERROR_CODE1',
     'mppt1_voltage'        : 'MPPT1_VOLTAGE',
     'mppt1_current'        : 'MPPT1_CURRENT',
     'mppt2_voltage'        : 'MPPT2_VOLTAGE',
