@@ -2289,8 +2289,11 @@ class ModbusHandlerSerial:
         np_lo_addr = _addr('NOMINAL_POWER_LOW', 'NOMINAL_POWER_L', 'NOMINAL_POWER')
         np_hi_addr = _addr('NOMINAL_POWER_HIGH', 'NOMINAL_POWER_H')
 
-        # Guard: at least model address must exist
-        if device_model_addr is None:
+        # Guard: bail out only when NEITHER model nor serial is known.
+        # Some protocols expose only a serial number and use a U16 code for
+        # the model (Sungrow, Solis, Growatt, Sunways) — we still want to
+        # return the serial in that case.
+        if device_model_addr is None and serial_addr is None:
             return {'model': '', 'serial': '', 'mppt_count': 4,
                     'string_count': 8, 'nominal_power': 50000}
 
@@ -2329,13 +2332,17 @@ class ModbusHandlerSerial:
             model_regs = getattr(self.RegMap, 'DEVICE_MODEL_SIZE', None) or 16
             serial_regs = getattr(self.RegMap, 'DEVICE_SERIAL_NUMBER_SIZE', None) or 8
 
-            # Model name
-            result = _read(device_model_addr, model_regs)
-            if result is not None and not result.isError():
-                model_bytes = b''
-                for reg in result.registers:
-                    model_bytes += bytes([(reg >> 8) & 0xFF, reg & 0xFF])
-                info['model'] = model_bytes.rstrip(b'\x00').decode('utf-8', errors='ignore')
+            # Model name — skip when the register file has no DEVICE_MODEL
+            # (inverters that only expose a U16 type code, not a string).
+            if device_model_addr is not None:
+                result = _read(device_model_addr, model_regs)
+                if result is not None and not result.isError():
+                    model_bytes = b''
+                    for reg in result.registers:
+                        model_bytes += bytes([(reg >> 8) & 0xFF, reg & 0xFF])
+                    info['model'] = model_bytes.rstrip(b'\x00').decode('utf-8', errors='ignore')
+                else:
+                    info['model'] = ''
             else:
                 info['model'] = ''
 
