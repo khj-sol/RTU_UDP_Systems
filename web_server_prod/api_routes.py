@@ -18,6 +18,8 @@ import os
 import re
 import time
 import logging
+from starlette.requests import Request
+from starlette.responses import StreamingResponse
 from datetime import datetime
 from typing import Optional
 
@@ -1236,9 +1238,6 @@ def _get_mm2_client():
     if _mm2_http_client is None:
         _mm2_http_client = httpx.AsyncClient(base_url=f"http://127.0.0.1:{_MM2_PORT}", timeout=30.0)
     return _mm2_http_client
-
-from starlette.requests import Request
-from starlette.responses import StreamingResponse
 
 @router.api_route("/mm2-app/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
 async def mm2_proxy(request: Request, path: str = ""):
