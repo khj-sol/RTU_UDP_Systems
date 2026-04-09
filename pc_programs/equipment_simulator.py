@@ -325,9 +325,12 @@ def get_register_name(addr):
 class ModbusLoggedHoldingBlock(ModbusSequentialDataBlock):
     """Modbus Holding Register Block with logging"""
     
-    CONTROL_REGISTERS = [0x0834, 0x07D0, 0x07D1, 0x07D2, 0x07D3, 0x600D]
+    # Default DER-AVM standardized control registers. Per-protocol overrides
+    # (e.g. CPS 0x6001, Growatt 0x6000 vendor ON/OFF) are appended at runtime
+    # from the register file via _augment_control_registers().
+    DEFAULT_CONTROL_REGISTERS = [0x0834, 0x07D0, 0x07D1, 0x07D2, 0x07D3, 0x600D]
     IV_STRING_BASES = [0x8040, 0x8080, 0x8180, 0x81C0, 0x82C0, 0x8300, 0x8400, 0x8440]
-    
+
     def __init__(self, address, values, logger=None, simulator=None, name="HR"):
         super().__init__(address, values)
         self.logger = logger
@@ -336,6 +339,9 @@ class ModbusLoggedHoldingBlock(ModbusSequentialDataBlock):
         self._update_lock = threading.Lock()
         self.simulator = simulator
         self.name = name  # "INV" or "RLY" or "WTH"
+        # Instance-level copy so each simulator instance can add vendor-
+        # specific control addresses without affecting other protocols.
+        self.CONTROL_REGISTERS = list(self.DEFAULT_CONTROL_REGISTERS)
     
     def getValues(self, address, count=1):
         result = super().getValues(address, count)
@@ -1067,6 +1073,22 @@ class GenericInverterSimulator:
         )
 
         self.store = store
+        # Add per-protocol vendor-specific control addresses (e.g. CPS 0x6001,
+        # Growatt 0x6000) to the block's CONTROL_REGISTERS so writes to these
+        # addresses also trigger _check_control_changes. Without this, the
+        # vendor ON/OFF writes succeed silently but the simulator's internal
+        # on_off state never updates, so power output continues.
+        for attr in ('INVERTER_ON_OFF', 'SWITCH_ON_OFF',
+                     'DER_ACTIVE_POWER_PCT', 'DER_POWER_FACTOR_SET',
+                     'DER_REACTIVE_POWER_PCT', 'DER_ACTION_MODE',
+                     'ACTIVE_POWER_PCT', 'POWER_FACTOR_SET',
+                     'REACTIVE_POWER_SET', 'OPERATION_MODE',
+                     'ACTIVE_POWER_LIMIT', 'POWER_FACTOR_SETTING',
+                     'REACTIVE_POWER_LIMIT_PCT', 'REACTIVE_POWER_LIMIT_VAR',
+                     'IV_SCAN_COMMAND'):
+            addr = getattr(self.reg_map, attr, None)
+            if isinstance(addr, int) and addr not in block.CONTROL_REGISTERS:
+                block.CONTROL_REGISTERS.append(addr)
         block._internal_update = True
         self._init_control_registers()
         block._internal_update = False
