@@ -395,25 +395,30 @@ def get_string_registers(string_num):
 def get_iv_tracker_voltage_registers(tracker_num, data_points=100):
     """Return IV voltage block for PV{tracker_num} (1-3).
 
-    Kstar IV scan layout: PV1 at 5000-5199, PV2 at 5200-5399, PV3 at 5400-5599.
-    Each data point = (voltage, current) pair, 100 points total = 200 regs.
-    Voltage at even offsets, current at odd.
+    Kstar IV scan sim layout (non-interleaved):
+      PV1: voltage 0x1388-0x13EB (100), current 0x13EC-0x144F (100)
+      PV2: voltage 0x1450-0x14B3 (100), current 0x14B4-0x1517 (100)
+      PV3: voltage 0x1518-0x157B (100), current 0x157C-0x15DF (100)
+    Total 200 regs per tracker, separated V and I arrays so the sim
+    and RTU can write/read each as a contiguous block without the
+    interleaved layout overwriting itself.
     """
     if tracker_num < 1 or tracker_num > 3:
         raise ValueError(f"Tracker number must be 1-3, got {tracker_num}")
     base = 0x1388 + (tracker_num - 1) * 200  # 5000, 5200, 5400
-    return {'base': base, 'count': data_points * 2, 'end': base + data_points * 2 - 1}
+    return {'base': base, 'count': data_points, 'end': base + data_points - 1}
 
 
 def get_iv_string_current_registers(mppt_num, string_num, data_points=100):
-    """Kstar has only PV-level IV scan, not per-string. Returns the same base
-    as get_iv_tracker_voltage_registers but with current offset."""
+    """Kstar has only PV-level IV scan, not per-string. All strings of the
+    same MPPT share the same current array at voltage_base + data_points."""
     if mppt_num < 1 or mppt_num > 3:
         raise ValueError(f"MPPT number must be 1-3, got {mppt_num}")
     if string_num < 1 or string_num > 3:
         raise ValueError(f"String number must be 1-3 per MPPT, got {string_num}")
-    base = 0x1388 + (mppt_num - 1) * 200 + 1  # current at offset 1 (V, I, V, I, ...)
-    return {'base': base, 'count': data_points * 2, 'end': base + data_points * 2 - 1}
+    # Current block sits immediately after voltage block (offset +data_points).
+    base = 0x1388 + (mppt_num - 1) * 200 + data_points
+    return {'base': base, 'count': data_points, 'end': base + data_points - 1}
 
 
 def get_iv_string_mapping(total_strings=9, strings_per_mppt=3):
