@@ -1143,11 +1143,15 @@ class UDPEngine:
                 status = "online" if age < threshold else "offline"
                 total_solar = 0
                 total_grid = 0
+                has_grid_device = False
                 for (dt, dn), data in state.devices.items():
-                    if dt == 1:
+                    if dt == DEVICE_INVERTER:
                         total_solar += data.get('ac_power', 0)
-                    elif dt == 4:
-                        total_grid += data.get('total_power', 0)
+                    elif dt in (DEVICE_POWER_METER, DEVICE_PROTECTION_RELAY):
+                        has_grid_device = True
+                        # _parse_relay produces total_active_power; older
+                        # protocols may use total_power. Try both for compat.
+                        total_grid += data.get('total_active_power', data.get('total_power', 0))
                 # Determine RTU type from model name
                 model = state.rtu_info.get('model', '')
                 if 'SRPV' in model:
@@ -1165,6 +1169,7 @@ class UDPEngine:
                     'device_count': len(state.devices),
                     'total_solar_power': total_solar,
                     'total_grid_power': total_grid,
+                    'has_grid_device': has_grid_device,
                     'avg_interval': round(state.avg_interval),
                     'rtu_type': rtu_type,
                     'rtu_info': state.rtu_info,

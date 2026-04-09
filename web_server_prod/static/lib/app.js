@@ -283,10 +283,11 @@ function OverviewTab({
   const online = activeRtus.filter(r => r.status === 'online').length;
   const totalSolar = activeRtus.reduce((s, r) => s + (r.total_solar_power || 0), 0);
   const totalGrid = activeRtus.reduce((s, r) => s + (r.total_grid_power || 0), 0);
-  const hasGrid = totalGrid > 0;
-  const gridDisplay = hasGrid ? totalGrid : totalSolar;
-  const gridLabel = hasGrid ? "Total Grid Power" : "Total Grid Power (=Solar)";
-  const gridColor = hasGrid ? "text-blue-400" : "text-yellow-400";
+  // Total Grid Power is shown only when at least one RTU has a power meter
+  // or protection relay device (DEVICE_POWER_METER=3 / DEVICE_PROTECTION_RELAY=4).
+  // Without any grid measurement device the value is meaningless, so the card
+  // is hidden entirely instead of falling back to the solar total.
+  const hasGridDevice = activeRtus.some(r => r.has_grid_device);
   const [infoRtu, setInfoRtu] = useState(null);
   const [infoData, setInfoData] = useState(null);
   const showRtuInfo = async (r) => {
@@ -339,11 +340,11 @@ function OverviewTab({
     className: "text-gray-400 text-sm"
   }, "Total Solar Power"), /*#__PURE__*/React.createElement("div", {
     className: "text-3xl font-bold text-yellow-400"
-  }, fmt(totalSolar / 1000, 2), " kW")), /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("div", {
+  }, fmt(totalSolar / 1000, 2), " kW")), hasGridDevice && /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("div", {
     className: "text-gray-400 text-sm"
-  }, gridLabel), /*#__PURE__*/React.createElement("div", {
-    className: "text-3xl font-bold " + gridColor
-  }, fmt(gridDisplay / 1000, 2), " kW"))), /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("table", {
+  }, "Total Grid Power"), /*#__PURE__*/React.createElement("div", {
+    className: "text-3xl font-bold text-blue-400"
+  }, fmt(totalGrid / 1000, 2), " kW"))), /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("table", {
     className: "w-full text-sm"
   }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", {
     className: "text-gray-400 border-b border-gray-700"
