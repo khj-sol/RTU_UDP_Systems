@@ -520,27 +520,57 @@
   }
 
   // ─── Stage 실행 ────────────────────────────────────────────────
+  let _s1ProgressTimer = null;
   async function runStage1() {
-    document.getElementById('btn-s1').disabled = true;
+    const btn = document.getElementById('btn-s1');
+    const origText = btn.textContent;
+    btn.disabled = true;
     clearLog('s1');
     // Show AI mode status immediately in log
     if (_aiMode) {
       appendLog('s1', '🤖 AI Mode — Claude API가 직접 PDF를 파싱합니다', 'ok');
       appendLog('s1', '  Rule-based 건너뜀 → AI 추출 → Stage 2/3 진행', 'info');
+      btn.textContent = '🤖 AI 분석 중...';
+      btn.style.background = '#7c3aed';
+      // Periodic progress indicator (AI can take 30s-2min)
+      let dots = 0;
+      let elapsed = 0;
+      _s1ProgressTimer = setInterval(() => {
+        dots = (dots + 1) % 4;
+        elapsed += 5;
+        const phases = [
+          [0,  'PDF 텍스트 추출 중'],
+          [5,  'Claude API 호출 중 — PDF 분석 대기'],
+          [15, 'Claude가 레지스터 추출 중'],
+          [30, 'Claude 응답 대기 중 (대용량 PDF는 1~2분 소요)'],
+          [60, '아직 처리 중... 잠시만 기다려주세요'],
+          [90, '거의 완료... 응답 수신 중'],
+        ];
+        let phase = phases[0][1];
+        for (const [t, msg] of phases) { if (elapsed >= t) phase = msg; }
+        btn.textContent = `🤖 ${phase}${'.'.repeat(dots)}`;
+      }, 5000);
     } else {
       appendLog('s1', 'Rule-based 파싱 모드 (AI Mode OFF)', 'info');
+      btn.textContent = '실행 중...';
     }
     appendLog('s1', `Stage 1 실행 중... (${uploadedFilename})`, 'info');
-    await fetch(`${API}/stage1/run`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        session_id: sessionId,
-        filename: uploadedFilename,
-        device_type: document.getElementById('s1-device').value,
-        use_ai: _aiMode,
-      }),
-    });
+    try {
+      await fetch(`${API}/stage1/run`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: sessionId,
+          filename: uploadedFilename,
+          device_type: document.getElementById('s1-device').value,
+          use_ai: _aiMode,
+        }),
+      });
+    } finally {
+      if (_s1ProgressTimer) { clearInterval(_s1ProgressTimer); _s1ProgressTimer = null; }
+      btn.textContent = origText;
+      btn.style.background = '';
+    }
   }
 
   async function uploadStage1Excel(input) {
