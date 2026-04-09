@@ -3192,9 +3192,11 @@ def run_stage1(
     else:
         raise ValueError(f'지원하지 않는 파일 형식: {ext}')
 
-    log('레지스터 테이블 파싱...')
-    registers = extract_registers_from_tables(all_tables, fc_list=fc_list)
-    log(f'  {len(registers)}개 레지스터 추출 (원본)')
+    # AI 모드: registers는 위에서 이미 생성됨 → 테이블 파싱 건너뜀
+    if not _ai_mode_active:
+        log('레지스터 테이블 파싱...')
+        registers = extract_registers_from_tables(all_tables, fc_list=fc_list)
+        log(f'  {len(registers)}개 레지스터 추출 (원본)')
 
     # 텍스트 형식 폴백 (SunSpec/SMA EDMx/SAJ 등 — find_tables() 실패시)
     # 추출 결과가 적거나(<20) 노이즈만 (BYTE/BIT 같은 protocol-description 키워드)
@@ -3206,7 +3208,7 @@ def run_stage1(
                     'SLAVE_ADDRESS', 'STARTING_ADDRESS', 'SERVER_BUSY')
         noisy = sum(1 for r in regs if any(kw in (r.definition or '').upper() for kw in noisy_kw))
         return noisy >= len(regs) * 0.5
-    if ext == '.pdf' and (not registers or len(registers) < 20 or _is_noisy(registers)):
+    if not _ai_mode_active and ext == '.pdf' and (not registers or len(registers) < 20 or _is_noisy(registers)):
         log('  표준 테이블 부족/노이즈 → 텍스트 형식 fallback 시도...')
         text_regs = _parse_sunspec_text_registers(pages)
         if text_regs:
