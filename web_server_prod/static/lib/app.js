@@ -2638,7 +2638,7 @@ function ModbusTestTab({ rtus, selectedRtu }) {
                   /*#__PURE__*/React.createElement("td", { className: "px-2 py-0.5 text-gray-500" }, ascii)));
               }
               return rows;
-            })()))),
+            })())))),
 
     result && result.result_code !== 0 && /*#__PURE__*/React.createElement(Card, null,
       /*#__PURE__*/React.createElement("div", { className: "text-red-400 text-sm" },
