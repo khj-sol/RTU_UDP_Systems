@@ -166,14 +166,23 @@ class DB:
                 rtu_type TEXT,
                 first_seen TEXT, last_seen TEXT, last_info_update TEXT,
                 note TEXT)""")
-        # Migrate existing rtu_registry tables
-        for col, typ in [('model','TEXT'), ('phone','TEXT'), ('serial','TEXT'),
-                         ('firmware','TEXT'), ('rtu_type','TEXT'),
-                         ('last_info_update','TEXT'), ('note','TEXT'),
-                         ('hidden','INTEGER DEFAULT 0')]:
+        # Migrate existing rtu_registry tables. The (col, type, default) tuple
+        # form keeps the validator simple — type is a plain SQL type, default
+        # is appended separately to the ALTER TABLE statement.
+        for col, typ, default in [
+                ('model', 'TEXT', None),
+                ('phone', 'TEXT', None),
+                ('serial', 'TEXT', None),
+                ('firmware', 'TEXT', None),
+                ('rtu_type', 'TEXT', None),
+                ('last_info_update', 'TEXT', None),
+                ('note', 'TEXT', None),
+                ('hidden', 'INTEGER', '0')]:
             try:
                 _validate_sql_col(col, typ)
-                await self.db.execute(f"ALTER TABLE rtu_registry ADD COLUMN {col} {typ}")
+                default_clause = f" DEFAULT {default}" if default is not None else ""
+                await self.db.execute(
+                    f"ALTER TABLE rtu_registry ADD COLUMN {col} {typ}{default_clause}")
             except ValueError as e:
                 logger.error(f"ALTER TABLE validation failed: {e}")
             except Exception:
@@ -320,13 +329,11 @@ class DB:
     # ----- Inverter Data -----
 
     async def save_inverter_data(self, rtu_id: int, parsed: dict):
-        logger.info(f"save_inverter_data CALLED rtu={rtu_id} dev={parsed.get('device_number')} pv_p={parsed.get('pv_power')} ac_p={parsed.get('ac_power')}")
         is_backup = parsed.get('backup', 0)
         original_ts = parsed.get('original_timestamp')
         ts = original_ts if (is_backup and original_ts) else now_kst()
 
-        try:
-            await self.db.execute("""
+        await self.db.execute("""
             INSERT INTO inverter_data (
                 timestamp, rtu_id, device_number, model,
                 pv_voltage, pv_current, pv_power,
@@ -344,12 +351,7 @@ class DB:
               parsed.get('r_voltage', 0), parsed.get('s_voltage', 0), parsed.get('t_voltage', 0),
               parsed.get('r_current', 0), parsed.get('s_current', 0), parsed.get('t_current', 0),
               parsed.get('raw_hex', ''), is_backup, original_ts))
-            await self._maybe_commit()
-            logger.info(f"save_inverter_data OK rtu={rtu_id} dev={parsed.get('device_number')}")
-        except Exception as e:
-            logger.error(f"save_inverter_data FAILED rtu={rtu_id} dev={parsed.get('device_number')}: {type(e).__name__}: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
+        await self._maybe_commit()
 
     async def get_inverter_history(self, rtu_id=None, device_num=None,
                                    from_ts=None, to_ts=None, limit=100):

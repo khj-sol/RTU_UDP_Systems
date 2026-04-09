@@ -170,15 +170,14 @@ async def websocket_endpoint(websocket: WebSocket):
 # ---------------------------------------------------------------------------
 async def _handle_h01_async(rtu_id: int, device_key: tuple, parsed: dict):
     """Save H01 data to DB and broadcast via WebSocket."""
-    print(f"[DBG] _handle_h01_async ENTER rtu={rtu_id} key={device_key}", flush=True)
     dev_type, dev_num = device_key
 
+    # Skip hidden (deleted) RTUs entirely — no DB update, no WS broadcast
     try:
         _rtu_check = await database.get_rtu(rtu_id)
     except Exception as e:
-        print(f"[DBG] _handle_h01_async get_rtu failed: {type(e).__name__}: {e}", flush=True)
+        logger.error(f"_handle_h01_async get_rtu failed: {type(e).__name__}: {e}")
         return
-    print(f"[DBG] _handle_h01_async after get_rtu rtu_check={_rtu_check is not None}", flush=True)
     if _rtu_check and _rtu_check.get('hidden'):
         with engine._lock:
             engine.rtu_registry.pop(rtu_id, None)  # remove from memory too
@@ -186,7 +185,6 @@ async def _handle_h01_async(rtu_id: int, device_key: tuple, parsed: dict):
 
     # Upsert RTU in database + detect online recovery
     rtu_state = engine.rtu_registry.get(rtu_id)
-    print(f"[DBG] rtu_state={rtu_state is not None}", flush=True)
     if rtu_state:
         # Atomic check+clear of the reconnect edge flag. Using an in-memory
         # flag under engine._lock avoids the race where many concurrent H01
@@ -208,9 +206,9 @@ async def _handle_h01_async(rtu_id: int, device_key: tuple, parsed: dict):
         try:
             await database.upsert_rtu(rtu_id, rtu_state.ip, rtu_state.port)
         except Exception as e:
-            print(f"[DBG] upsert_rtu raised: {type(e).__name__}: {e}", flush=True)
-            return
-    print(f"[DBG] after upsert", flush=True)
+            logger.error(f"upsert_rtu failed: {type(e).__name__}: {e}")
+            # Continue — don't block H01 data save just because the registry
+            # upsert had a transient SQL issue (column missing, busy, etc.)
 
     # Log backup recovery
     backup_flag = parsed.get('backup', 0)
@@ -236,13 +234,11 @@ async def _handle_h01_async(rtu_id: int, device_key: tuple, parsed: dict):
                 'detail': f"Device {dev_type}/{dev_num}: Communication restored",
             })
 
-    print(f"[DBG] PRE-SAVE rtu={rtu_id} dev_type={dev_type} dev_num={dev_num}", flush=True)
     if dev_type == DEVICE_INVERTER:
         try:
             await database.save_inverter_data(rtu_id, parsed)
         except Exception as e:
-            logger.error(f"_handle_h01_async save_inverter_data raised: {type(e).__name__}: {e}")
-            import traceback; logger.error(traceback.format_exc())
+            logger.error(f"save_inverter_data failed: {type(e).__name__}: {e}")
     elif dev_type == DEVICE_PROTECTION_RELAY:
         # Calculate inverter total AC power for PCC power flow
         inv_total_w = 0.0
@@ -722,16 +718,9 @@ async def shutdown():
 # Main
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    # DB 자동 초기화 (기존 DB 삭제 후 새로 시작)
-    if os.path.exists(DB_PATH):
-        os.remove(DB_PATH)
-        for ext in ('-wal', '-shm'):
-            p = DB_PATH + ext
-            if os.path.exists(p):
-                os.remove(p)
-        print(f"  기존 DB 삭제 완료: {DB_PATH}")
-    print()
-
+    # DB는 매번 삭제하지 않음 — 운영 데이터 누적 보존.
+    # 개발 시 DB 초기화가 필요하면 web_server_prod/rtu_dashboard.db* 파일을
+    # 직접 삭제한 뒤 재시작하세요.
     uvicorn.run(
         "web_server_prod.main:app",
         host="0.0.0.0",
