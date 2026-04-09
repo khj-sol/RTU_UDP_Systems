@@ -949,14 +949,20 @@ class GenericInverterSimulator:
         # Use protocol_name hash as seed so each instance is distinct enough
         serial = f"{prefix}{abs(hash(proto)) % 100000000:08d}"
 
+        # DEVICE_MODEL / SERIAL_NUMBER sizes come from the register file's
+        # DEVICE_MODEL_SIZE / DEVICE_SERIAL_NUMBER_SIZE attrs when present.
+        # Without a size constant the default matches the Solarize Korean
+        # V1.2.4 convention (16 regs model, 8 regs serial).
         device_model_addr = self._find_addr('DEVICE_MODEL', 'DEVICE_MODEL_NAME', 'MODEL')
         if device_model_addr is not None:
-            self._write_string_regs(device_model_addr, model_name, 16)
+            model_regs = getattr(self.reg_map, 'DEVICE_MODEL_SIZE', None) or 16
+            self._write_string_regs(device_model_addr, model_name, model_regs)
 
         serial_addr = self._find_addr('SERIAL_NUMBER', 'DEVICE_SERIAL_NUMBER',
                                        'SERIAL_NUMBER_BASE')
         if serial_addr is not None:
-            self._write_string_regs(serial_addr, serial, 8)
+            serial_regs = getattr(self.reg_map, 'DEVICE_SERIAL_NUMBER_SIZE', None) or 8
+            self._write_string_regs(serial_addr, serial, serial_regs)
 
         mppt_count_addr = self._find_addr('MPPT_COUNT')
         if mppt_count_addr is not None:

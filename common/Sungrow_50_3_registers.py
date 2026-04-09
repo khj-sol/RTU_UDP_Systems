@@ -143,6 +143,13 @@ class RegisterMap:
     IV_SCAN_STATUS                           = 0x600D
 
 
+    # Device info (FC04) — Sungrow String Inverter v1.1.37
+    # DEVICE_MODEL: only U16 type code at 0x1388 (Appendix 6 lookup) — not a string
+    # Serial: UTF-8 STRING 10 regs at 0x137E (4990)
+    DEVICE_SERIAL_NUMBER                     = 0x137E
+    DEVICE_SERIAL_NUMBER_SIZE                = 10
+
+
 class InverterMode:
     """Sungrow work state (0x5038). PDF Appendix 1."""
     INITIAL  = 0x0000

@@ -188,6 +188,15 @@ class RegisterMap:
     ERROR_CODE3                              = ALARM3
 
 
+    # Device info (FC03) — Huawei SUN2000MC Modbus Interface Definitions
+    # Model: ASCII STRING 15 regs = 30 bytes at 0x7530 (30000)
+    # Serial: ASCII STRING 10 regs = 20 bytes at 0x753F (30015)
+    DEVICE_MODEL                             = 0x7530
+    DEVICE_MODEL_SIZE                        = 15
+    DEVICE_SERIAL_NUMBER                     = 0x753F
+    DEVICE_SERIAL_NUMBER_SIZE                = 10
+
+
 class InverterMode:
     """Huawei device status codes (reg 32089) — mapped to Solarize modes.
 

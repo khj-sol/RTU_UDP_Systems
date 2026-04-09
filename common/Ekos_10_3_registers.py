@@ -165,6 +165,15 @@ class RegisterMap:
     INVERTER_ON_OFF                          = 0x0834
 
 
+    # Device info (FC03) — Ekos EK PDF
+    # Existing MODEL_NAME/SERIAL_NUMBER already at 0x0000/0x0008; alias for
+    # the standardized DEVICE_MODEL/DEVICE_SERIAL_NUMBER lookup names.
+    DEVICE_MODEL                             = 0x0000
+    DEVICE_MODEL_SIZE                        = 8
+    DEVICE_SERIAL_NUMBER                     = 0x0008
+    DEVICE_SERIAL_NUMBER_SIZE                = 8
+
+
 class InverterMode:
     """Ekos operating state (reg 30025) — F007 enum."""
     INITIAL  = 1   # Initializing

@@ -2323,8 +2323,14 @@ class ModbusHandlerSerial:
         try:
             info = {}
 
-            # Model name (16 registers = 32 bytes)
-            result = _read(device_model_addr, 16)
+            # Register counts come from the register file's *_SIZE attributes
+            # when present so each inverter's actual PDF width is honored
+            # (e.g. Huawei model is 15 regs, Kstar model is 5 regs).
+            model_regs = getattr(self.RegMap, 'DEVICE_MODEL_SIZE', None) or 16
+            serial_regs = getattr(self.RegMap, 'DEVICE_SERIAL_NUMBER_SIZE', None) or 8
+
+            # Model name
+            result = _read(device_model_addr, model_regs)
             if result is not None and not result.isError():
                 model_bytes = b''
                 for reg in result.registers:
@@ -2333,9 +2339,9 @@ class ModbusHandlerSerial:
             else:
                 info['model'] = ''
 
-            # Serial number (8 registers = 16 bytes)
+            # Serial number
             if serial_addr is not None:
-                result = _read(serial_addr, 8)
+                result = _read(serial_addr, serial_regs)
                 if result is not None and not result.isError():
                     serial_bytes = b''
                     for reg in result.registers:

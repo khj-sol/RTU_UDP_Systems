@@ -157,6 +157,13 @@ class RegisterMap:
     INVERTER_ON_OFF                          = 0x0834
 
 
+    # Device info (FC03) — Sunways PV Protocol V00.07
+    # DEVICE_MODEL: only U16 type code at 0x2718 — not a string
+    # Serial: STRING 8 regs at 0x2710 (10000)
+    DEVICE_SERIAL_NUMBER                     = 0x2710
+    DEVICE_SERIAL_NUMBER_SIZE                = 8
+
+
 class InverterMode:
     INITIAL  = 0x01  # check
     STANDBY  = 0x00  # wait

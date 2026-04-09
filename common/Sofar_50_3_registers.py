@@ -121,6 +121,11 @@ class RegisterMap:
     INVERTER_ON_OFF                          = 0x0834
 
 
+    # Device info: Sofar 1-70KTL G1/G2 PDF v1.01 does NOT expose model name
+    # or serial number registers. RTU Model Info response will be empty —
+    # this is a protocol limitation, not a bug.
+
+
 class InverterMode:
     INITIAL  = 0x01
     STANDBY  = 0x00

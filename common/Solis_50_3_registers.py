@@ -23,8 +23,8 @@ class RegisterMap:
     AC_OUTPUT_TYPE                           = 0x0BBB
     DC_INPUT_TYPE                            = 0x0BBC
     SERIAL_NUMBER                            = 0x0BF5  # 3061
-    DEVICE_MODEL                             = PRODUCT_MODEL
-    DEVICE_SERIAL_NUMBER                     = SERIAL_NUMBER
+    DEVICE_SERIAL_NUMBER                     = 0x0BF5
+    DEVICE_SERIAL_NUMBER_SIZE                = 4
     FIRMWARE_VERSION                         = DSP_VERSION
 
     # Power & energy (3005-3018)

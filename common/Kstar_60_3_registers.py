@@ -199,6 +199,15 @@ class RegisterMap:
     PV_POWER_HIGH                            = PV1_INPUT_POWER_HIGH
 
 
+    # Device info (FC03) — Kstar KSG1250K PDF v35
+    # Model: byte-packed ASCII 10 bytes = 5 regs at 0x0C80 (Machine model)
+    # Serial: byte-packed ASCII 22 bytes = 11 regs at 0x0C86 (Inverter SN)
+    DEVICE_MODEL                             = 0x0C80
+    DEVICE_MODEL_SIZE                        = 5
+    DEVICE_SERIAL_NUMBER                     = 0x0C86
+    DEVICE_SERIAL_NUMBER_SIZE                = 11
+
+
 class InverterMode:
     """Kstar operating mode (reg 3030 low byte). PDF Table 3.1.4."""
     INITIAL  = 0x00  # System initialization
