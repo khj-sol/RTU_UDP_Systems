@@ -1,0 +1,4878 @@
+=== PAGE 1 ===
+                                                         1 / 32 
+ 
+格瑞特新能源有限公司 
+中国深圳市宝安区西乡街道西成工
+业区12 栋 邮编518102 
+Tel: 86 755 27471063  
+info@ginverter.com  
+www.ginverter.com  
+GROWATT NEW ENERGY CO.,LTD 
+No. 12 Building, Xicheng Industrial 
+Zone, Bao'an District, Shenzhen 
+518102, China.
+       
+    Growatt PV Inverter Modbus RS485 RTU Protocol 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+V3.14 
+2016-09-27 
+Growatt New Energy CO.,LTD 
+ 
+No. 
+Version 
+Date 
+Notice 
+Signature 
+1 
+V1.00 
+2011-8-30 
+The first version 
+Paco 
+2 
+V1.10 
+2011-10-20 
+X 
+Lin 
+3 
+V2.01 
+2011-11-2 
+Update Modbus mostly protocol 
+Xin.Chen 
+… 
+… 
+… 
+… 
+… 
+19 
+V3.00 
+2012-8-15 
+add 
+3-113~115, 
+ 
+4-48~63, 
+4-450~575, 
+Jumi 
+20 
+V3.01 
+2012-11-22 
+Add many CEI registers 
+Jumi 
+21 
+V3.02 
+2013-01-26 
+Add some reserved registers 
+Jumi 
+22 
+V3.03 
+2013-01-30 
+Change 485 Time out limit 
+Jumi 
+23 
+V3.04 
+2013-02-28 
+Chang holding 80 and 150 
+Jumi 
+24 
+V3.05 
+2014-12-30 
+add 3-180~191 
+ 
+25 
+V3.06 
+2015-03-09 
+Add address to dis/enable N to 
+GND detect 
+Jason 
+26 
+V3.07 
+2015-5-22 
+Add hold 165 and 166 for CEI delay 
+time 
+ 
+27 
+V3.08 
+2015-7-24 
+Add holding 194 
+ 
+28 
+V3.09 
+2015-9-28 
+Add holding 195~200 for network 
+Zhenyuan.li 
+29 
+V3.10 
+2015-12-17 
+Add Input 70~89 for string monitor 
+May 
+30 
+V3.11 
+2016-04-01 
+Add holding 87~89 and input 
+115~119 for PID information 
+Hui.zhao 
+31 
+V3.12 
+2016-05-19 
+Add InputReg 120-127 to get PV3 
+Information 
+Jason 
+32 
+V3.13 
+2016-08-04 
+Add 
+holding 
+167-170 
+for 
+softstartflag,QPercentMax,DRMS 
+and PowerVoltFuncEn Enable 
+Add Inputreg128~129 for transfer 
+fault code as &*8 
+Pan.xie 
+33 
+V3.14 
+2016-9-27 
+Add holding 171-175 for input 
+parameters setting 
+Shuang.he 
+ 
+ 
+ 
+ 
+ 
+ 
+
+=== PAGE 2 ===
+                                                         2 / 32 
+ 
+格瑞特新能源有限公司 
+中国深圳市宝安区西乡街道西成工
+业区12 栋 邮编518102 
+Tel: 86 755 27471063  
+info@ginverter.com  
+www.ginverter.com  
+GROWATT NEW ENERGY CO.,LTD 
+No. 12 Building, Xicheng Industrial 
+Zone, Bao'an District, Shenzhen 
+518102, China.
+V2.01  2011-11-2: 
+ 
+1, Update the four register map tables 
+ 
+2, Add maximum data length define 
+ 
+3,Change the parity type of RS232 
+V2.02 2011-11-4: 
+ 
+1, Add the flash command 
+V2.03 2012-03-01 
+ 
+1, Combine the read and write register map table 
+ 
+2, Update the register map of 4.1 and 4.2 by blue marked; 
+V2.04 2012-03-05 
+1， Add system time read and write cmd 
+V2.05 2012-03-06 
+ 
+1, Add Grid V/F Outrange protect time read and write cmd  
+V2.06 2012-03-21 
+ 
+1, Add Auto test start cmd; 
+     2, Move Manufacturer  info from 13 to 60. 
+V2.07 2012-04-19 
+ 
+1, Add holding registers: 13~15, 40~45, 68~71, 73, 74; 
+V2.08 2012-04-28 
+ 
+1, Shift the all reg address, start at 0x0000; 
+V2.09 2012-05-09 
+ 
+1, Add 4-45 PF register, to read and adjust inverter output PF; 
+     2,Add3-90~99 registers, to set the PF limit line,(this function is resaved for internal); 
+V2.10 2012-05-10 
+ 
+1, Add 4-180~429 registers, for the 50 records of the inverter error info;  
+V2.11 2012-05-29 
+ 
+1, Add 3-1,100~107 registers, for the frequency – load limit rate and the PF check adjust values; 
+ 
+2, Change the Input Pac registers’s unit, from watt to power (W--VA) ; 
+V2.12 2012-06-14 
+ 
+1, Change 3-3 register define; 
+ 
+2, Change 3-90~99 registers, change the PF line  define;   
+ 
+3, Add 3-135~138 grid spec network command password registers,  
+V2.13 2012-06-27 
+ 
+1, chg 3-99 register, add 3-108~112 
+V2.14 2012-07-17 
+ 
+1, add 3-74 euro inverter spec select cmd, 3-98 CEI freq. test cmd; 
+ 
+2,add 3-80~89, 4-80~89 resaved registers,  for the outsourcing device updating; 
+V2.15 V2.16 2012-07-31 
+ 
+1, add 4-48~63  pv energy , reactive power and energy registers; 
+V3.00 2012-08-15 
+ 
+1, add 3-113~115 registers, for CEI021 model set; 
+ 
+2, add 4-48~63 registers, for PV energy and reactive ac energy; 
+ 
+3, add 4-450~575 registers, for history energy records; 
+V3.01 2012-11-22: 
+
+=== PAGE 3 ===
+                                                         3 / 32 
+ 
+格瑞特新能源有限公司 
+中国深圳市宝安区西乡街道西成工
+业区12 栋 邮编518102 
+Tel: 86 755 27471063  
+info@ginverter.com  
+www.ginverter.com  
+GROWATT NEW ENERGY CO.,LTD 
+No. 12 Building, Xicheng Industrial 
+Zone, Bao'an District, Shenzhen 
+518102, China.
+ 
+1,add 3-75 232T485Enable; 
+ 
+2,add 3-116~119, 6KwSystem, FrequencyDeratingEnable, QlockOutpower, RestartDelayTime 
+ 
+3,add 4-47 DeratingMode; 
+ 
+4,add others; 
+ 
+V3.02 2013-01-26: 
+ 
+1,add power control registers in holding map; 
+ 
+2,add debug resaved registers in input map; 
+ 
+3,change 24 hours energy means; 
+ 
+4, notice the minimum period of the CMD; 
+ 
+V3.03 2013-01-30: 
+ 
+1,change 485 time out limit; 
+ 
+V3.04 2013-02-28: 
+ 
+1,change holding 80 register to ODM factory Info; 
+ 
+2,add holding 81 register for the point of over-frequency derate load; 
+ 
+2,add holding 150 register to start Fan check; 
+V3.05 2014-12-30: 
+ 
+1,add holding 180~182 register for the Internet IP; 
+ 
+2,add holding 184~191 register for the MTL-US 6K protect level 3; 
+ 
+3,add input 69 register for warning value of main CPU 
+V3.06 2015-03-09: 
+ 
+1, add holding 192 register to enable or disable N to GND detect 
+2, add holding 193 register to enable appointed Spec setting // 2015-03-19 
+V3.07 2015-05-22: 
+ 
+1, Add holding 165 register as delay time for Q(V) activation  
+ 
+2, Add holding 166 register as delay time for over-frequency load derating activation 
+V3.08 2015-07-24： 
+    1,Add holding 194 register to enable or disable non-standard AC voltage range 
+V3.09 2015-09-28： 
+1,add holding 195~196 register for the server IP; 
+2,add holding 197 register for the send data Interval; 
+3,add holding 198~200 register for Datalogger Check Code; 
+V3.10 2015-12-17： 
+1, Add Input 70~89 for string monitor; 
+V3.11 2016-04-01： 
+1, Add holding 87~89 and input 115~119 for PID information; 
+V3.12 2016-5-19： 
+ Add InputReg 120-127，For getting PV3 voltage/current/power/E_Today/E_total information 
+V3.13 2016-8-9： 
+1, Add holding 167-169 for Australia Spe；167：load softstart enable 168: Qmax for Q(V) 
+curve 169: DRMS Enable 170: PowerVoltFuncEn 
+2, Add Inputreg128~129 for transfer faultcode as &*8 
+
+=== PAGE 4 ===
+                                                         4 / 32 
+ 
+格瑞特新能源有限公司 
+中国深圳市宝安区西乡街道西成工
+业区12 栋 邮编518102 
+Tel: 86 755 27471063  
+info@ginverter.com  
+www.ginverter.com  
+GROWATT NEW ENERGY CO.,LTD 
+No. 12 Building, Xicheng Industrial 
+Zone, Bao'an District, Shenzhen 
+518102, China.
+V3.14 2016-9-27: 
+ 
+Add holding 171-175 for input parameters setting. 171: INVWorkModeSetting 172: 
+PV1VoltSet 173:PV2VoltSet 174:BT1CurrRefSet 175: BT2CurrRefSet 
+2016-12-19: 
+Add holding 131 register for power restart slope setting 
+Add holding 132 register for load derating of over AC voltage start point setting 
+Add holding 149 register for over AC voltage load derating slope setting 
+Add holding 176 register for Delay time for power recovering when ac voltage getting normal 
+ 
+ 
+
+=== PAGE 5 ===
+                                                         5 / 32 
+ 
+格瑞特新能源有限公司 
+中国深圳市宝安区西乡街道西成工
+业区12 栋 邮编518102 
+Tel: 86 755 27471063  
+info@ginverter.com  
+www.ginverter.com  
+GROWATT NEW ENERGY CO.,LTD 
+No. 12 Building, Xicheng Industrial 
+Zone, Bao'an District, Shenzhen 
+518102, China.
+1 Data format ............................................................................................................................ 6 
+2 Command Format ................................................................................................................... 6 
+3 Device Message Transmission Mode / Framing ..................................................................... 9 
+4 Register map ........................................................................................................................... 9 
+5 Set address ........................................................................................................................... 31 
+6 Notice ................................................................................................................................... 32 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+
+=== PAGE 6 ===
+                                                         6 / 32 
+ 
+格瑞特新能源有限公司 
+中国深圳市宝安区西乡街道西成工
+业区12 栋 邮编518102 
+Tel: 86 755 27471063  
+info@ginverter.com  
+www.ginverter.com  
+GROWATT NEW ENERGY CO.,LTD 
+No. 12 Building, Xicheng Industrial 
+Zone, Bao'an District, Shenzhen 
+518102, China.
+1 Data format 
+ 
+ 
+Valid slave device addresses are in the range of 0 – 247 decimal. 
+The individual slave devices are assigned addresses in the range of 1 – 247. 
+0 is the broadcast address 
+ 
+It is 16bits (two bytes) unsigned integer for each holding and input register; 
+ 
+2 Command Format 
+Function 3 Read holding register 
+ 
+ 
+Response Error: 
+ 
+11 0x80|0x03 Errornum CRC  (Errornum as a byte) 
+
+=== PAGE 7 ===
+                                                         7 / 32 
+ 
+格瑞特新能源有限公司 
+中国深圳市宝安区西乡街道西成工
+业区12 栋 邮编518102 
+Tel: 86 755 27471063  
+info@ginverter.com  
+www.ginverter.com  
+GROWATT NEW ENERGY CO.,LTD 
+No. 12 Building, Xicheng Industrial 
+Zone, Bao'an District, Shenzhen 
+518102, China.
+ 
+Function 4 Read input  register 
+ 
+ 
+  Response Error: 
+ 
+11 0x80|0x04 Errornum CRC  (Errornum as a byte) 
+ 
+Function 6 Preset single register 
+ 
+
+=== PAGE 8 ===
+                                                         8 / 32 
+ 
+格瑞特新能源有限公司 
+中国深圳市宝安区西乡街道西成工
+业区12 栋 邮编518102 
+Tel: 86 755 27471063  
+info@ginverter.com  
+www.ginverter.com  
+GROWATT NEW ENERGY CO.,LTD 
+No. 12 Building, Xicheng Industrial 
+Zone, Bao'an District, Shenzhen 
+518102, China.
+ 
+Response Error: 
+ 
+11 0x80|0x06 Errornum CRC  (Errornum as a byte) 
+ 
+Function 16 Preset multiple register 
+ 
+ 
+Response Error: 
+ 
+11 0x80|0x10 Errornum CRC  (Errornum as a byte) 
+ 
+ 
+
+=== PAGE 9 ===
+                                                         9 / 32 
+ 
+格瑞特新能源有限公司 
+中国深圳市宝安区西乡街道西成工
+业区12 栋 邮编518102 
+Tel: 86 755 27471063  
+info@ginverter.com  
+www.ginverter.com  
+GROWATT NEW ENERGY CO.,LTD 
+No. 12 Building, Xicheng Industrial 
+Zone, Bao'an District, Shenzhen 
+518102, China.
+3 Device Message Transmission Mode / Framing 
+RTU Mode 
+When controllers are setup to communicate on a Modbus network using RTU (Remote 
+Terminal Unit) mode, each 8–bit byte in a message contains two 4–bit hexadecimal 
+characters. Each message must be transmitted in a continuous stream. 
+ 
+The format for each byte in RTU mode is: 
+Coding System: 8–bit binary, hexadecimal 0–9, A–F 
+Two hexadecimal characters contained in each 
+8–bit field of the message 
+ 
+Bits per Byte:  
+1 start bit 
+8 data bits, least significant bit sent first 
+None parity 
+1 stop bit 
+Error Check Field: Cyclical Redundancy Check (CRC) 
+ 
+The baud rate of the transmission is: 
+Baud Rate: 9600 bps 
+ 
+ 
+Minimum CMD period (RS485 Time out): 850ms. 
+ 
+ 
+ 
+Wait for minimum 850ms to send a new CMD after last CMD. Suggestion is 1s; 
+ 
+Maximum Data Length Define: 
+ 
+ 
+ 
+Maximum read data length is 45 words in read command; 
+ 
+ 
+ 
+Maximum update data length is 45 words in preset command; 
+ 
+ 
+ 
+Read or update registers NO. should in the range of times of 45, 
+ 
+ 
+ 
+ 
+eg: 1~45 or 96~123 are OK,  but 40~60 is not OK; 
+ 
+Note: 
+ 
+Except the CEI0-21 and VDE-AR-N 4105 power management registers, you should refer the 
+manufactory’s suggestion when writing other registers; 
+4 Register map 
+It is 16bits (two bytes) unsigned integer for each holding and input register; 
+ 
+4.1 Holding Reg    
+
+=== PAGE 10 ===
+                                                         10 / 32 
+ 
+格瑞特新能源有限公司 
+中国深圳市宝安区西乡街道西成工
+业区12 栋 邮编518102 
+Tel: 86 755 27471063  
+info@ginverter.com  
+www.ginverter.com  
+GROWATT NEW ENERGY CO.,LTD 
+No. 12 Building, Xicheng Industrial 
+Zone, Bao'an District, Shenzhen 
+518102, China.
+Regis
+ter 
+NO. 
+Variable 
+Name 
+Description 
+C
+us
+to
+m
+er 
+W
+rit
+e 
+Value  
+Unit 
+Initial 
+value  
+Note 
+00 
+OnOff 
+The Inverter On/Off 
+state and the auto 
+start state, The low 
+byte is the 
+on/off(1/0), the high 
+byte is the auto start 
+state or not(1/0). 
+W 
+0x0000; 
+0x0001; 
+0x0100; 
+0x0101; 
+ 
+ 
+0x010
+1; 
+Auto 
+start 
+means 
+the auto 
+power AC 
+when 
+next 
+power on 
+inverter. 
+01 
+SPIenable 
+SPI(system 
+protection interface) 
+function enable 
+W 
+0or1, 
+ 
+ 
+Now only 
+for 
+CEI021 
+02 
+PF 
+CMD 
+memory 
+state 
+Set the following 
+3,4,5,99 CMD will be 
+memory or not(1/0), 
+if not, these settings 
+are the initial value. 
+W 
+0or1, 
+ 
+0 
+Means 
+these 
+settings  
+will 
+be 
+acting  
+or 
+not 
+when 
+next 
+power on 
+03 
+Active 
+P 
+Rate 
+Read Inverter max 
+output active power 
+percent  
+W 
+0-100 
+perce
+nt 
+100 
+ 
+04 
+Reactive 
+P 
+Rate 
+Read Inverter max 
+output 
+reactive 
+power percent 
+W 
+0-100 
+perce
+nt 
+ 
+ 
+05 
+Power 
+factor 
+Read 
+Inverter 
+output 
+power 
+factor’s 10000 times 
+W 
+0-20000， 
+0-10000 
+is 
+underexcite
+c, other is 
+overexcited 
+ 
+10000 
+ 
+06 
+Pmax H 
+Normal  power 
+(high) 
+ 
+ 
+0.1VA 
+ 
+ 
+07 
+Pmax L 
+Normal  power 
+(low) 
+ 
+ 
+0.1VA 
+ 
+ 
+
+=== PAGE 11 ===
+                                                         11 / 32 
+ 
+格瑞特新能源有限公司 
+中国深圳市宝安区西乡街道西成工
+业区12 栋 邮编518102 
+Tel: 86 755 27471063  
+info@ginverter.com  
+www.ginverter.com  
+GROWATT NEW ENERGY CO.,LTD 
+No. 12 Building, Xicheng Industrial 
+Zone, Bao'an District, Shenzhen 
+518102, China.
+08 
+Vnormal 
+Normal work PV 
+voltage 
+ 
+ 
+0.1V 
+ 
+ 
+09 
+Fw version 
+H 
+Firmware version 
+(high) 
+ 
+ 
+ASCII 
+ 
+ 
+10 
+Fw version 
+M 
+Firmware version 
+(middle) 
+ 
+ 
+ 
+ 
+ 
+11 
+Fw version L 
+Firmware version 
+(low) 
+ 
+ 
+ 
+ 
+ 
+12 
+Fw version2 
+H 
+Control Firmware 
+version (high) 
+ 
+ 
+ASCII 
+ 
+ 
+13 
+Fw version2 
+M 
+Control Firmware 
+version (middle) 
+ 
+ 
+ 
+ 
+ 
+14 
+Fw version2 
+L 
+Control Firmware 
+version (low) 
+ 
+ 
+ 
+ 
+ 
+15 
+LCD 
+language 
+LCD language 
+W 
+0-4,5 
+ 
+ 
+ 
+16 
+LCD 
+Contrast 
+LCD Contrast 
+W 
+ 
+ 
+ 
+ 
+17 
+Vpv start 
+Input start voltage  
+W 
+ 
+0.1V 
+ 
+ 
+18 
+Time start 
+Start time 
+W 
+ 
+1S 
+ 
+ 
+19 
+Vac low 
+Grid voltage low 
+limit protect  
+W 
+ 
+0.1V 
+ 
+ 
+20 
+Vac high 
+Grid voltage high 
+limit protect  
+W 
+ 
+0.1V 
+ 
+ 
+21 
+Fac low  
+Grid frequency low 
+limit protect  
+W 
+ 
+0.01 
+Hz 
+ 
+ 
+22 
+Fac high 
+Grid high frequency 
+limit protect  
+W 
+ 
+0.01 
+Hz 
+ 
+ 
+23 
+Serial NO. 5 
+Serial number 5 
+ 
+ 
+ASCII 
+ 
+ 
+24 
+Serial No. 4 
+Serial number 4 
+ 
+ 
+ 
+ 
+ 
+25 
+Serial No. 3 
+Serial number 3 
+ 
+ 
+ 
+ 
+ 
+26 
+Serial No. 2 
+Serial number 2 
+ 
+ 
+ 
+ 
+ 
+27 
+Serial No. 1 
+Serial number 1 
+ 
+ 
+ 
+ 
+ 
+28 
+Moudle H 
+Inverter Moudle 
+(high) 
+ 
+&*5 
+ 
+ 
+ 
+29 
+Moudle L 
+Inverter Moudle 
+(low) 
+ 
+ 
+ 
+ 
+ 
+30 
+Com 
+Address 
+Communicate  addr
+ess 
+W 
+ 
+ 
+1 
+ 
+31 
+FlashStart 
+Update firmware  
+W 
+0x0001:own 
+0X0100: 
+TIC2000 
+ 
+ 
+ 
+32 
+Reset User 
+Reset User 
+W 
+0x0001 
+ 
+ 
+ 
+
+=== PAGE 12 ===
+                                                         12 / 32 
+ 
+格瑞特新能源有限公司 
+中国深圳市宝安区西乡街道西成工
+业区12 栋 邮编518102 
+Tel: 86 755 27471063  
+info@ginverter.com  
+www.ginverter.com  
+GROWATT NEW ENERGY CO.,LTD 
+No. 12 Building, Xicheng Industrial 
+Zone, Bao'an District, Shenzhen 
+518102, China.
+Info 
+Information 
+33 
+Reset 
+to 
+factory 
+Reset to factory 
+W 
+0x0001 
+ 
+ 
+ 
+34 
+AutoTestSta
+rt 
+AutoTestStart 
+W 
+0x0001 
+ 
+ 
+ 
+35 
+Vac low 2 
+Grid voltage low 
+limit protect 2 
+W 
+ 
+0.1V 
+ 
+ 
+36 
+Vac high 2 
+Grid voltage high 
+limit protect 2 
+W 
+ 
+0.1V 
+ 
+ 
+37 
+Fac low 2 
+Grid frequency low 
+limit protect 2 
+W 
+ 
+0.01 
+Hz 
+ 
+ 
+38 
+Fac high 2 
+Grid high frequency 
+limit protect 2 
+W 
+ 
+0.01 
+Hz 
+ 
+ 
+39 
+Vac low C 
+Grid low voltage 
+limit connect to Grid 
+W 
+ 
+0.1V 
+ 
+ 
+40 
+Vac high C 
+Grid high voltage 
+limit connect to Grid 
+W 
+ 
+0.1V 
+ 
+ 
+41 
+Fac low C 
+Grid low frequency 
+limit connect to Grid 
+W 
+ 
+0.01 
+Hz 
+ 
+ 
+42 
+Fac high C 
+Grid high frequency 
+limit connect to Grid 
+W 
+ 
+0.01 
+Hz 
+ 
+ 
+43 
+DTC 
+Device Type Code 
+ 
+&*6 
+ 
+ 
+ 
+44 
+TP 
+Input tracker num 
+and output phase 
+num 
+ 
+Eg:0x0203 is 
+two  MPPT 
+and 
+3ph 
+output 
+ 
+ 
+ 
+45 
+Sys Year 
+System time-year 
+W 
+Year offset is 
+0 
+ 
+ 
+ 
+46 
+Sys Month 
+System time- Month 
+W 
+ 
+ 
+ 
+ 
+47 
+Sys Day 
+System time- Day 
+W 
+ 
+ 
+ 
+ 
+48 
+Sys Hour 
+System time- Hour 
+W 
+ 
+ 
+ 
+ 
+49 
+Sys Min 
+System time- Min 
+W 
+ 
+ 
+ 
+ 
+50 
+Sys Sec 
+System time- 
+Second 
+W 
+ 
+ 
+ 
+ 
+51 
+Vac 
+low1 
+time 
+Grid 
+voltage 
+low 
+limit protect time 
+1 
+W 
+ 
+Cycle 
+ 
+ 
+52 
+Vac 
+high1 
+time 
+Grid voltage high 
+limit protect time 
+1 
+W 
+ 
+Cycle 
+ 
+ 
+53 
+Vac 
+low2 
+time 
+Grid 
+voltage 
+low 
+limit protect time 
+2 
+W 
+ 
+Cycle 
+ 
+ 
+
+=== PAGE 13 ===
+                                                         13 / 32 
+ 
+格瑞特新能源有限公司 
+中国深圳市宝安区西乡街道西成工
+业区12 栋 邮编518102 
+Tel: 86 755 27471063  
+info@ginverter.com  
+www.ginverter.com  
+GROWATT NEW ENERGY CO.,LTD 
+No. 12 Building, Xicheng Industrial 
+Zone, Bao'an District, Shenzhen 
+518102, China.
+54 
+Vac 
+high2 
+time 
+Grid voltage high 
+limit protect time 
+2 
+W 
+ 
+Cycle 
+ 
+ 
+55 
+Fac 
+low1 
+time 
+Grid frequency low 
+limit protect time 
+1 
+W 
+ 
+Cycle 
+ 
+ 
+56 
+Fac 
+high1 
+time 
+Grid frequency high 
+limit protect time 
+1 
+W 
+ 
+Cycle 
+ 
+ 
+57 
+Fac 
+low2 
+time 
+Grid frequency low 
+limit protect time 
+2 
+W 
+ 
+Cycle 
+ 
+ 
+58 
+Fac 
+high2 
+time 
+Grid frequency high 
+limit protect time 
+2 
+W 
+ 
+Cycle 
+ 
+ 
+59 
+Manufactur
+er Info 8 
+Manufacturer 
+information (high) 
+ 
+ 
+ASCII 
+ 
+ 
+60 
+Manufactur
+er Info 7 
+Manufacturer 
+information 
+(middle) 
+ 
+ 
+ 
+ 
+ 
+61 
+Manufactur
+er Info 6 
+Manufacturer 
+information (low) 
+ 
+ 
+ 
+ 
+ 
+62 
+Manufactur
+er Info 5 
+Manufacturer 
+information (high) 
+ 
+ 
+ 
+ 
+ 
+63 
+Manufactur
+er Info 4 
+Manufacturer 
+information 
+(middle) 
+ 
+ 
+ 
+ 
+ 
+64 
+Manufactur
+er Info3 
+Manufacturer 
+information (low) 
+ 
+ 
+ 
+ 
+ 
+65 
+Manufactur
+er Info 2 
+Manufacturer 
+information (low) 
+ 
+ 
+ 
+ 
+ 
+66 
+Manufactur
+er Info 1 
+Manufacturer 
+information (high) 
+ 
+ 
+ASCII 
+ 
+ 
+67 
+FW 
+Build 
+No. 4 
+Control FW Build 
+No. 2 
+ 
+ 
+ASCII 
+ 
+ 
+68 
+FW 
+Build 
+No. 3 
+Control FW Build 
+No. 1 
+ 
+ 
+ 
+ 
+ 
+69 
+FW 
+Build 
+No. 2 
+COM FW Build No. 2 
+ 
+ 
+ 
+ 
+ 
+70 
+FW 
+Build 
+No. 1 
+COM FW Build No. 1 
+ 
+ 
+ASCII 
+ 
+ 
+71 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+72 
+Sys Weekly 
+Sys Weekly 
+W 
+0-6 
+ 
+ 
+ 
+
+=== PAGE 14 ===
+                                                         14 / 32 
+ 
+格瑞特新能源有限公司 
+中国深圳市宝安区西乡街道西成工
+业区12 栋 邮编518102 
+Tel: 86 755 27471063  
+info@ginverter.com  
+www.ginverter.com  
+GROWATT NEW ENERGY CO.,LTD 
+No. 12 Building, Xicheng Industrial 
+Zone, Bao'an District, Shenzhen 
+518102, China.
+73 
+ModbusVer
+sion 
+Modbus Version 
+ 
+Eg ：207 is 
+V2.07 
+Int(16
+bits) 
+ 
+ 
+74 
+ModelSelec
+ted 
+Model Selected or 
+not 
+W 
+0: need to 
+select; 
+1: 
+have 
+selected 
+ 
+ 
+ 
+75 
+232T485Ena
+ble 
+232T485Enable 
+W 
+0: Disable; 
+1: Enable 
+ 
+ 
+ 
+76 
+Decrease 
+Power H 
+Decrease output 
+watt  
+W 
+ 
+ 
+ 
+ 
+77 
+Decrease 
+Power L 
+Decrease output 
+watt 
+W 
+ 
+0.1W 
+ 
+ 
+78 
+Increase 
+Power H 
+Increase output 
+watt  
+W 
+ 
+ 
+ 
+ 
+79 
+Increase 
+Power L 
+Increase output 
+watt 
+W 
+ 
+0.1W 
+ 
+ 
+80 
+Factory 
+The ODM Info code 
+ 
+ 
+ 
+ 
+ 
+81 
+FreqDerateS
+tart 
+Frequency derating 
+start point  
+W 
+ 
+0.01H
+Z 
+ 
+ 
+82 
+LoadSpeed 
+Load add speed 
+W 
+ 
+0.1% 
+ 
+ 
+83 
+60HzLow 
+60Hz Fac low 
+W 
+ 
+0.01H
+Z 
+ 
+ 
+84 
+60HzHingh 
+60Hz Fac hingh 
+W 
+ 
+0.01H
+Z 
+ 
+ 
+85 
+Vac start by 
+pf  
+Vac start adjust by 
+pf  
+W 
+ 
+0.1V 
+ 
+ 
+86 
+PF of vac 
+limit 
+Max pf of adjust Vac 
+W 
+ 
+ 
+10000 
+ 
+87 
+PID Working 
+Model 
+PID Working Model 
+W 
+0:Automatic 
+1: Continual 
+2: Overnight 
+ 
+ 
+ 
+88 
+PID On/Off 
+Ctrl 
+PID On/Off Control 
+W 
+0:On 
+1:Off 
+ 
+ 
+ 
+89 
+PID 
+Volt 
+Option 
+PID Output Voltage 
+Option  
+W 
+300~1000 
+V 
+ 
+ 
+90 
+PFLineP1_L
+P 
+PF limit line point 1 
+load percent 
+W 
+0-255 
+perce
+nt 
+ 
+255 
+means 
+no 
+this 
+point 
+91 
+PFLineP1_P
+F 
+PF limit line point 1 
+power factor 
+W 
+0-20000 
+ 
+ 
+ 
+92 
+PFLineP2_L
+P 
+PF limit line point 2 
+load percent 
+W 
+0-255 
+perce
+nt 
+ 
+255 
+means 
+
+=== PAGE 15 ===
+                                                         15 / 32 
+ 
+格瑞特新能源有限公司 
+中国深圳市宝安区西乡街道西成工
+业区12 栋 邮编518102 
+Tel: 86 755 27471063  
+info@ginverter.com  
+www.ginverter.com  
+GROWATT NEW ENERGY CO.,LTD 
+No. 12 Building, Xicheng Industrial 
+Zone, Bao'an District, Shenzhen 
+518102, China.
+no 
+this 
+point 
+93 
+PFLineP2_P
+F 
+PF limit line point 
+2power factor 
+W 
+0-20000 
+ 
+ 
+ 
+94 
+PFLineP3_L
+P 
+PF limit line point 3 
+load percent 
+W 
+0-255 
+perce
+nt 
+ 
+255 
+means 
+no 
+this 
+point 
+95 
+PFLineP3_P
+F 
+PF limit line point 3 
+power factor 
+W 
+0-20000 
+ 
+ 
+ 
+96 
+PFLineP4_L
+P 
+PF limit line point 4 
+load percent 
+W 
+0-255 
+perce
+nt 
+ 
+255 
+means 
+no 
+this 
+point 
+97 
+PFLineP4_P
+F 
+PF limit line point 4 
+power factor 
+W 
+0-20000 
+ 
+ 
+ 
+98 
+LCMDTest 
+Local command test  W 
+1 to test 
+ 
+ 
+ 
+99 
+PFModel 
+Set PF function 
+Model 
+W 
+0: PF=1 
+1: PF by set 
+2: default PF 
+line 
+3: User PF 
+line  
+4：
+UnderExcite
+d (Inda) 
+Reactive 
+Power 
+5：
+OverExcited(
+Capa) 
+Reactive 
+Power 
+6：
+Q(v)model 
+ 
+ 
+ 
+ 
+100 
+FLrate 
+Frequency – load 
+limit rate 
+W 
+0-100 
+10tim
+es 
+ 
+ 
+101 
+PFAdj1 
+PF adjust value 1 
+ 
+4096 is 1 
+ 
+ 
+Reserved 
+102 
+PFAdj2 
+PF adjust value 2 
+ 
+4096 is 1 
+ 
+ 
+Reserved 
+103 
+PFAdj3 
+PF adjust value 3 
+ 
+4096 is 1 
+ 
+ 
+Reserved 
+104 
+PFAdj4 
+PF adjust value 4 
+ 
+4096 is 1 
+ 
+ 
+Reserved 
+105 
+PFAdj5 
+PF adjust value 5 
+ 
+4096 is 1 
+ 
+ 
+Reserved 
+106 
+PFAdj6 
+PF adjust value 6 
+ 
+4096 is 1 
+ 
+ 
+Reserved 
+
+=== PAGE 16 ===
+                                                         16 / 32 
+ 
+格瑞特新能源有限公司 
+中国深圳市宝安区西乡街道西成工
+业区12 栋 邮编518102 
+Tel: 86 755 27471063  
+info@ginverter.com  
+www.ginverter.com  
+GROWATT NEW ENERGY CO.,LTD 
+No. 12 Building, Xicheng Industrial 
+Zone, Bao'an District, Shenzhen 
+518102, China.
+107 
+LVFRTenabl
+e 
+Low Voltage Fault 
+Ride Through enable 
+W 
+0 or 1 
+ 
+ 
+ 
+108 
+V1S 
+CEI021 V1S Q(v) 
+W 
+V1S<V2S 
+0.1V 
+ 
+ 
+109 
+V2S 
+CEI021 V2S Q(v) 
+W 
+ 
+0.1V 
+ 
+ 
+110 
+V1L 
+CEI021 V1L Q(v) 
+W 
+V1L<V1S 
+0.1V 
+ 
+ 
+111 
+V2L 
+CEI021 V2L Q(v) 
+W 
+V2L<V1L 
+0.1V 
+ 
+ 
+112 
+U10min 
+Volt protection for 
+10 min 
+W 
+ 
+0.1V 
+1.1Vn 
+ 
+113 
+Qlockinpow
+er 
+Q(v) lock in active 
+power of CEI021 
+W 
+0-100 
+Perce
+nt 
+ 
+ 
+114 
+LIGridV 
+Lock in gird volt of 
+CEI021 PF line 
+W 
+nVn 
+0.1V 
+ 
+ 
+115 
+LOGridV 
+Lock out gird volt of 
+CEI021 PF line 
+W 
+nVn 
+0.1V 
+ 
+ 
+116 
+6KwSystem 
+Above 6KwSystem 
+for CEI021 
+W 
+0 or 1 
+ 
+ 
+ 
+117 
+FrequencyD
+eratingEnab
+le 
+Frequency Derating 
+Enable  
+W 
+0 or 1 
+ 
+1 
+ 
+118 
+QlockOutpo
+wer 
+Q(v) lock Out active 
+power of CEI021 
+W 
+0-100 
+Perce
+nt 
+ 
+ 
+119 
+RestartDela
+yTime 
+Restart Delay Time 
+after fault back; 
+W 
+ 
+s 
+ 
+ 
+120 
+ReactiveRat
+e 
+Reactive Rate in 
+LVFRT 
+W 
+0-100 
+ 
+2 
+ 
+121 
+LVFRT_LV1 
+LVFRT low fault 
+value 1 
+W 
+ 
+0.1V 
+ 
+ 
+122 
+LVFRT_LT1 
+LVFRT low fault time 
+1 
+W 
+ 
+1ms 
+ 
+ 
+123 
+LVFRT_LV2 
+LVFRT low fault 
+value 2 
+W 
+ 
+0.1V 
+ 
+ 
+124 
+LVFRT_LT2 
+LVFRT low fault time 
+2 
+W 
+ 
+1ms 
+ 
+ 
+125 
+LVFRT_LV3 
+LVFRT low fault 
+value 3 
+W 
+ 
+0.1V 
+ 
+ 
+126 
+LVFRT_LT3 
+LVFRT low fault time 
+3 
+W 
+ 
+1ms 
+ 
+ 
+127 
+LVFRT_LV4 
+LVFRT low fault 
+value 4 
+W 
+ 
+0.1V 
+ 
+ 
+128 
+LVFRT_LT4 
+LVFRT low fault time 
+4 
+W 
+ 
+1ms 
+ 
+ 
+129 
+LVFRT_HV1 
+LVFRT high fault 
+value 1 
+W 
+ 
+0.1V 
+ 
+ 
+
+=== PAGE 17 ===
+                                                         17 / 32 
+ 
+格瑞特新能源有限公司 
+中国深圳市宝安区西乡街道西成工
+业区12 栋 邮编518102 
+Tel: 86 755 27471063  
+info@ginverter.com  
+www.ginverter.com  
+GROWATT NEW ENERGY CO.,LTD 
+No. 12 Building, Xicheng Industrial 
+Zone, Bao'an District, Shenzhen 
+518102, China.
+130 
+LVFRT_HT1 
+LVFRT high fault 
+time 1 
+W 
+ 
+1ms 
+ 
+ 
+131 
+wPowerRest
+artSlopeEE 
+Power restart slope 
+W 
+1-1000 
+0.1% 
+ 
+ 
+132 
+wLoadDerat
+eStartVolt 
+Load derate start ac 
+voltage 
+ 
+1.05Vn~1.2V
+n 
+0.1V 
+ 
+ 
+135 
+SpecPasswo
+rdType 
+Unlock or set 
+Specpassword 
+W 
+0:unlock ,au
+to lock in 5 
+minute; 
+1:change pw 
+(should 
+unlock 
+first)，  
+2：lock, 
+&*7 
+ 
+2 
+ 
+136 
+SpecPasswo
+rd3 
+SpecPassword3 
+W 
+For the spec 
+setting 
+change 
+ASCII 
+XX 
+ 
+137 
+SpecPasswo
+rd2 
+SpecPassword2 
+W 
+.. 
+ASCII 
+XX 
+ 
+138 
+SpecPasswo
+rd1 
+SpecPassword1 
+W 
+.. 
+ASCII 
+XX 
+ 
+139 
+GTsetModel 
+ 
+ 
+ 
+ 
+ 
+Reserved 
+140 
+GFCI_old 
+GFCI Module type 
+ 
+0 or 1, 1 is 
+old 
+ 
+ 
+Reserved 
+141 
+DCIshift 
+DCI offset 
+ 
+Center 
+is 
+30000 
+ 
+ 
+Reserved 
+142 
+DCIAdj 
+DCI adjust 
+ 
+Center 
+is 
+2000 
+ 
+ 
+Reserved 
+143 
+Fast 
+MPPT 
+enable 
+About Fast mppt 
+ 
+0,1,2 
+ 
+0 
+Reserved 
+144 
+IslandDisabl
+e 
+IslandDisable 
+W 
+0,1 
+ 
+0 
+Reserved 
+145 
+IniEEPROM 
+IniEEPROM 
+W 
+0xFF 
+ 
+ 
+Reserved 
+146 
+Balance 1 
+Phaseflag|ErrorCod
+e 
+W 
+ 
+ 
+ 
+Reserved 
+147 
+Balance 2 
+Power H 
+W 
+ 
+ 
+ 
+Reserved 
+148 
+Balance 3 
+Power L 
+W 
+ 
+ 
+ 
+Reserved 
+149 
+bHighACVD
+erateSlope 
+High ac voltage load 
+derating slope 
+W 
+20 
+0-100 
+ 
+ 
+150 
+StartFanChe
+ck 
+Start Fan Check 
+W 
+1 
+ 
+ 
+ 
+151 
+EnableNLin
+Enable N Line of grid 
+W 
+1 
+ 
+ 
+ 
+
+=== PAGE 18 ===
+                                                         18 / 32 
+ 
+格瑞特新能源有限公司 
+中国深圳市宝安区西乡街道西成工
+业区12 栋 邮编518102 
+Tel: 86 755 27471063  
+info@ginverter.com  
+www.ginverter.com  
+GROWATT NEW ENERGY CO.,LTD 
+No. 12 Building, Xicheng Industrial 
+Zone, Bao'an District, Shenzhen 
+518102, China.
+e 
+152 
+SimilarPVTr
+acker 
+Similar PV strings for 
+two trackers 
+W 
+1 
+ 
+ 
+ 
+153 
+wCheckHar
+dware 
+ 
+wCheckHardware 
+ 
+W 
+ 
+ 
+ 
+ 
+154 
+BlaneceMo
+del 
+BlaneceModel 
+W 
+1-3 
+ 
+ 
+ 
+155 
+BalencePha
+se 
+BalencePhase 
+W 
+1-3 
+ 
+ 
+ 
+156 
+DCIshift2 
+DCI offset 2 
+W 
+Center 
+is 
+30000 
+ 
+ 
+Reserved 
+157 
+DCIshift3 
+DCI offset 3 
+W 
+Center 
+is 
+30000 
+ 
+ 
+Reserved 
+158 
+EnergyLimit
+Enable 
+Output 
+Energy 
+Limit Enable 
+R 
+1 is enable 
+ 
+ 
+Reserved 
+159 
+EnergyRem
+ain H 
+Output 
+Energy 
+Limit value High 
+W 
+0.1kWh 
+ 
+ 
+Reserved 
+160 
+EnergyRem
+ain L 
+Output 
+Energy 
+Limit value low 
+W 
+0.1kWh 
+ 
+ 
+Reserved 
+161 
+BLVersion1 
+Boot 
+loader 
+version1 
+R 
+ 
+ 
+ 
+Reserved 
+162 
+BLVersion2 
+Boot 
+loader 
+version2 
+R 
+ 
+ 
+ 
+Reserved 
+163 
+TrakerMode
+l 
+2 Traker Model  
+W 
+0,1,2 
+ 
+ 
+Reserved 
+164 
+PMcheck 
+Growatt Resaved 
+W 
+ 
+ 
+ 
+Reserved 
+165 
+QVRPDelayT
+imeEE 
+QV Reactive Power 
+delaytime 
+W 
+0-30 
+1S 
+3S 
+ 
+166 
+OverFDerat
+DelayTimeE
+E 
+Overfrequency  der
+ating delaytime 
+W 
+0-20 
+50ms 
+0 
+ 
+167 
+SoftstartFla
+g 
+Softstart enable for 
+Australia spec 
+W 
+0: Disable 
+1: enable 
+ 
+1 
+ 
+168 
+QPercentM
+ax  
+Qmax for Q(V) curve 
+W 
+0-1000 
+0.1% 
+ 
+ 
+169 
+DRMSEn 
+DRMS enable for 
+Australia spec 
+W 
+0: Disable 
+1: enable 
+ 
+0 
+ 
+170 
+PowerVoltF
+uncEn 
+Enable 
+PowerVoltFuntion 
+for SAA Spec 
+W 
+0: Disable 
+1: enable 
+ 
+1 
+ 
+171 
+INVWorkMo
+de 
+INV work mode set 
+W 
+0:default 
+1:CV Mode 
+ 
+0 
+ 
+
+=== PAGE 19 ===
+                                                         19 / 32 
+ 
+格瑞特新能源有限公司 
+中国深圳市宝安区西乡街道西成工
+业区12 栋 邮编518102 
+Tel: 86 755 27471063  
+info@ginverter.com  
+www.ginverter.com  
+GROWATT NEW ENERGY CO.,LTD 
+No. 12 Building, Xicheng Industrial 
+Zone, Bao'an District, Shenzhen 
+518102, China.
+2:CC Mode 
+3:CP Mode 
+172 
+PV1VoltSet 
+pv1 voltage set 
+when CV Mode 
+was chosed  
+W 
+StartPVVolt-
+HighPVVolt 
+ 
+ 
+ 
+173 
+PV2VoltSet 
+Pv2 voltage set 
+when CV Mode 
+was chosed  
+W 
+StartPVVolt-
+HighPVVolt 
+ 
+ 
+ 
+174 
+BT1CurrRef
+Set 
+BT1 current set 
+when CC Mode 
+was chosed  
+W 
+0-MaxBTCur
+rent 
+ 
+ 
+ 
+175 
+BT2CurrRef
+Set 
+BT2current set 
+when CC Mode 
+was chosed  
+W 
+0-MaxBTCur
+rent 
+ 
+ 
+ 
+176 
+WattACVRe
+coverDelayT
+ime 
+Delay 
+time 
+for 
+power 
+recovering 
+when 
+ac 
+voltage 
+getting normal 
+W 
+3-90S 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+180 
+DHCP 
+Disable 
+Disable LAN DHCP 
+W 
+ 
+1:Disable 
+DHCP; 
+0:Enable 
+DHCP; 
+ 
+ 
+ 
+181 
+HostIP H 
+LAN 
+Local 
+IP 
+part1&part2 
+W 
+ part1*256+
+part2 
+ 
+ 
+ 
+182 
+HostIP L 
+LAN 
+Local 
+IP 
+part3&part4 
+W 
+ part3*256+
+part4 
+ 
+ 
+ 
+183 
+PV Voltage 
+High  Fault  
+PV 
+Voltage 
+High  Fault  
+W 900V~10000
+V 
+0.1V 
+ 
+ 
+184 
+Vac low 3 
+Grid 
+voltage 
+low 
+limit protect 3 
+W 
+ 
+0.1V 
+ 
+ 
+185 
+Vac high 3 
+Grid voltage high 
+limit protect 3 
+W 
+ 
+0.1V 
+ 
+ 
+186 
+Vac 
+low3 
+time 
+Grid 
+voltage 
+low 
+limit protect time 
+3 
+W 9 
+Cycle 
+ 
+ 
+187 
+Vac 
+high3 
+time 
+Grid voltage high 
+limit protect time 
+3 
+W 9 
+Cycle 
+ 
+ 
+188 
+Fac low 3 
+Grid frequency low 
+limit protect 3 
+W 5600-6000 
+0.01H
+z 
+ 
+ 
+189 
+Fac high 3 
+Grid frequency high 
+W 6000-6400 
+0.01H
+ 
+ 
+
+=== PAGE 20 ===
+                                                         20 / 32 
+ 
+格瑞特新能源有限公司 
+中国深圳市宝安区西乡街道西成工
+业区12 栋 邮编518102 
+Tel: 86 755 27471063  
+info@ginverter.com  
+www.ginverter.com  
+GROWATT NEW ENERGY CO.,LTD 
+No. 12 Building, Xicheng Industrial 
+Zone, Bao'an District, Shenzhen 
+518102, China.
+limit protect 3 
+z 
+190 
+Fac 
+low3 
+time 
+Grid frequency low 
+limit protect time 
+3 
+W 119-17999 
+Cycle 
+ 
+ 
+191 
+Fac 
+high3 
+time 
+Grid frequency high 
+limit protect time 
+3 
+W 9-599 
+Cycle 
+ 
+ 
+192 
+ubNToGND
+DetectBit 
+Dis/enable 
+N 
+to 
+GND 
+detect 
+functhion 
+W 
+1:enable 
+0:disable 
+Cycle 
+1 
+ 
+193 
+uwEnableSp
+ecSet 
+Dis/enable 
+appointed 
+spec 
+setting  
+W 
+1:enable 
+0:disable 
+Binary 
+0x000
+0 
+Bit 
+0: 
+Hungary 
+194 
+NonStdVacE
+nable 
+Enable/Disable  
+Nonstandard 
+AC voltage range  
+w 
+0-1; 
+0:Disable; 
+1:Enable; 
+ 
+0 
+0:Disable
+ Nonstan
+dard 
+AC voltag
+e range; 
+1:Enable 
+Nonstand
+ard 
+AC voltag
+e range; 
+195 
+ServerIP H 
+ServerIP 
+part1&part2 
+W 
+ part1*256+
+part2 
+ 
+192*
+256+
+168 
+192.168 
+196 
+ServerIP L 
+ServerIP 
+part3&part4 
+W 
+ part3*256+
+part4 
+ 
+3*25
+6+35 
+3.35 
+197 
+TxDataInter
+val 
+TxDataInterval 
+W 
+ 1~600 
+0.1 
+mins 
+50 
+5mins 
+198 
+ChkCode 
+NO.1 
+Datalogger Check 
+Code 1 
+R 
+ 
+ASCII 
+ 
+ 
+199 
+ChkCode 
+NO.2 
+Datalogger Check 
+Code 2 
+R 
+ 
+ASCII 
+ 
+ 
+200 
+ChkCode 
+NO.3 
+Datalogger Check 
+Code 3 
+R 
+ 
+ASCII 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+859 
+bISLDShiftD
+eltaEE 
+Growatt Resaved 
+W 
+ 
+ 
+ 
+Reserved 
+860 
+bLowPointe
+r 
+Growatt Resaved 
+W 
+ 
+ 
+ 
+Reserved 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+
+=== PAGE 21 ===
+                                                         21 / 32 
+ 
+格瑞特新能源有限公司 
+中国深圳市宝安区西乡街道西成工
+业区12 栋 邮编518102 
+Tel: 86 755 27471063  
+info@ginverter.com  
+www.ginverter.com  
+GROWATT NEW ENERGY CO.,LTD 
+No. 12 Building, Xicheng Industrial 
+Zone, Bao'an District, Shenzhen 
+518102, China.
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+4.2 Input Reg  
+(Some of input Registers can be wrote by Manufacturer, write address offset is 0x1000, start at 
+0x1000.  can not be wrote by customer.) 
+Reg
+iste
+r 
+NO. 
+Variable Name 
+Description 
+Value  
+Unit 
+Note 
+00 
+Inverter Status 
+Inverter run state 
+0:waiting, 
+1:normal, 
+3:fault 
+ 
+ 
+01 
+Ppv H 
+Input power (high) 
+ 
+0.1W 
+ 
+02 
+Ppv L 
+Input power (low) 
+ 
+0.1W 
+ 
+03 
+Vpv1 
+PV1 voltage 
+ 
+0.1V 
+ 
+04 
+PV1Curr 
+PV1 input current 
+ 
+0.1A 
+ 
+05 
+PV1Watt H 
+PV1 input watt (high) 
+ 
+0.1W 
+ 
+06 
+PV1Watt L 
+PV1 input watt (low) 
+ 
+0.1W 
+ 
+07 
+Vpv2 
+PV2 voltage 
+ 
+0.1V 
+ 
+08 
+PV2Curr 
+PV2 input current 
+ 
+0.1A 
+ 
+09 
+PV2Watt H 
+PV2 input watt (high) 
+ 
+0.1W 
+ 
+10 
+PV2Watt L 
+PV2 input watt (low) 
+ 
+0.1W 
+ 
+11 
+Pac H 
+Output power (high) 
+ 
+0.1W 
+ 
+12 
+Pac L 
+Output power (low) 
+ 
+0.1W 
+ 
+13 
+Fac 
+Grid frequency 
+ 
+0.01
+Hz 
+ 
+14 
+Vac1 
+Three/single phase grid 
+voltage 
+ 
+0.1V 
+ 
+15 
+Iac1 
+Three/single phase grid 
+output current 
+ 
+0.1A 
+ 
+16 
+Pac1 H 
+Three/single phase grid 
+output watt (high) 
+ 
+0.1V
+A 
+ 
+17 
+Pac1 L 
+Three/single phase grid 
+output watt (low) 
+ 
+0.1V
+A 
+ 
+18 
+Vac2 
+Three phase grid voltage 
+ 
+0.1V 
+ 
+19 
+Iac2 
+Three phase grid output 
+current 
+ 
+0.1A 
+ 
+20 
+Pac2 H 
+Three phase grid output 
+power (high) 
+ 
+0.1V
+A 
+ 
+21 
+Pac2 L 
+Three phase grid output 
+power (low) 
+ 
+0.1V
+A 
+ 
+22 
+Vac3 
+Three phase grid voltage 
+ 
+0.1V 
+ 
+
+=== PAGE 22 ===
+                                                         22 / 32 
+ 
+格瑞特新能源有限公司 
+中国深圳市宝安区西乡街道西成工
+业区12 栋 邮编518102 
+Tel: 86 755 27471063  
+info@ginverter.com  
+www.ginverter.com  
+GROWATT NEW ENERGY CO.,LTD 
+No. 12 Building, Xicheng Industrial 
+Zone, Bao'an District, Shenzhen 
+518102, China.
+23 
+Iac3 
+Three phase grid output 
+current 
+ 
+0.1A 
+ 
+24 
+Pac3 H 
+Three phase grid output 
+power (high) 
+ 
+0.1V
+A 
+ 
+25 
+Pac3 L 
+Three phase grid output 
+power (low) 
+ 
+0.1V
+A 
+ 
+26 
+Energy today H 
+Today 
+generate 
+energy 
+(high) 
+ 
+0.1K
+WH 
+ 
+27 
+Energy today L 
+Today 
+generate 
+energy 
+today (low) 
+ 
+0.1K
+WH 
+ 
+28 
+Energy total H 
+Total 
+generate 
+energy 
+(high) 
+ 
+0.1K
+WH 
+ 
+29 
+Energy total L 
+Total 
+generate 
+energy 
+(low) 
+ 
+0.1K
+WH 
+ 
+30 
+Time total H 
+Work time total (high) 
+ 
+0.5S 
+ 
+31 
+Time total L 
+Work time total (low) 
+ 
+0.5S 
+ 
+32 
+Temperature 
+Inverter temperature 
+ 
+0.1C 
+ 
+33 
+ISO fault Value 
+ISO Fault value 
+ 
+0.1V 
+ 
+34 
+GFCI fault Value 
+GFCI fault Value 
+ 
+1mA 
+ 
+35 
+DCI fault Value 
+DCI fault Value 
+ 
+0.01
+A 
+ 
+36 
+Vpv fault Value 
+PV voltage fault value 
+ 
+0.1V 
+ 
+37 
+Vac fault Value 
+AC voltage fault value 
+ 
+0.1V 
+ 
+38 
+Fac fault Value 
+AC frequency fault value 
+ 
+0.01 
+Hz 
+ 
+39 
+Temperature 
+fault Value 
+Temperature fault value 
+ 
+0.1C 
+ 
+40 
+Fault code 
+Inverter fault bit 
+&*1 
+ 
+ 
+41 
+IPM Temperature 
+The inside IPM in inverter 
+Temperature 
+ 
+0.1C 
+ 
+42 
+P Bus Voltage 
+P Bus inside  Voltage 
+ 
+0.1V 
+ 
+43 
+N Bus Voltage 
+N Bus inside Voltage 
+ 
+0.1V 
+ 
+44 
+Check Step 
+Product check step 
+ 
+ 
+Reserved 
+45 
+IPF 
+Inverter output PF now 
+0-20000 
+ 
+ 
+46 
+ResetCHK 
+Reset check data 
+1 to reset 
+ 
+Reserved 
+47 
+DeratingMode 
+DeratingMode 
+0:no 
+deratring; 
+1:PV; 
+2:; 
+3:Vac; 
+4:Fac; 
+5:Tboost; 
+6:Tinv; 
+ 
+“*”is 
+Reserved 
+
+=== PAGE 23 ===
+                                                         23 / 32 
+ 
+格瑞特新能源有限公司 
+中国深圳市宝安区西乡街道西成工
+业区12 栋 邮编518102 
+Tel: 86 755 27471063  
+info@ginverter.com  
+www.ginverter.com  
+GROWATT NEW ENERGY CO.,LTD 
+No. 12 Building, Xicheng Industrial 
+Zone, Bao'an District, Shenzhen 
+518102, China.
+7:Control; 
+8:*LoadSpee
+d; 
+9:*OverBackB
+yTime; 
+48 
+Epv1_today H 
+PV Energy today 
+ 
+ 
+ 
+49 
+Epv1_today L 
+PV Energy today 
+ 
+0.1k
+Wh 
+ 
+50 
+Epv1_total H 
+PV Energy total 
+ 
+ 
+ 
+51 
+Epv1_total L 
+PV Energy total 
+ 
+0.1k
+Wh 
+ 
+52 
+Epv2_today H 
+PV Energy today 
+ 
+ 
+ 
+53 
+Epv2_today L 
+PV Energy today 
+ 
+0.1k
+Wh 
+ 
+54 
+Epv2_total H 
+PV Energy total 
+ 
+ 
+ 
+55 
+Epv2_total L 
+PV Energy total 
+ 
+0.1k
+Wh 
+ 
+56 
+Epv_total H 
+PV Energy total 
+ 
+ 
+ 
+57 
+Epv_total L 
+PV Energy total 
+ 
+0.1k
+Wh 
+ 
+58 
+Rac H 
+AC Reactive power 
+ 
+ 
+ 
+59 
+Rac L 
+AC Reactive power 
+ 
+0.1Va
+r 
+ 
+60 
+E_rac_today H 
+AC Reactive energy 
+ 
+ 
+ 
+61 
+E_rac_today L 
+AC Reactive energy 
+ 
+0.1kV
+arh 
+ 
+62 
+E_rac_total H 
+AC Reactive energy 
+ 
+ 
+ 
+63 
+E_rac_ total L 
+AC Reactive energy 
+ 
+0.1kV
+arh 
+ 
+64 
+WarningCode 
+Warning Code 
+&*8 
+ 
+ 
+65 
+WarningValue1 
+Warning Value of slave 
+CPU 
+ 
+ 
+ 
+66 
+RealOPPercent 
+RealOPPercent 
+ 
+1% 
+ 
+67 
+OPFullwatt H 
+Out put full load watt high 
+ 
+ 
+ 
+68 
+OPFullwatt L 
+Out put full load watt low 
+ 
+0.1W 
+ 
+69 
+WarningValue2 
+Warning Value of main 
+CPU 
+PV1ShortCirc
+uit: 0x0001 
+PV2ShortCirc
+uit: 0x0002 
+BT1DriverFaul
+t: 0x0004 
+BT2DriverFaul
+t: 0x0008 
+ 
+ 
+
+=== PAGE 24 ===
+                                                         24 / 32 
+ 
+格瑞特新能源有限公司 
+中国深圳市宝安区西乡街道西成工
+业区12 栋 邮编518102 
+Tel: 86 755 27471063  
+info@ginverter.com  
+www.ginverter.com  
+GROWATT NEW ENERGY CO.,LTD 
+No. 12 Building, Xicheng Industrial 
+Zone, Bao'an District, Shenzhen 
+518102, China.
+ 
+70 
+V _String1 
+PV String1 voltage 
+ 
+0.1V 
+ 
+71 
+Curr _String1 
+PV String1 current 
+-15A~15A 
+0.1A 
+ 
+72 
+V _String2 
+PV String2 voltage 
+ 
+0.1V 
+ 
+73 
+Curr _String2 
+PV String2 current 
+-15A~15A 
+0.1A 
+ 
+74 
+V _String3 
+PV String3 voltage 
+ 
+0.1V 
+ 
+75 
+Curr _String3 
+PV String3 current 
+-15A~15A 
+0.1A 
+ 
+76 
+V _String4 
+PV String4 voltage 
+ 
+0.1V 
+ 
+77 
+Curr _String4 
+PV String4 current 
+-15A~15A 
+0.1A 
+ 
+78 
+V _String5 
+PV String5 voltage 
+ 
+0.1V 
+ 
+79 
+Curr _String5 
+PV String5 current 
+-15A~15A 
+0.1A 
+ 
+80 
+V _String6 
+PV String6voltage 
+ 
+0.1V 
+ 
+81 
+Curr _String6 
+PV String6 current 
+-15A~15A 
+0.1A 
+ 
+82 
+V _String7 
+PV String7 voltage 
+ 
+0.1V 
+ 
+83 
+Curr _String7 
+PV String7 current 
+-15A~15A 
+0.1A 
+ 
+84 
+V _String8 
+PV String8 voltage 
+ 
+0.1V 
+ 
+85 
+Curr _String8 
+PV String8 current 
+-15A~15A 
+0.1A 
+ 
+86 
+StrFault 
+0~16 
+&*1 
+ 
+ 
+87 
+StrWarning 
+0~16 
+&*1 
+ 
+ 
+88 
+StrBreak 
+Bit0~7: 
+String1~8 
+disconnect 
+Bit8~15: Reserved 
+&*1 
+ 
+ 
+89 
+PIDFaultCode 
+0~16 
+&*1 
+ 
+ 
+90 
+Grid Fault record 
+1 - code 
+Grid Fault record 1 - code 
+ 
+ 
+ 
+91 
+Grid Fault record 
+1 - year| month 
+Grid Fault record 1 - year| 
+month 
+Year offset is 
+2000 
+ 
+ 
+92 
+Grid Fault record 
+1 - day| hour 
+Grid Fault record 1 - day| 
+hour 
+ 
+ 
+ 
+93 
+Grid Fault record 
+1 - min| sec 
+Grid Fault record 1 - min| 
+sec 
+ 
+ 
+ 
+94 
+Grid Fault record 
+1-value 
+Grid Fault record 1-value 
+&*2 
+ 
+ 
+95 
+Grid Fault record 
+2 - code 
+Grid Fault record 2 - code 
+ 
+ 
+ 
+96 
+Grid Fault record 
+2 - year| month 
+Grid Fault record 2 - year| 
+month 
+Year offset is 
+2000 
+ 
+ 
+97 
+Grid Fault record 
+2 - day| hour 
+Grid Fault record 2 - day| 
+hour 
+ 
+ 
+ 
+98 
+Grid Fault record 
+2 - min| sec 
+Grid Fault record 2 - min| 
+sec 
+ 
+ 
+ 
+99 
+Grid Fault record 
+2-value 
+Grid Fault record 2-value 
+ 
+ 
+ 
+
+=== PAGE 25 ===
+                                                         25 / 32 
+ 
+格瑞特新能源有限公司 
+中国深圳市宝安区西乡街道西成工
+业区12 栋 邮编518102 
+Tel: 86 755 27471063  
+info@ginverter.com  
+www.ginverter.com  
+GROWATT NEW ENERGY CO.,LTD 
+No. 12 Building, Xicheng Industrial 
+Zone, Bao'an District, Shenzhen 
+518102, China.
+100 
+Grid Fault record 
+3 - code 
+Grid Fault record 3 - code 
+ 
+ 
+ 
+101 
+Grid Fault record 
+3 - year| month 
+Grid Fault record 3 - year| 
+month 
+Year offset is 
+2000 
+ 
+ 
+102 
+Grid Fault record 
+3 - day| hour 
+Grid Fault record 3 - day| 
+hour 
+ 
+ 
+ 
+103 
+Grid Fault record 
+3 - min| sec 
+Grid Fault record 3 - min| 
+sec 
+ 
+ 
+ 
+104 
+Grid Fault record 
+3-value 
+Grid Fault record 3-value 
+ 
+ 
+ 
+105 
+Grid Fault record 
+4 - code 
+Grid Fault record 4 - code 
+ 
+ 
+ 
+106 
+Grid Fault record 
+4 - year| month 
+Grid Fault record 4 - year| 
+month 
+Year offset is 
+2000 
+ 
+ 
+107 
+Grid Fault record 
+4 - day| hour 
+Grid Fault record 4 - day| 
+hour 
+ 
+ 
+ 
+108 
+Grid Fault record 
+4 - min| sec 
+Grid Fault record 4 - min| 
+sec 
+ 
+ 
+ 
+109 
+Grid Fault record 
+4-value 
+Grid Fault record 4-value 
+ 
+ 
+ 
+110 
+Grid Fault record 
+5 - code 
+Grid Fault record 5 - code 
+ 
+ 
+ 
+111 
+Grid Fault record 
+5 - year| month 
+Grid Fault record 5 - year| 
+month 
+Year offset is 
+2000 
+ 
+ 
+112 
+Grid Fault record 
+5 - day| hour 
+Grid Fault record 5 - day| 
+hour 
+ 
+ 
+ 
+113 
+Grid Fault record 
+5 - min| sec 
+Grid Fault record 5 - min| 
+sec 
+ 
+ 
+ 
+114 
+Grid Fault record 
+5-value 
+Grid Fault record 5-value 
+ 
+ 
+ 
+115 
+PID PVA+ Voltage 
+PID PVAPE Volt 
+0V~1000V 
+0.1V 
+ 
+116 
+PID PVA+ Current 
+PID PVAPE Curr 
+-10mA~10mA 
+0.1A 
+ 
+117 
+PID Status  
+Bit0~7:PID Working Status 
+1:Wait Status 
+2:Normal Status 
+3:Fault Status 
+Bit8~15:Reverse 
+1~3 
+ 
+ 
+118 
+PID PVB+ Voltage 
+PID PVBPE Volt 
+0V~1000V 
+0.1V 
+ 
+119 
+PID PVB+ Current 
+PID PVBPE Curr 
+-10mA~10mA 
+0.1A 
+ 
+120 
+PV3 Voltage 
+PV3 input voltage 
+ 
+ 
+ 
+121 
+PV3 Current 
+PV3 input current 
+ 
+ 
+ 
+122 
+PV3Watt H 
+PV3 input watt (high) 
+ 
+ 
+ 
+123 
+PV3Watt L 
+PV3 input watt (low) 
+ 
+ 
+ 
+
+=== PAGE 26 ===
+                                                         26 / 32 
+ 
+格瑞特新能源有限公司 
+中国深圳市宝安区西乡街道西成工
+业区12 栋 邮编518102 
+Tel: 86 755 27471063  
+info@ginverter.com  
+www.ginverter.com  
+GROWATT NEW ENERGY CO.,LTD 
+No. 12 Building, Xicheng Industrial 
+Zone, Bao'an District, Shenzhen 
+518102, China.
+124 
+Epv3_today H 
+PV3 Energy today 
+ 
+ 
+ 
+125 
+Epv3_today L 
+PV3 Energy today 
+ 
+ 
+ 
+126 
+Epv3_total H 
+PV3 Energy total 
+ 
+ 
+ 
+127 
+Epv3_total L 
+PV3 Energy total 
+ 
+ 
+ 
+128 
+Faultcode H 
+Inverter fault code high 
+&*8 
+ 
+ 
+129 
+Faultcode L 
+Inverter fault code low 
+ 
+ 
+… 
+ 
+ 
+ 
+ 
+ 
+… 
+ 
+ 
+ 
+ 
+ 
+133 
+ 
+ 
+ 
+ 
+ 
+134 
+ 
+ 
+ 
+ 
+ 
+135 
+bTestProcess<<8 
+| bAutoTestStep 
+Auto test process or auto 
+test step 
+&*3 
+ 
+ 
+136 
+wAutoTestResult 
+Auto test result  
+&*4 
+ 
+ 
+137 
+cTestStepStop 
+Auto test stop step 
+&*4 
+ 
+ 
+138 
+0 
+0 
+ 
+0 
+ 
+139 
+Value Limit 
+Safety voltage/frequency 
+limit value  
+ 
+0.1V 
+ 
+140 
+Time Limit 
+Safety time limit value 
+ 
+1ms 
+ 
+141 
+Real value 
+Real voltage/frequency 
+value 
+ 
+0.1V 
+ 
+142 
+Test value 
+Auto testing  
+voltage/frequency  value 
+ 
+0.1V 
+ 
+143 
+Test treat value 
+Auto test 
+voltage/frequency  treat 
+value 
+ 
+0.1V 
+ 
+144 
+Test treat time 
+Auto test treat time 
+ 
+1ms 
+ 
+145 
+ 
+ 
+ 
+ 
+ 
+146 
+ 
+ 
+ 
+ 
+ 
+… 
+ 
+ 
+ 
+ 
+ 
+… 
+ 
+ 
+ 
+ 
+ 
+…. 
+ 
+ 
+ 
+ 
+ 
+178 
+ 
+ 
+ 
+ 
+ 
+179 
+ 
+ 
+ 
+ 
+ 
+180 
+Inverter 
+Error 
+record 1 - code 
+Inverter Error record 1 - 
+code 
+ 
+ 
+ 
+181 
+Inverter 
+Error 
+record 1 - year| 
+month 
+Inverter Error record 1 - 
+year| month 
+Year offset is 
+2000 
+ 
+ 
+182 
+Inverter 
+Error 
+record 1 - day| 
+hour 
+Inverter Error record 1 - 
+day| hour 
+ 
+ 
+ 
+183 
+Inverter 
+Error 
+record 1 - min| 
+Inverter Error record 1 - 
+min| sec 
+ 
+ 
+ 
+
+=== PAGE 27 ===
+                                                         27 / 32 
+ 
+格瑞特新能源有限公司 
+中国深圳市宝安区西乡街道西成工
+业区12 栋 邮编518102 
+Tel: 86 755 27471063  
+info@ginverter.com  
+www.ginverter.com  
+GROWATT NEW ENERGY CO.,LTD 
+No. 12 Building, Xicheng Industrial 
+Zone, Bao'an District, Shenzhen 
+518102, China.
+sec 
+184 
+Inverter 
+Error 
+record 1-value 
+Inverter 
+Error 
+record 
+1-value 
+ 
+ 
+ 
+185 
+Inverter 
+Error 
+record 2 - code 
+Inverter Error record 2 - 
+code 
+ 
+ 
+ 
+186 
+Inverter 
+Error 
+record 2 - year| 
+month 
+Inverter Error record 2 - 
+year| month 
+Year offset is 
+2000 
+ 
+ 
+187 
+Inverter 
+Error 
+record 2 - day| 
+hour 
+Inverter Error record 2 - 
+day| hour 
+ 
+ 
+ 
+188 
+Inverter 
+Error 
+record 2 - min| 
+sec 
+Inverter Error record 2 - 
+min| sec 
+ 
+ 
+ 
+189 
+Inverter 
+Error 
+record 2-value 
+Inverter 
+Error 
+record 
+2-value 
+ 
+ 
+ 
+190 
+Inverter 
+Error 
+record 2 - code 
+Inverter Error record 2 - 
+code 
+ 
+ 
+ 
+191
+-41
+9 
+Inverter 
+Error 
+record…… 
+Inverter Error record…… 
+ 
+ 
+ 
+420 
+Inverter 
+Error 
+record49 - code 
+Inverter Error record 49- 
+code 
+ 
+ 
+ 
+421 
+Inverter 
+Error 
+record49 - year| 
+month 
+Inverter Error record49 - 
+year| month 
+Year offset is 
+2000 
+ 
+ 
+422 
+Inverter 
+Error 
+record49 - day| 
+hour 
+Inverter Error record49 - 
+day| hour 
+ 
+ 
+ 
+423 
+Inverter 
+Error 
+record49 - min| 
+sec 
+Inverter Error record49 - 
+min| sec 
+ 
+ 
+ 
+424 
+Inverter 
+Error 
+record49-value 
+Inverter 
+Error 
+record49-value 
+ 
+ 
+ 
+425 
+Inverter 
+Error 
+record50 - code 
+Inverter Error record 50- 
+code 
+ 
+ 
+ 
+426 
+Inverter 
+Error 
+record50 - year| 
+month 
+Inverter Error record50 - 
+year| month 
+Year offset is 
+2000 
+ 
+ 
+427 
+Inverter 
+Error 
+record50 - day| 
+hour 
+Inverter Error record50 - 
+day| hour 
+ 
+ 
+ 
+428 
+Inverter 
+Error 
+record50 - min| 
+Inverter Error record50 - 
+min| sec 
+ 
+ 
+ 
+
+=== PAGE 28 ===
+                                                         28 / 32 
+ 
+格瑞特新能源有限公司 
+中国深圳市宝安区西乡街道西成工
+业区12 栋 邮编518102 
+Tel: 86 755 27471063  
+info@ginverter.com  
+www.ginverter.com  
+GROWATT NEW ENERGY CO.,LTD 
+No. 12 Building, Xicheng Industrial 
+Zone, Bao'an District, Shenzhen 
+518102, China.
+sec 
+429 
+Inverter 
+Error 
+record50-value 
+Inverter 
+Error 
+record50-value 
+ 
+ 
+ 
+430 
+ 
+ 
+ 
+ 
+ 
+… 
+ 
+ 
+ 
+ 
+ 
+450 
+E_hour0 H 
+Energy hourly of this day 
+ 
+ 
+ 
+451 
+E_hour0 L 
+Energy hourly of this day 
+ 
+ 
+ 
+452 
+E_hour1 H 
+Energy hourly of this day 
+ 
+ 
+ 
+453 
+E_hour1 L 
+Energy hourly of this day 
+ 
+ 
+ 
+454 
+E_hour 
+… 
+ 
+ 
+ 
+… 
+E_hour 
+… 
+ 
+ 
+ 
+496 
+E_hour23 H 
+Energy hourly of this day 
+ 
+ 
+ 
+497 
+E_hour23 L 
+Energy hourly of this day 
+ 
+ 
+ 
+498 
+E_ day0 H 
+Energy of latest day 
+ 
+ 
+ 
+499 
+E_day0 L 
+Energy of latest day 
+ 
+ 
+ 
+500 
+E_ day1 H 
+Energy of latest 1st day 
+ 
+ 
+ 
+501 
+E_ day1 L 
+Energy of latest 1st day 
+ 
+ 
+ 
+502 
+E_ day 
+… 
+ 
+ 
+ 
+… 
+E_ day 
+… 
+ 
+ 
+ 
+510 
+E_ day 6 H 
+Energy of latest 6 th day 
+ 
+ 
+ 
+511 
+E_ day 6L 
+Energy of latest 6 th day 
+ 
+ 
+ 
+512 
+E_ month0 H 
+Energy of latest month 
+ 
+ 
+ 
+513 
+E_ month0 L 
+Energy of latest month 
+ 
+ 
+ 
+514 
+E_ month1 H 
+Energy of latest 1st month 
+ 
+ 
+ 
+515 
+E_ month1 L 
+Energy of latest 1st month 
+ 
+ 
+ 
+516 
+E_ month 
+… 
+ 
+ 
+ 
+… 
+E_ month 
+… 
+ 
+ 
+ 
+534 
+E_ month11 H 
+Energy of latest 11 th 
+month 
+ 
+ 
+ 
+535 
+E_ month11L 
+Energy of latest 11 th 
+month 
+ 
+ 
+ 
+536 
+E_ year0 H 
+Energy of latest year 
+ 
+ 
+ 
+537 
+E_ year 0 L 
+Energy of latest year 
+ 
+ 
+ 
+538 
+E_ year 1 H 
+Energy of latest 1st year 
+ 
+ 
+ 
+539 
+E_ year 1 L 
+Energy of latest 1st year 
+ 
+ 
+ 
+540 
+E_ year 
+… 
+ 
+ 
+ 
+… 
+E_ year 
+… 
+ 
+ 
+ 
+574 
+E_ year 19 H 
+Energy of latest 11 th year 
+ 
+ 
+ 
+575 
+E_ year19 L 
+Energy of latest 11 th year 
+ 
+ 
+ 
+…….
+. 
+ 
+ 
+ 
+ 
+ 
+630 
+Debug Resaved 
+Debug Resaved 
+ 
+ 
+Resaved 
+631 
+Debug Resaved 
+Debug Resaved 
+ 
+ 
+Resaved 
+
+=== PAGE 29 ===
+                                                         29 / 32 
+ 
+格瑞特新能源有限公司 
+中国深圳市宝安区西乡街道西成工
+业区12 栋 邮编518102 
+Tel: 86 755 27471063  
+info@ginverter.com  
+www.ginverter.com  
+GROWATT NEW ENERGY CO.,LTD 
+No. 12 Building, Xicheng Industrial 
+Zone, Bao'an District, Shenzhen 
+518102, China.
+…. 
+Debug Resaved 
+Debug Resaved 
+ 
+ 
+Resaved 
+674 
+Debug Resaved 
+Debug Resaved 
+ 
+ 
+Resaved 
+675 
+Fault info. 0 
+The fault code info. 0 
+ 
+ 
+Resaved 
+676 
+Fault info. 1 
+The fault code info. 1 
+ 
+ 
+Resaved 
+….. 
+Fault info. x 
+The fault code info. x 
+ 
+ 
+Resaved 
+706 
+Fault info. 31 
+The fault code info. 31 
+ 
+ 
+Resaved 
+…….
+. 
+ 
+ 
+ 
+ 
+ 
+720 
+Alarm info. 0 
+The Alarm code info. 0 
+ 
+ 
+Resaved 
+721 
+Alarm info. 1 
+The Alarm code info. 1 
+ 
+ 
+Resaved 
+….. 
+Alarm info. x 
+The Alarm code info. x 
+ 
+ 
+Resaved 
+751 
+Alarm info. 31 
+The Alarm code info. 31 
+ 
+ 
+Resaved 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+&*1:  Inverter fault code Bit: 
+Fault type value 
+Means(The message showed on the inverter when the inverter 
+has fault) 
+1~23 
+"    Error: 99+x ",   
+24 
+ 
+ 
+"Auto Test Failed", 
+ 
+25 
+ 
+ 
+"No AC Connection", 
+26 
+ 
+ 
+"PV Isolation Low", 
+27 
+ 
+ 
+" Residual I High", 
+28 
+ 
+ 
+" Output High DCI", 
+29 
+ 
+ 
+" PV Voltage High", 
+30 
+ 
+ 
+" AC V Outrange  ", 
+31 
+ 
+ 
+" AC F Outrange  ", 
+32 
+ 
+ 
+"   Module Hot   " 
+ 
+&*2:  The value is 0.1V when the fault is the voltage, is 0.01Hz when the fault is the frequency; 
+&*3:   
+High byte 
+value 
+Means 
+ 
+low byte 
+value 
+Means 
+0 
+Auto test stop 
+0 
+No test 
+1 
+Auto test starting  
+1 
+Testing grid volt high pro 
+2 
+Auto testing  
+2 
+Testing grid volt low pro 
+ 
+ 
+3 
+Testing grid frequency high 
+pro 
+ 
+ 
+4 
+Testing grid frequency low pro 
+ 
+ 
+ 
+ 
+&*4: The variable “wAutoTestResult” and “cTestStepStop”: wAutoTestResult is the step test time     
+
+=== PAGE 30 ===
+                                                         30 / 32 
+ 
+格瑞特新能源有限公司 
+中国深圳市宝安区西乡街道西成工
+业区12 栋 邮编518102 
+Tel: 86 755 27471063  
+info@ginverter.com  
+www.ginverter.com  
+GROWATT NEW ENERGY CO.,LTD 
+No. 12 Building, Xicheng Industrial 
+Zone, Bao'an District, Shenzhen 
+518102, China.
+    counter, when it reach cTestStepStop, this step test will stop and fail.  
+&*5: Inverter Model: A , could be show: “T0 Q0 PF U1 M5 S1” or “00F151” 
+ 
+ 
+ 
+ 
+ 
+Tx=(A&0XF00000)>>20 
+ 
+ 
+ 
+ 
+ 
+Qx=(A&0X0F0000)>>16 
+Px=(A&0x00F000)>>12  
+Ux=(A&0x000F00)>>8  
+Mx=(A&0x0000F0)>>4  
+Sx=(A&0x00000F) 
+&*6: DTC(Device type code) 
+ 
+ 
+Code 
+No. 
+Device type 
+Note 
+001xx 
+Inverter 
+1 tracker and 1phase Grid connect PV inverter TL 
+002xx 
+Inverter 
+2 tracker and 1phase Grid connect PV inverter TL 
+003xx 
+Inverter 
+1 tracker and 1phase Grid connect PV inverter HF 
+004xx 
+Inverter 
+2 tracker and 1phase Grid connect PV inverter HF 
+005xx 
+Inverter 
+1 tracker and 1phase Grid connect PV inverter LF 
+006xx 
+Inverter 
+2 tracker and 1phase Grid connect PV inverter LF 
+007xx 
+Inverter 
+1 tracker and 3phase Grid connect PV inverter TL 
+008xx 
+Inverter 
+2 tracker and 3phase Grid connect PV inverter TL 
+009xx 
+Inverter 
+1 tracker and 3phase Grid connect PV inverter LF 
+010xx 
+Inverter 
+2 tracker and 3phase Grid connect PV inverter LF 
+…… 
+ 
+ 
+10001 
+Data logger 
+RF-ShineVersion 
+10002 
+Data logger 
+Web-ShinePano 
+10003 
+Data logger 
+Web-ShineWebBox 
+10004 
+Data logger 
+WL-WIFI Module 
+…… 
+ 
+ 
+11001 
+Confluence box 
+Confluence box 1 
+…… 
+ 
+ 
+ 
+&*7: Grid network power control command password: 
+Inverter is in lock state after power on; change the power control by network command should unlock  
+ 
+inverter first; default pw is XXXXXX; 
+ 
+ 
+Unlock: send 0 to 3-135, then send password to 3-136~138; inverter will auto lock in 5min after  
+ 
+ 
+ 
+ 
+unlocked; 
+ 
+ 
+Change PW: unlock first, then send 1 to 3-135, then send new password to 3-136~138; 
+ 
+ 
+Lock: send 0 or 2 to 3-135; 
+ 
+ 
+
+=== PAGE 31 ===
+                                                         31 / 32 
+ 
+格瑞特新能源有限公司 
+中国深圳市宝安区西乡街道西成工
+业区12 栋 邮编518102 
+Tel: 86 755 27471063  
+info@ginverter.com  
+www.ginverter.com  
+GROWATT NEW ENERGY CO.,LTD 
+No. 12 Building, Xicheng Industrial 
+Zone, Bao'an District, Shenzhen 
+518102, China.
+ 
+&*8: Inverter fault code and warning code 
+Fault code 
+ 
+Warning code 
+0x00000001 
+\ 
+0x0001 
+Fan warning 
+0x00000002 
+Communication error 
+0x0002 
+String communication abnormal 
+0x00000004 
+\ 
+0x0004 
+StrPID config Warning 
+0x00000008 
+StrReverse or StrShort fault 
+0x0008 
+Fail to read EEPROM 
+0x00000010 
+Model Init fault 
+0x0010 
+DSP and COM firmware unmatch 
+0x00000020 
+Grid Volt Sample diffirent 
+0x0020 
+Fail to write EEPROM 
+0x00000040 
+ISO Sample diffirent 
+0x0040 
+SPD abnormal 
+0x00000080 
+GFCI Sample diffirent 
+0x0080 
+GND and N connect abnormal 
+0x00000100 
+\ 
+0x0100 
+PV1 or PV2 circuit short 
+0x00000200 
+\ 
+0x0200 
+PV1 or PV2 boost driver broken 
+0x00000400 
+\ 
+0x0400 
+\ 
+0x00000800 
+\ 
+0x0800 
+\ 
+0x00001000 
+AFCI Fault 
+0x1000 
+\ 
+0x00002000 
+\ 
+0x2000 
+\ 
+0x00004000 
+AFCI Module fault 
+0x4000 
+\ 
+0x00008000 
+\ 
+0x8000 
+\ 
+0x00010000 
+\ 
+ 
+ 
+0x00020000 
+Relay check fault 
+ 
+ 
+0x00040000 
+\ 
+ 
+ 
+0x00080000 
+\ 
+ 
+ 
+0x00100000 
+\ 
+ 
+ 
+0x00200000 
+Communication error 
+ 
+ 
+0x00400000 
+Bus Voltage error 
+ 
+ 
+0x00800000 
+AutoTest fail 
+ 
+ 
+0x01000000 
+No Utility 
+ 
+ 
+0x02000000 
+PV Isolation Low 
+ 
+ 
+0x04000000 
+Residual I High 
+ 
+ 
+0x08000000 
+Output High DCI 
+ 
+ 
+0x10000000 
+PV Voltage high 
+ 
+ 
+0x20000000 
+AC V Outrange 
+ 
+ 
+0x40000000 
+AC F Outrange 
+ 
+ 
+0x80000000 
+TempratureHigh 
+ 
+ 
+ 
+5 Set address 
+ 
+Refer to the Inverter user manual.  Always is : 
+ 
+Knock the pv inverter to let the lcd display to the “COM Addr: xxx”, then double knock, if 
+displays “Move”, you should another double knock, until it displays a address number, then you 
+
+=== PAGE 32 ===
+                                                         32 / 32 
+ 
+格瑞特新能源有限公司 
+中国深圳市宝安区西乡街道西成工
+业区12 栋 邮编518102 
+Tel: 86 755 27471063  
+info@ginverter.com  
+www.ginverter.com  
+GROWATT NEW ENERGY CO.,LTD 
+No. 12 Building, Xicheng Industrial 
+Zone, Bao'an District, Shenzhen 
+518102, China.
+can give a single knock to change the address, this address will be remembered when the lcd 
+backlight off. 
+ 
+6 Notice 
+ 1) It can drive mostly 32 pv inverters for one rs485 comport. 
+2) There are only read input and hold registers commands even the newest version. 
+ 3) App user could only care the input register. 
+ 4) App user could not care the holding registers. 
+ 5) Except the CEI0-21 and VDE-AR-N 4105 power management registers, you should refer the 
+manufactory’s suggestion when writing the other registers; 
+ 
+ 

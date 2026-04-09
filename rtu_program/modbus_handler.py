@@ -3005,15 +3005,22 @@ class ModbusHandlerSimulation:
         threading.Thread(target=scan_thread, daemon=True).start()
     
     def read_control_status(self):
-        """Read current control status (for H05 Body Type 13)"""
+        """Read current control status (for H05 Body Type 13).
+
+        Must return RAW register-scale values (not physical floats) to match
+        protocol_handler.create_h05_control_check which packs int() values
+        via '>HhHhH'. HAT/Serial handlers return raw values (pf/rp: -1000..1000,
+        ap: 0..1000); Simulation must match for parity.
+        """
         pf = self._power_factor if self._power_factor < 32768 else self._power_factor - 65536
-        
+        rp = self._reactive_power if self._reactive_power < 32768 else self._reactive_power - 65536
+
         return {
             'on_off': self._on_off,
-            'power_factor': pf / 1000.0,
+            'power_factor': pf,          # raw -1000..1000 (was pf/1000.0)
             'operation_mode': 0,
-            'reactive_power_pct': self._reactive_power / 10.0,  # %
-            'active_power_pct': self._power_limit / 10.0,  # %
+            'reactive_power_pct': rp,    # raw -1000..1000 (was rp/10.0 %)
+            'active_power_pct': self._power_limit,  # raw 0..1000 (was /10 %)
             'iv_scan_status': self._iv_scan_status  # 0=Idle, 1=Running, 2=Finished
         }
     

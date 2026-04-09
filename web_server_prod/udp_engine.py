@@ -143,6 +143,13 @@ class RTUState:
     _prev_seen: float = 0.0   # previous last_seen for interval calc
     rtu_info: dict = field(default_factory=dict)  # {model, phone, serial, firmware}
     dev_caps: dict = field(default_factory=dict)  # {dev_num: {iv_scan: bool, der_avm: bool}}
+    # Offline->online reconnect edge-detection flag.
+    # Set True by stale_rtu_checker when marking offline, checked+cleared
+    # atomically under engine._lock by _handle_h01_async to ensure the
+    # rtu_reconnect event is broadcast exactly once per reconnect cycle
+    # (fixes race where 13 concurrent H01 device handlers each fired
+    # rtu_reconnect because DB-based check saw 'offline' before any upsert).
+    _reconnect_pending: bool = False
 
 
 # ============================================================================

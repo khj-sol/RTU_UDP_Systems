@@ -186,8 +186,22 @@ def load_reference_patterns() -> Dict[str, Dict[int, str]]:
     → FC03 vs FC04 cross-table 충돌을 자동 회피.
     """
     patterns = {}
-    py_files = glob.glob(os.path.join(COMMON_DIR, '*_registers.py'))
-    for fpath in set(py_files):
+    # Prefer RTU's verified common/ over the model-maker scratch common/.
+    # If both contain the same protocol filename, RTU_COMMON_DIR wins so that
+    # hand-curated, ground-truth maps drive enrichment instead of stale auto
+    # outputs (which can self-poison via wrong addresses → cycle).
+    py_files: list = []
+    seen_basenames: set = set()
+    for _src in (RTU_COMMON_DIR, COMMON_DIR):
+        if not _src or not os.path.isdir(_src):
+            continue
+        for fp in glob.glob(os.path.join(_src, '*_registers.py')):
+            base = os.path.basename(fp)
+            if base in seen_basenames:
+                continue
+            seen_basenames.add(base)
+            py_files.append(fp)
+    for fpath in py_files:
         fname = os.path.basename(fpath)
         proto = fname.replace('_registers.py', '').lstrip('REF_')
         try:

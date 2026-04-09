@@ -182,9 +182,15 @@ async def _handle_h01_async(rtu_id: int, device_key: tuple, parsed: dict):
     # Upsert RTU in database + detect online recovery
     rtu_state = engine.rtu_registry.get(rtu_id)
     if rtu_state:
-        # Check if RTU was offline (reconnected without H05 restart)
-        rtu_db = await database.get_rtu(rtu_id)
-        if rtu_db and rtu_db.get('status') == 'offline':
+        # Atomic check+clear of the reconnect edge flag. Using an in-memory
+        # flag under engine._lock avoids the race where many concurrent H01
+        # device handlers each saw rtu_db status='offline' before any upsert
+        # completed, producing 13 rtu_reconnect broadcasts per batch.
+        with engine._lock:
+            was_pending = getattr(rtu_state, '_reconnect_pending', False)
+            if was_pending:
+                rtu_state._reconnect_pending = False
+        if was_pending:
             await database.save_event(rtu_id, "rtu_reconnect",
                 f"RTU resumed from {rtu_state.ip}:{rtu_state.port}")
             await ws_manager.broadcast({
@@ -405,6 +411,10 @@ async def _stale_rtu_checker():
                     if age > threshold and state.connected:
                         stale_ids.append((rtu_id, threshold))
                         state.connected = False
+                        # Arm reconnect edge-trigger so the next H01 emits
+                        # exactly one rtu_reconnect event (atomic check+clear
+                        # in _handle_h01_async under engine._lock).
+                        state._reconnect_pending = True
                     # Remove from memory after 2 hours offline (prevent unbounded growth)
                     elif age > 7200 and not state.connected:
                         remove_ids.append(rtu_id)

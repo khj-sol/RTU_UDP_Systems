@@ -1,0 +1,645 @@
+=== PAGE 1 ===
+NingboSunwaysTechnologiesCo.,Ltd.
+Sunways PV Inverter
+Modbus RTU Protocol
+Version 00.07
+Date 2023-7-6
+=== PAGE 2 ===
+NingboSunwaysTechnologiesCo.,Ltd.
+Copyright©NingbosunwaysTechnologiesCo.,Ltd.2020Allrightsreserved.
+Nopartofthisdocumentmaybereproducedortransmittedinanyformorbyanymeanswithout
+priorwrittenconsentofNingbosunwaysTechnologiesCo.,Ltd.
+Notice
+Theproducts,servicesorfeaturesyoupurchasearesubjecttothecommercialcontractsandterms
+ofNingboSunwaystechnologiesCo.,Ltd.Allorpartoftheproducts,servicesorfeatures
+describedinthisdocumentmaynotbewithinyourpurchasingorusingscope.Unlessotherwise
+agreedinthecontract,theCompanyshallnotmakeanyexpressorimplieddeclarationor
+guaranteeofthecontentsofthisdocument.
+Duetoproductversionupgradesorotherreasons,thecontentsofthisdocumentwillbeupdated
+periodically.Unlessotherwiseagreed,thisdocumentservesonlyasaguidetouse,andall
+statements,informationandrecommendationsinthisdocumentdonotconstituteanyexpressor
+implied guarantee.
+Manufacturer: NingboSunwaystechnologiesCo.,Ltd.
+Address: No.1,SecondRoad,GreenIndustrialZone,ChongshouTown,CixiCity,
+ZheJiangProvince,PEOPLE’SREPUBLICOFCHINA
+Website: www.sunways-tech.com
+ServiceMail: service@sunways-tech.com
+=== PAGE 3 ===
+NingboSunwaysTechnologiesCo.,Ltd.
+Change History
+Version Date Signature Notice
+00.01 20190918 Lee Initialrelease.
+00.02 20191013 Lee Addedsomeregisterdatadescription;
+Fixedsomedatatypeerrors;
+Deletedinvalidregisteraddress;
+Addedinverterstart-stopsettingregister
+00.03 20191025 Lee FinishedtheForm3.2,ModelId;
+00.04 20191029 Lee AddedP_AC
+00.05 20200731 Lee Updatedmodelinformation
+00.06 20211019 Neo Table3.1addregisterinformation;
+Table3.2addmodelinformation
+Table4.1addmodelinformation
+00.07 20230706 Hu
+=== PAGE 4 ===
+NingboSunwaysTechnologiesCo.,Ltd.
+Content
+1Introduction......................................................................................................................................1
+2CommunicationProtocolSummary................................................................................................2
+2.1PhysicalLayer......................................................................................................................2
+2.2DLL.......................................................................................................................................2
+2.2.1AddressingMode......................................................................................................2
+2.2.2FrameStructure.........................................................................................................2
+2.2.3DataCoding..............................................................................................................2
+2.2.4InteractiveProcess....................................................................................................3
+2.2.5CRCVerify................................................................................................................3
+2.3ApplicationLayer.................................................................................................................5
+2.3.1FunctionCode03(0x03)............................................................................................6
+2.3.2FunctionCode06(0x06)............................................................................................7
+2.3.3FunctionCode16(0x10)............................................................................................8
+3RegisterTable.................................................................................................................................9
+=== PAGE 5 ===
+SunwaysPVInverterModbus-RS485RTUProtocol
+1 Introduction
+Modbus-RTUprotocolisawidelyusedcommunicationprotocolinindustryandisacommon
+languageusedinelectricalcommunicationterminals.Throughthisprotocol,inverterscan
+communicatewitheachothervianetwork(suchasRS485bus)andotherdevices.Ithasbecomea
+universalindustrystandard.Withit,inverterequipmentmanufacturedbydifferentmanufacturers
+canbeconnectedintoanindustrialnetworkforcentralizedmonitoring.Theprotocoldescribes
+howthemasterandslavenodesaredefined,howthemasternodeaccessesotherdevicesbyusing
+variousrequestmethods,howtheslavenodesrespondtorequestsfromotherdevices,andhow
+bothpartiesdetectandrecorderrors.Itdefinesthemessagedomainpatternandthedatacontentin
+detail.
+Inthispaper,theModbusprotocoloftheSunwaysinverterisdescribedandexplained,which
+isusedtostandardizeandconstrainthesubsequentthird-partyintegrationdevelopmentand
+customization.
+Copyright©NingboSunwaysTechnologiesCo.,Ltd. 1
+=== PAGE 6 ===
+SunwaysPVInverterModbus-RS485RTUProtocol
+2 Communication Protocol Summary
+Modbuscommunicationprotocolincludesphysicallayer,datalinklayerandapplicationlayer.
+2.1 Physical Layer
+Communicatewithtwo-lineRS-485viaserialport.
+⚫
+Thebaudrateis9600.
+⚫
+AdoptRTUmodetransmission,asynchronousmode.
+⚫
+Onestartingbit.
+⚫
+Eightdatabits.
+⚫
+Noverification.
+⚫
+1stopbit.
+⚫
+2.2 DLL
+2.2.1AddressingMode
+Theprotocolsupportsunicastandbroadcast,andtheaddressassignmentrulesareasfollows:
+Broadcast SlaveNode
+Retain
+Address Address
+0 1~247 248~255
+2.2.2FrameStructure
+Address FunctionCode Data CRCCheckCode
+1byte 1byte 2*Nbytes 2bytes
+Note:
+Themaximumframelengthisnomorethan256bytes.
+⚫
+CRCcheckcodelowbytebefore,highbyteafter.
+⚫
+The definition ofallframe structures in this paper contains only the function codesand
+⚫
+datasections.
+2.2.3DataCoding
+Modbus uses a 'big-endian' to represent addresses and data items. This means that when
+sendingmorethanonebyte,themostsignificantbitissentfirst,suchas:
+Registersize Value
+Copyright©NingboSunwaysTechnologiesCo.,Ltd. 2
+=== PAGE 7 ===
+SunwaysPVInverterModbus-RS485RTUProtocol
+16bits 0xABCD
+Thefirstbytesentis0xABandthesecondbyteis0xCD.
+2.2.4InteractiveProcess
+Inanycase,thecommunicationprocessisinitiatedbythemasternodeandtheslavenodedoes
+notinitiatethecommunicationactively.
+In unicast mode, the slave node responds to the master node's command in a question-and-
+answer manner. If the master node does not receive a reply from the slave node within 5s, the
+communicationtimeoutisconsidered.
+Inbroadcastmode,theslavenodeonlyreceivescommandsissuedbythemasternodeanddoes
+notrespondtocommandframesissuedbythemasternode.
+2.2.5CRCVerify
+constINT8UauchCRCHi[256]={ 0x00,0xC1,0x81,0x40,0x01,0xC0,0x80,0x41,0x01,0xC0,
+0x80,0x41,0x00,0xC1,0x81,0x40,
+0x01, 0xC0, 0x80, 0x41, 0x00, 0xC1, 0x81, 0x40, 0x00, 0xC1, 0x81, 0x40,
+0x01,0xC0,0x80,0x41,
+0x01, 0xC0, 0x80, 0x41, 0x00, 0xC1, 0x81, 0x40, 0x00, 0xC1, 0x81, 0x40,
+0x01,0xC0,0x80,0x41,
+0x00, 0xC1, 0x81, 0x40, 0x01, 0xC0, 0x80, 0x41, 0x01, 0xC0, 0x80, 0x41,
+0x00,0xC1,0x81,0x40,
+0x01, 0xC0, 0x80, 0x41, 0x00, 0xC1, 0x81, 0x40, 0x00, 0xC1, 0x81, 0x40,
+0x01,0xC0,0x80,0x41,
+0x00, 0xC1, 0x81, 0x40, 0x01, 0xC0, 0x80, 0x41, 0x01, 0xC0, 0x80, 0x41,
+0x00,0xC1,0x81,0x40,
+0x00, 0xC1, 0x81, 0x40, 0x01, 0xC0, 0x80, 0x41, 0x01, 0xC0, 0x80, 0x41,
+0x00,0xC1,0x81,0x40,
+0x01, 0xC0, 0x80, 0x41, 0x00, 0xC1, 0x81, 0x40, 0x00, 0xC1, 0x81, 0x40,
+0x01,0xC0,0x80,0x41,
+0x01, 0xC0, 0x80, 0x41, 0x00, 0xC1, 0x81, 0x40, 0x00, 0xC1, 0x81, 0x40,
+0x01,0xC0,0x80,0x41,
+0x00, 0xC1, 0x81, 0x40, 0x01, 0xC0, 0x80, 0x41, 0x01, 0xC0, 0x80, 0x41,
+0x00,0xC1,0x81,0x40,
+0x00, 0xC1, 0x81, 0x40, 0x01, 0xC0, 0x80, 0x41, 0x01, 0xC0, 0x80, 0x41,
+0x00,0xC1,0x81,0x40,
+0x01, 0xC0, 0x80, 0x41, 0x00, 0xC1, 0x81, 0x40, 0x00, 0xC1, 0x81, 0x40,
+0x01,0xC0,0x80,0x41,
+0x00, 0xC1, 0x81, 0x40, 0x01, 0xC0, 0x80, 0x41, 0x01, 0xC0, 0x80, 0x41,
+0x00,0xC1,0x81,0x40,
+0x01, 0xC0, 0x80, 0x41, 0x00, 0xC1, 0x81, 0x40, 0x00, 0xC1, 0x81, 0x40,
+0x01,0xC0,0x80,0x41,
+Copyright©NingboSunwaysTechnologiesCo.,Ltd. 3
+=== PAGE 8 ===
+SunwaysPVInverterModbus-RS485RTUProtocol
+0x01, 0xC0, 0x80, 0x41, 0x00, 0xC1, 0x81, 0x40, 0x00, 0xC1, 0x81, 0x40,
+0x01,0xC0,0x80,0x41,
+0x00, 0xC1, 0x81, 0x40, 0x01, 0xC0, 0x80, 0x41, 0x01, 0xC0, 0x80, 0x41,
+0x00,0xC1,0x81,0x40
+};
+constINT8U auchCRCLo[256] ={ 0x00, 0xC0, 0xC1, 0x01, 0xC3, 0x03, 0x02, 0xC2, 0xC6,
+0x06,0x07,0xC7,0x05,0xC5,0xC4,0x04,
+0xCC,0x0C,0x0D,0xCD,0x0F,0xCF,0xCE,0x0E,0x0A,0xCA,0xCB,0x0B,
+0xC9,0x09,0x08,0xC8,
+0xD8,0x18,0x19,0xD9,0x1B,0xDB,0xDA,0x1A,0x1E,0xDE,0xDF,0x1F,
+0xDD,0x1D,0x1C,0xDC,
+0x14,0xD4,0xD5,0x15,0xD7,0x17,0x16,0xD6,0xD2,0x12,0x13,0xD3,
+0x11,0xD1,0xD0,0x10,
+0xF0, 0x30, 0x31, 0xF1, 0x33, 0xF3, 0xF2, 0x32, 0x36, 0xF6, 0xF7, 0x37,
+0xF5,0x35,0x34,0xF4,
+0x3C, 0xFC, 0xFD, 0x3D, 0xFF, 0x3F, 0x3E, 0xFE, 0xFA, 0x3A, 0x3B,
+0xFB,0x39,0xF9,0xF8,0x38,
+0x28,0xE8,0xE9,0x29,0xEB,0x2B,0x2A,0xEA,0xEE,0x2E,0x2F,0xEF,
+0x2D,0xED,0xEC,0x2C,
+0xE4, 0x24, 0x25, 0xE5, 0x27, 0xE7, 0xE6, 0x26, 0x22, 0xE2, 0xE3, 0x23,
+0xE1,0x21,0x20,0xE0,
+0xA0,0x60,0x61,0xA1,0x63,0xA3,0xA2,0x62,0x66,0xA6,0xA7,0x67,
+0xA5,0x65,0x64,0xA4,
+0x6C, 0xAC, 0xAD, 0x6D, 0xAF, 0x6F, 0x6E, 0xAE, 0xAA, 0x6A, 0x6B,
+0xAB,0x69,0xA9,0xA8,0x68,
+0x78,0xB8,0xB9,0x79,0xBB,0x7B,0x7A,0xBA,0xBE,0x7E,0x7F,0xBF,
+0x7D,0xBD,0xBC,0x7C,
+0xB4, 0x74, 0x75, 0xB5,0x77, 0xB7, 0xB6, 0x76, 0x72, 0xB2,0xB3, 0x73,
+0xB1,0x71,0x70,0xB0,
+0x50,0x90,0x91,0x51,0x93,0x53,0x52,0x92,0x96,0x56,0x57,0x97,0x55,
+0x95,0x94,0x54,
+0x9C,0x5C,0x5D,0x9D,0x5F,0x9F,0x9E,0x5E,0x5A,0x9A,0x9B,0x5B,
+0x99,0x59,0x58,0x98,
+0x88, 0x48, 0x49, 0x89,0x4B,0x8B,0x8A,0x4A,0x4E,0x8E,0x8F,0x4F,
+0x8D,0x4D,0x4C,0x8C,
+0x44,0x84,0x85,0x45,0x87,0x47,0x46,0x86,0x82,0x42,0x43,0x83,0x41,
+0x81,0x80,0x40
+};
+INT16UCRC16(INT8U*puchMsg,INT16UusDataLen)
+{
+INT8UuchCRCHi=0xFF;
+INT8UuchCRCLo=0xFF;
+Copyright©NingboSunwaysTechnologiesCo.,Ltd. 4
+=== PAGE 9 ===
+SunwaysPVInverterModbus-RS485RTUProtocol
+INT8UuIndex=0;
+while(usDataLen--)
+{
+uIndex=uchCRCLo^*puchMsg++;
+uchCRCLo=uchCRCHi^auchCRCHi[uIndex];
+uchCRCHi=auchCRCLo[uIndex];
+}
+return(((INT16U)uchCRCHi<<8)|(INT16U)uchCRCLo);
+}
+2.3 Application Layer
+MODBUShasthreetypesoffunctioncodes.
+Commonfunctioncodes:Theyarewelldefinedfunctioncodesthatareguaranteedtobeunique,
+modifiable by MODBUS organization, publicly proven, with available conformancetests, proven
+in MB IETF RFC, andcontain definedcommonassigned functioncodesandunassigned reserved
+functioncodesforfutureuse.
+User-defined function codes: There are two defined scopes of user-defined function codes,
+namely 65 to 72 and 100 to 110. Users can select and implement a function code without any
+approval from MODBUS organization, andthe use ofthe selected function code cannotbe
+guaranteedtobeunique.
+Preserve function codes: Function codes that are commonly used by some companies for
+traditionalproductsandthatarenotvalidforpublicuses.
+ThecommonfunctioncodesusedinthisAgreementareasfollows:
+Function
+FunctionDescription
+Code
+03(0x03) Readholdregistervalues
+06(0x06) WriteSingleRegister
+16(0x10) WriteMultipleRegisters
+Abbreviationsandtermsaredefinedasfollows:
+Designation Description
+Registeraddress Oneaddresscorrespondstoone2Bytesdata
+U16 Unsigned16-bitreshapingdata
+U32 Unsigned32-bitreshapingdata
+I16 Signed16-bitreshapingdata
+I32 Signed32-bitreshapingdata
+STR Characterstring
+N/A None
+Copyright©NingboSunwaysTechnologiesCo.,Ltd. 5
+=== PAGE 10 ===
+SunwaysPVInverterModbus-RS485RTUProtocol
+2.3.1Function Code03(0x03)
+Themasternoderequeststheframeformat：
+Datadomain Length(byte) Description
+Slavenodeaddress 1 1~247
+Functioncode 1 0x03
+Registerstartaddress 2 0x0000~0xFFFF
+Registernumber 2 1~125
+CRC 2 N/A
+Copyright©NingboSunwaysTechnologiesCo.,Ltd. 6
+=== PAGE 11 ===
+SunwaysPVInverterModbus-RS485RTUProtocol
+Theslavenoderespondsnormallytotheframeformat
+Datadomain Length(byte) Description
+Slavenodeaddress 1 1~247
+Functioncode 1 0x03
+Numberofbytes 1 2*N
+Registervalues 2*N N/A
+CRC 2 N/A
+Theslavenodeexceptionrespondstotheframeformat
+Datadomain Length(byte) Description
+Slavenodeaddress 1 1~247
+Functioncode 1 0x83
+exceptioncode 1 1/2/3
+CRC 2 N/A
+2.3.2 Function Code06(0x06)
+Themasternoderequeststheframeformat：
+Datadomain Length(byte) Description
+Slavenodeaddress 1 1~247
+Functioncode 1 0x06
+Registeraddress 2 0x0000~0xFFFF
+Registervalue 2 0x0000~0xFFFF
+CRC 2 N/A
+Theslavenoderespondsnormallytotheframeformat
+Datadomain length(byte) Description
+Slavenodeaddress 1 1~247
+Functioncode 1 0x06
+Registeraddress 2 0x0000~0xFFFF
+Registervalue 2 0x0000~0xFFFF
+CRC 2 N/A
+Theslavenodeexceptionrespondstotheframeformat
+Datadomain length(byte) Description
+Slavenodeaddress 1 1~247
+Functioncode 1 0x86
+Exceptioncode 1 1/2/3
+CRC 2 N/A
+Copyright©NingboSunwaysTechnologiesCo.,Ltd. 7
+=== PAGE 12 ===
+SunwaysPVInverterModbus-RS485RTUProtocol
+2.3.3 Function Code16(0x10)
+Themasternoderequeststheframeformat:
+DataDomain Length(byte) Description
+Slavenodeaddress 1 0~247
+Functioncode 1 0x10
+Registeraddress 2 0x0000~0xFFFF
+Numberofregisters 2 0x0000~0x007b
+Numberofbytes 1 2*N
+Registervalues 2*N Value
+CRC 2 N/A
+“N” isthenumberofregisters(0x0000~0x007b)
+Theslavenoderespondsnormallytotheframeformat
+DataDomain Length(byte) Description
+Slavenodeaddress 1 1~247
+Functioncode 1 0x10
+Registeraddress 2 0x0000~0xFFFF
+Numberofregisters 2 0x0000~0x007b
+CRC 2 N/A
+Theslavenodeexceptionrespondstotheframeformat
+DataDomain Length(byte) Description
+Slavenodeaddress 1 1~247
+Functioncode 1 0x90
+Exceptioncode 1 1/2/3
+CRC 2 N/A
+Copyright©NingboSunwaysTechnologiesCo.,Ltd. 8
+=== PAGE 13 ===
+SunwaysPVInverterModbus-RS485RTUProtocol
+3 Register Table
+Table3.1
+Register Read-
+SN Words DataDescription Types Units Gain Notes
+Address write
+Serialnumberof Resolvestocharactersin
+1 10000 8 RO STR N/A 1
+devices highandlowbytes
+......
+Seetable3.2for
+2 10008 1 Modelinformation RO U16 N/A 1
+informationresolution
+0：threephasefour-wire
+3 10009 1 Outputmode RO U16 N/A 1
+1：three-phasethree-wire
+Communication
+4 10010 1 RO U16 N/A 1 Currentversion0
+protocolversion
+Firmwareversion
+5 10011 2 RO U32 N/A 1 Byteparsing
+number
+10012
+6 10100 1 Time:year/month RO U16 N/A 1
+7 10101 1 Time:day/hour RO U16 N/A 1 Thedataisparsedinterms
+Time: ofhighandlowbytes
+8 10102 1 RO U16 N/A 1
+minute/second
+Safetystandard/
+9 10104 1 RO U16 N/A 1
+Areacode
+0:wait,Waitingforthegrid
+1:check,self-inspection
+Workingstateof
+10 10105 1 RO U16 N/A 1 2:normal,generating
+inverter
+3:fault,devicefailure
+4:flash,firmwareupdate
+11 10112 2 FaultFLAG1 RO U32 N/A 1
+10113
+12 10114 2 FaultFLAG2 RO U32 N/A 1 Thebitwiseresolutionis
+10115 showninTable3.3
+13 10120 2 FaultFLAG3 RO U32 N/A 1
+10121
+GridLINEAB
+11006 1 RO U16 V 10
+14 voltage
+GridLINEBC
+11007 1 RO U16 V 10
+15 voltage
+GridLINECA
+11008 1 RO U16 V 10
+16 voltage
+GridAphase
+11009 1 RO U16 V 10
+17 voltage
+Copyright©NingboSunwaysTechnologiesCo.,Ltd. 9
+=== PAGE 14 ===
+SunwaysPVInverterModbus-RS485RTUProtocol
+ContinuedTable3.1
+Register Read-
+SN Words DataDescription Types Units Gain Notes
+Address write
+GridAphase
+11010 1 RO U16 A 10
+18 current
+GridBphase
+11011 1 RO U16 V 10
+19 voltage
+GridBphase
+11012 1 RO U16 A 10
+20 current
+GridCphase
+11013 1 RO U16 V 10
+21 voltage
+GridCphase
+11014 1 RO U16 A 10
+22 current
+23 11015 1 Gridfrequency RO U16 Hz 100
+24 11016 2 P_AC RO U32 kW 1000
+11017
+Dailygenerating
+25 2 RO U32 kWh 10
+11018 capacity
+11019
+26 11020 2 Totalgeneration RO U32 kWh 10
+11021
+Totalgenerating
+27 11022 2 RO U32 H 1
+time
+11023
+Outputapparent
+28 11024 2 RO U32 kVar 1000
+power
+11025
+Outputreactive
+29 11026 2 RO I32 kVar 1000
+power
+11027
+30 11028 2 Totalpowerinput RO U32 kW 1000
+11029
+31 11030 1 Powerfactor RO I16 N/A 1000
+32 11031 1 Efficiency RO U16 % 100
+33 11032 1 Temperature1 RO I16 ℃ 10
+34 11033 1 Temperature2 RO I16 ℃ 10
+35 11034 1 Temperature3 RO I16 ℃ 10
+36 11035 1 Temperature4 RO I16 ℃ 10
+37 11036 1 BUSVoltage RO U16 V 10
+38 11037 1 NBSVoltage RO U16 V 10
+39 11038 1 PV1voltage RO U16 V 10
+40 11039 1 PV1current RO U16 A 10
+41 11040 1 PV2voltage RO U16 V 10
+Copyright©NingboSunwaysTechnologiesCo.,Ltd. 10
+=== PAGE 15 ===
+SunwaysPVInverterModbus-RS485RTUProtocol
+ContinuedTable3.1
+Register Read-
+SN Words DataDescription Types Units Gain Notes
+Address write
+42 11041 1 PV2current RO U16 A 10
+43 11042 1 PV3voltage RO U16 V 10
+44 11043 1 PV3current RO U16 A 10
+45 11044 1 PV4voltage RO U16 V 10
+46 11045 1 PV4current RO U16 A 10
+47 11046 1 PV5voltage RO U16 V 10
+48 11047 1 PV5current RO U16 A 10
+49 11048 1 PV6voltage RO U16 V 10
+50 11049 1 PV6current RO U16 A 10
+51 11050 1 String1current RO U16 A 10
+52 11051 1 String2current RO U16 A 10
+53 11052 1 String3current RO U16 A 10
+54 11053 1 String4current RO U16 A 10
+55 11054 1 String5current RO U16 A 10
+56 11055 1 String6current RO U16 A 10
+57 11056 1 String7current RO U16 A 10
+58 11057 1 String8current RO U16 A 10
+59 11058 1 String9current RO U16 A 10
+60 11059 1 String10current RO U16 A 10
+61 11060 1 String11current RO U16 A 10
+62 11061 1 String12current RO U16 A 10
+63 11062 2 PV1inputpower RO U32 kW 1000
+11063
+64 11064 2 PV2inputpower RO U32 kW 1000
+11065
+65 11066 2 PV3inputpower RO U32 kW 1000
+11067
+66 11068 2 PV4inputpower RO U32 kW 1000
+11069
+67 11070 2 PV5inputpower RO U32 kW 1000
+11071
+68 11072 2 PV6inputpower RO U32 kW 1000
+11073
+69 11074 1 PV7voltage RO U16 V 10
+70 11075 1 PV7current RO U16 A 10
+71 11076 1 PV8voltage RO U16 V 10
+72 11077 1 PV8current RO U16 A 10
+73 11078 1 PV9voltage RO U16 V 10
+74 11079 1 PV9current RO U16 A 10
+75 11080 1 PV10voltage RO U16 V 10
+Copyright©NingboSunwaysTechnologiesCo.,Ltd. 11
+=== PAGE 16 ===
+SunwaysPVInverterModbus-RS485RTUProtocol
+ContinuedTable3.1
+Register Read-
+SN Words DataDescription Types Units Gain Notes
+Address write
+76 11081 1 PV10current RO U16 V 10
+77 11082 1 String13current RO U16 A 10
+78 11083 1 String14current RO U16 A 10
+79 11084 1 String15current RO U16 A 10
+80 11085 1 String16current RO U16 A 10
+81 11086 1 String17current RO U16 A 10
+82 11087 1 String18current RO U16 A 10
+83 11087 1 String18current RO U16 A 10
+84 11088 1 String19current RO U16 A 10
+85 11089 1 String20current RO U16 A 10
+86 11090 2 PV7inputpower RO U32 kW 1000
+87 11091
+88 11092 2 PV8inputpower RO U32 kW 1000
+89 11093
+90 11094 2 PV9inputpower RO U32 kW 1000
+91 11095
+92 11096 2 PV10inputpower RO U32 kW 1000
+11097
+20000 1 RW U16 N/A 1 YearMonth
+Devicereal-time
+93 20001 1 RW U16 N/A 1 DayHour
+clocktime
+20002 1 RW U16 N/A 1 MinuteSecond
+BIT0:Set1，turnon；
+Switchon/off
+94 25008 1 RW U16 N/A 1 Set0，turnoff；
+settings
+BIT1:Set1，restart；
+Active power WO
+95 25112 2 U32 W 1
+limit
+25113
+Active power WO
+96 25114 1 U16 N/A 1000 [0,1000]
+limitpercentage
+Reactive power WO
+97 25116 2 I32 W 1
+limit
+25117
+Reactive power WO
+98 25118 1 I16 N/A 1000 [-600,+600]
+limitpercentage
+99 25120 1 PFSettings RW I16 N/A 1000 (-1000,-800]U[800,1000]
+Copyright©NingboSunwaysTechnologiesCo.,Ltd. 12
+=== PAGE 17 ===
+Sunways PV Inverter Modbus-RS485 RTU Protocol
+Table3.2
+Single-phase Single-phase Single-phase Three-
+Model information Dual-MPPT PV Single-MPPT Dual-MPPT PV phase Dual
+(10008 high type) inverter PV inverter inverter -MPPT PV
+inverter
+01 02 03 12
+00 STS-3KTL(-P) N/A STS-7KTL STT-6KTL(-P)
+01 STS-3.6KTL(-P) STS-1KTL-S STS-8KTL STT-8KTL(-P)
+02 STS-4.2KTL(-P) STS-1.5KTL-S STS-9KTL STT-10KTL(-P)
+Rating 03 STS-4.6KTL(-P) STS-2KTL-S STS-10KTL STT-12KTL(-P)
+information 04 STS-5KTL(-P) STS-2.5KTL-S STS-11KTL STT-15KTL(-P)
+(10008 05 STS-6KTL(-P) STS-3KTL-S N/A STT-17KTL(-P)
+low byte) 06 N/A STS-3.3KTL-S N/A STT-20KTL(-P)
+07 N/A STS-1KTL-S-P N/A STT-25KTL(-P)
+08 N/A STS-1.5KTL-S-P N/A STT-4KTL(-P)
+09 N/A STS-2KTL-S-P N/A STT-5KTL(-P)
+10 STS-2.5KTL-S-P
+11 STS-3KTL-S-P
+12 STS-3.3KTL-S-P
+Three-phase Three-phase Three-phaseTen-
+Model information
+Four-MPPT PV Six-MPPT PV MPPT PV N/A
+(10008 high
+inverter inverter inverter
+type)
+16 20 21 N/A
+0 STT-29.9KTL STT-50KTL(-P) STT-80KTL N/A
+1 STT-30KTL STT-60KTL(-P) STT-90KTL N/A
+2 STT-33KTL N/A STT-100KTL N/A
+3 STT-36KTL N/A STT-110KTL N/A
+4 STT-40KTL N/A N/A N/A
+5 STT-45KTL N/A N/A N/A
+6 STT-50KTL-M STT-100KTL-HV N/A
+Rating
+N/A
+information
+7 STT-60KTL-M N/A STT-110KTL-HV N/A
+(10008
+8 N/A N/A STT-125KTL-HV N/A
+low byte)
+N/A N/A N/A
+9
+10 N/A N/A N/A
+11 STT-15KTL-LV N/A
+12 STT-20KTL-LV N/A
+13 STT-25KTL-LV N/A
+Copyright©NingboSunwaysTechnologiesCo.,Ltd. 13
+=== PAGE 18 ===
+Sunways PV Inverter Modbus-RS485 RTU Protocol
+Table3.3
+Register
+Fault TheFault English
+中文显示
+Address Bit Hexadecimal Decimal
+Code Name Display
+1 BIT0 0x00000001 1 Gridloss 电网丢失 MainsLost
+Gridvoltage 电网电压 GridVoltage
+2 BIT1 0x00000002 2
+Fault 异常 Fault
+Grid Grid
+电网频率
+3 BIT2 0x00000004 4 Frequency Frequency
+异常
+Fault Fault
+直流分量
+4 BIT3 0x00000008 8 DCIFault DCIFault
+超限
+10112 ISOOver 绝缘阻抗 ISOOver
+5 BIT4 0x00000010 16
+(Fault Limitation 超限 Limitation
+FLAG1) 漏电流超
+6 BIT5 0x00000020 32 GFCIFault GFCIFault
+限
+PVOver 输入电压 PVOver
+7 BIT6 0x00000040 64
+Voltage 超限 Voltage
+BusVoltage 母线电压 BusVoltage
+8 BIT7 0x00000080 128
+Fault 超限 Fault
+Inverter
+设备温度 InverterOver
+9 BIT8 0x00000100 256 Over
+超限 Temperature
+Temperature
+内部通讯
+34 BIT1 0x00000002 2 SPIFault SPIFault
+故障二
+存储器一
+35 BIT2 0x00000004 4 E2Fault E2Fault
+故障
+GFCI 漏电流传 GFCIDevice
+36 BIT3 0x00000008 8
+DeviceFault 感器故障 Fault
+10112 AC 输出电流 AC
+37 (Fault BIT4 0x00000010 16 Transducer 传感器故 Transducer
+FLAG2) Fault 障 Fault
+RelayCheck 继电器故 RelayCheck
+38 BIT5 0x00000020 32
+Fail 障 Fail
+InternalFan 内部风扇 InternalFan
+39 BIT6 0x00000040 64
+Fault 故障 Fault
+ExternalFan 外部风扇 ExternalFan
+40 BIT7 0x00000080 128
+Fault 故障 Fault
+内部通讯
+65 10120 BIT0 0x00000001 1 SCIFault SCIFault
+故障一
+(Fault
+FLASH 存储器二
+66 FLAG3) BIT1 0x00000002 2 FLASHFault
+Fault 故障
+Copyright©NingboSunwaysTechnologiesCo.,Ltd. 14
