@@ -205,15 +205,39 @@ class ControlMode:
 
 
 class ErrorCode1:
-    BITS = {}
+    """FAULT_FLAG1 (reg 10112/0x2780, U32 bitfield, Table 3.3)."""
+    BITS = {
+        0: 'GRID_LOSS',
+        1: 'GRID_VOLTAGE_FAULT',
+        2: 'GRID_FREQUENCY_FAULT',
+        3: 'DCI_FAULT',
+        4: 'ISO_OVER_LIMITATION',
+        5: 'GFCI_FAULT',
+        6: 'PV_OVER_VOLTAGE',
+        7: 'BUS_VOLTAGE_FAULT',
+        8: 'INVERTER_OVER_TEMPERATURE',
+    }
 
 
 class ErrorCode2:
-    BITS = {}
+    """FAULT_FLAG2 (reg 10114/0x2782, U32 bitfield, Table 3.3)."""
+    BITS = {
+        1: 'SPI_FAULT',
+        2: 'E2_FAULT',
+        3: 'GFCI_DEVICE_FAULT',
+        4: 'AC_TRANSDUCER_FAULT',
+        5: 'RELAY_CHECK_FAIL',
+        6: 'INTERNAL_FAN_FAULT',
+        7: 'EXTERNAL_FAN_FAULT',
+    }
 
 
 class ErrorCode3:
-    BITS = {}
+    """FAULT_FLAG3 (reg 10120/0x2788, U32 bitfield, Table 3.3)."""
+    BITS = {
+        0: 'SCI_FAULT',
+        1: 'FLASH_FAULT',
+    }
 
 
 SCALE = {

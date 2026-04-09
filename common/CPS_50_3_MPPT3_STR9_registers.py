@@ -215,14 +215,50 @@ class ControlMode:
 
 
 class ErrorCode1:
-    BITS = {}
+    """Error code (reg 0x101E, U32 bitfield)."""
+    BITS = {
+        0:  'GRID_AC_OVER_VOLTAGE',
+        1:  'GRID_AC_UNDER_VOLTAGE',
+        2:  'GRID_AC_ABSENT',
+        3:  'GRID_AC_OVER_FREQUENCY',
+        4:  'GRID_AC_UNDER_FREQUENCY',
+        5:  'PV_DC_OVER_VOLTAGE',
+        6:  'PV_INSULATION_ABNORMAL',
+        7:  'LEAKAGE_CURRENT_ABNORMAL',
+        8:  'GRID_AC_V_HIGHER_THAN_BUS',
+        9:  'CONTROL_POWER_LOW',
+        10: 'PV_STRING_ABNORMAL',
+        11: 'PV_DC_UNDER_VOLTAGE',
+        12: 'PV_IRRADIATION_WEAK',
+        13: 'GRID_TYPE_UNKNOWN',
+        14: 'ARC_FAULT_DETECTION',
+        15: 'GROUND_CURRENT_300MA',
+        16: 'OUTPUT_DC_OVER_CURRENT',
+        17: 'INVERTER_RELAY_ABNORMAL',
+        18: 'OUTPUT_DC_SENSOR_FAILED',
+        19: 'INVERTER_OVER_TEMPERATURE',
+        20: 'LEAKAGE_CURRENT_HCT_ABNORMAL',
+        21: 'PV_STRING_REVERSE',
+        22: 'SYSTEM_TYPE_ERROR',
+        23: 'FAN_LOCK',
+        24: 'BUS_UNDER_VOLTAGE',
+        25: 'BUS_OVER_VOLTAGE',
+        26: 'INTERNAL_COMM_ERROR',
+        27: 'SOFTWARE_INCOMPATIBILITY',
+        28: 'EEPROM_ERROR',
+        29: 'CONSISTENT_WARNING',
+        30: 'INVERTER_ABNORMAL',
+        31: 'BOOST_ABNORMAL',
+    }
 
 
 class ErrorCode2:
+    """Same as ErrorCode1 (alias)."""
     BITS = {}
 
 
 class ErrorCode3:
+    """Same as ErrorCode1 (alias)."""
     BITS = {}
 
 

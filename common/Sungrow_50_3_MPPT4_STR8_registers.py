@@ -205,14 +205,46 @@ class ControlMode:
 
 
 class ErrorCode1:
-    BITS = {}  # Sungrow uses single fault code, no bit definitions
+    """Fault code (addr 0x5045, U16 enum -- not bitfield).
+    Sungrow uses single enumerated fault codes, not bit flags.
+    See FAULT_CODE_TABLE for code-to-description mapping."""
+    BITS = {}
+    FAULT_CODE_TABLE = {
+        0x0002: 'Grid overvoltage',
+        0x0003: 'Grid transient overvoltage',
+        0x0004: 'Grid undervoltage',
+        0x0005: 'Grid low voltage',
+        0x0007: 'AC instantaneous overcurrent',
+        0x0008: 'Grid over frequency',
+        0x0009: 'Grid underfrequency',
+        0x000A: 'Grid power outage',
+        0x000B: 'Device abnormal',
+        0x000C: 'Excessive leakage current',
+        0x000D: 'Grid abnormal',
+        0x000E: '10-minute grid overvoltage',
+        0x000F: 'Grid high voltage',
+        0x0010: 'Output overload',
+        0x0011: 'Grid voltage unbalance',
+        0x0013: 'Device abnormal (19)',
+        0x0014: 'Device abnormal (20)',
+        0x0015: 'Device abnormal (21)',
+        0x0016: 'Device abnormal (22)',
+        0x0017: 'PV connection fault',
+        0x0024: 'Module temperature too high',
+        0x0025: 'Ambient temperature too high',
+        0x0027: 'Low system insulation resistance',
+        0x002B: 'Low ambient temperature',
+        0x002F: 'PV input config abnormal',
+    }
 
 
 class ErrorCode2:
+    """Alias of ErrorCode1 (same register)."""
     BITS = {}
 
 
 class ErrorCode3:
+    """Alias of ErrorCode1 (same register)."""
     BITS = {}
 
 

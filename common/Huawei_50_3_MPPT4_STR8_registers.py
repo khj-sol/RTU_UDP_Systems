@@ -270,16 +270,62 @@ class ControlMode:
 
 
 class ErrorCode1:
-    """Alarm 1 bitfield (see Huawei Alarm Mapping sheet)."""
-    BITS = {}
+    """Alarm 1 bitfield (ALARM1, addr 0x7D08, U16, Table 5-1)."""
+    BITS = {
+        0:  'HighStringInputVoltage',
+        1:  'DCArcFault',
+        2:  'StringReverseConnection',
+        3:  'StringCurrentBackfeed',
+        4:  'AbnormalStringPower',
+        5:  'AFCISelfCheckFail',
+        6:  'PhaseWireShortCircuitedToPE',
+        7:  'GridLoss',
+        8:  'GridUndervoltage',
+        9:  'GridOvervoltage',
+        10: 'GridVoltImbalance',
+        11: 'GridOverfrequency',
+        12: 'GridUnderfrequency',
+        13: 'UnstableGridFrequency',
+        14: 'OutputOvercurrent',
+        15: 'OutputDCComponentOverhigh',
+    }
 
 
 class ErrorCode2:
-    BITS = {}
+    """Alarm 2 bitfield (ALARM2, addr 0x7D09, U16, Table 5-1)."""
+    BITS = {
+        0:  'AbnormalResidualCurrent',
+        1:  'AbnormalGrounding',
+        2:  'LowInsulationResistance',
+        3:  'Overtemperature',
+        4:  'DeviceFault',
+        5:  'UpgradeFailedOrVersionMismatch',
+        6:  'LicenseExpired',
+        7:  'FaultyMonitoringUnit',
+        8:  'FaultyPowerCollector',
+        9:  'BatteryAbnormal',
+        10: 'ActiveIslanding',
+        11: 'PassiveIslanding',
+        12: 'TransientACOvervoltage',
+        13: 'PeripheralPortShortCircuit',
+        14: 'ChurnOutputOverload',
+        15: 'AbnormalPVModuleConfiguration',
+    }
 
 
 class ErrorCode3:
-    BITS = {}
+    """Alarm 3 bitfield (ALARM3, addr 0x7D0A, U16, Table 5-1)."""
+    BITS = {
+        0: 'OptimizerFault',
+        1: 'BuiltInPIDOperationAbnormal',
+        2: 'HighInputStringVoltageToGround',
+        3: 'ExternalFanAbnormal',
+        4: 'BatteryReverseConnection',
+        5: 'OnGridOffGridControllerAbnormal',
+        6: 'PVStringLoss',
+        7: 'InternalFanAbnormal',
+        8: 'DCProtectionUnitAbnormal',
+    }
 
 
 SCALE = {

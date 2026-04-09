@@ -222,15 +222,71 @@ class ControlMode:
 
 
 class ErrorCode1:
-    BITS = {}
+    """Fault code (reg 0x0028, U32 bitfield)."""
+    BITS = {
+        1:  'COMM_ERROR',
+        3:  'STR_REVERSE_OR_SHORT',
+        4:  'MODEL_INIT_FAULT',
+        5:  'GRID_VOLT_SAMPLE_DIFF',
+        6:  'ISO_SAMPLE_DIFF',
+        7:  'GFCI_SAMPLE_DIFF',
+        12: 'AFCI_FAULT',
+        14: 'AFCI_MODULE_FAULT',
+        17: 'RELAY_CHECK_FAULT',
+        21: 'COMM_ERROR_2',
+        22: 'BUS_VOLTAGE_ERROR',
+        23: 'AUTO_TEST_FAIL',
+        24: 'NO_UTILITY',
+        25: 'PV_ISOLATION_LOW',
+        26: 'RESIDUAL_I_HIGH',
+        27: 'OUTPUT_HIGH_DCI',
+        28: 'PV_VOLTAGE_HIGH',
+        29: 'AC_V_OUTRANGE',
+        30: 'AC_F_OUTRANGE',
+        31: 'TEMPERATURE_HIGH',
+    }
 
 
 class ErrorCode2:
-    BITS = {}
+    """Warning code (reg 0x0040, U16 bitfield)."""
+    BITS = {
+        0: 'FAN_WARNING',
+        1: 'STRING_COMM_ABNORMAL',
+        2: 'STR_PID_CONFIG_WARNING',
+        3: 'EEPROM_READ_FAIL',
+        4: 'DSP_COM_FW_UNMATCH',
+        5: 'EEPROM_WRITE_FAIL',
+        6: 'SPD_ABNORMAL',
+        7: 'GND_N_CONNECT_ABNORMAL',
+        8: 'PV1_OR_PV2_SHORT',
+        9: 'PV1_OR_PV2_BOOST_BROKEN',
+    }
 
 
 class ErrorCode3:
-    BITS = {}
+    """Fault code high word (reg 0x0080, same as ErrorCode1)."""
+    BITS = {
+        1:  'COMM_ERROR',
+        3:  'STR_REVERSE_OR_SHORT',
+        4:  'MODEL_INIT_FAULT',
+        5:  'GRID_VOLT_SAMPLE_DIFF',
+        6:  'ISO_SAMPLE_DIFF',
+        7:  'GFCI_SAMPLE_DIFF',
+        12: 'AFCI_FAULT',
+        14: 'AFCI_MODULE_FAULT',
+        17: 'RELAY_CHECK_FAULT',
+        21: 'COMM_ERROR_2',
+        22: 'BUS_VOLTAGE_ERROR',
+        23: 'AUTO_TEST_FAIL',
+        24: 'NO_UTILITY',
+        25: 'PV_ISOLATION_LOW',
+        26: 'RESIDUAL_I_HIGH',
+        27: 'OUTPUT_HIGH_DCI',
+        28: 'PV_VOLTAGE_HIGH',
+        29: 'AC_V_OUTRANGE',
+        30: 'AC_F_OUTRANGE',
+        31: 'TEMPERATURE_HIGH',
+    }
 
 
 SCALE = {
