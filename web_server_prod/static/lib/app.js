@@ -2474,42 +2474,37 @@ function ModelMakerTab() {
         href: mm2Url, target: "_blank", rel: "noopener",
         className: "bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded text-sm"
       }, "Open in New Tab"),
-      status && /*#__PURE__*/React.createElement("span", { className: "text-xs text-yellow-400" }, status)
-    ),
-    /*#__PURE__*/React.createElement("div", { className: "flex gap-3 mb-4 items-center flex-wrap" },
       /*#__PURE__*/React.createElement("button", {
         onClick: () => setAiMode(m => !m),
         className: aiMode
-          ? "bg-purple-600 hover:bg-purple-500 px-4 py-1.5 rounded text-sm font-semibold"
-          : "bg-gray-600 hover:bg-gray-500 px-4 py-1.5 rounded text-sm"
+          ? "bg-purple-600 hover:bg-purple-500 px-4 py-2 rounded text-sm font-semibold"
+          : "bg-gray-600 hover:bg-gray-500 px-4 py-2 rounded text-sm"
       }, aiMode ? "\uD83E\uDD16 AI Mode ON" : "\uD83E\uDD16 AI Mode"),
-      aiMode && /*#__PURE__*/React.createElement(React.Fragment, null,
-        /*#__PURE__*/React.createElement("select", {
-          className: "bg-gray-700 rounded px-2 py-1.5 text-xs",
-          value: aiModel,
-          onChange: e => setAiModel(e.target.value)
-        },
-          ['claude-sonnet-4-6', 'claude-opus-4-6', 'claude-haiku-4-5-20251001'].map(m =>
-            /*#__PURE__*/React.createElement("option", { key: m, value: m }, m))
-        ),
-        aiHasKey
-          ? /*#__PURE__*/React.createElement("span", { className: "text-green-400 text-xs" },
-              "\u2705 API Key: ", aiMasked)
-          : /*#__PURE__*/React.createElement("span", { className: "text-red-400 text-xs" },
-              "\u26A0 API Key \uBBF8\uC124\uC815"),
-        /*#__PURE__*/React.createElement("input", {
-          type: "password",
-          className: "bg-gray-700 rounded px-2 py-1.5 text-xs w-64",
-          placeholder: "sk-ant-api03-...",
-          value: aiKey,
-          onChange: e => setAiKey(e.target.value)
-        }),
-        /*#__PURE__*/React.createElement("button", {
-          onClick: saveAiKey,
-          disabled: !aiKey.trim() || aiSaving,
-          className: "bg-purple-600 hover:bg-purple-500 px-3 py-1.5 rounded text-xs disabled:opacity-50"
-        }, aiSaving ? "Saving..." : "Save Key")
-      )
+      status && /*#__PURE__*/React.createElement("span", { className: "text-xs text-yellow-400" }, status)
+    ),
+    aiMode && !aiHasKey && /*#__PURE__*/React.createElement("div", { className: "flex gap-3 mb-4 items-center flex-wrap" },
+      /*#__PURE__*/React.createElement("select", {
+        className: "bg-gray-700 rounded px-2 py-1.5 text-xs",
+        value: aiModel,
+        onChange: e => setAiModel(e.target.value)
+      },
+        ['claude-sonnet-4-6', 'claude-opus-4-6', 'claude-haiku-4-5-20251001'].map(m =>
+          /*#__PURE__*/React.createElement("option", { key: m, value: m }, m))
+      ),
+      /*#__PURE__*/React.createElement("span", { className: "text-red-400 text-xs" },
+        "\u26A0 API Key \uBBF8\uC124\uC815"),
+      /*#__PURE__*/React.createElement("input", {
+        type: "password",
+        className: "bg-gray-700 rounded px-2 py-1.5 text-xs w-64",
+        placeholder: "sk-ant-api03-...",
+        value: aiKey,
+        onChange: e => setAiKey(e.target.value)
+      }),
+      /*#__PURE__*/React.createElement("button", {
+        onClick: saveAiKey,
+        disabled: !aiKey.trim() || aiSaving,
+        className: "bg-purple-600 hover:bg-purple-500 px-3 py-1.5 rounded text-xs disabled:opacity-50"
+      }, aiSaving ? "Saving..." : "Save Key")
     ),
     running && /*#__PURE__*/React.createElement("div", {
       className: "border border-gray-700 rounded overflow-hidden",
