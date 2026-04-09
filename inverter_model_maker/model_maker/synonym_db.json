@@ -376,6 +376,52 @@
       "synonyms": [
         "直流电流4DC_CURRENT_4"
       ]
+    },
+    "mppt7_voltage": {
+      "category": "MONITORING",
+      "h01_field": "mppt7_voltage",
+      "synonyms": [
+        "DC_VOLTAGE_7"
+      ]
+    },
+    "mppt2_voltage": {
+      "category": "MONITORING",
+      "h01_field": "mppt2_voltage",
+      "synonyms": [
+        "2DC_VOLTAGE_2",
+        "MPPT2_VOLTAGE"
+      ]
+    },
+    "alarm1": {
+      "category": "MONITORING",
+      "h01_field": "alarm1",
+      "synonyms": [
+        "HIGH_BYTE_OFTOTAL_FEEDINGHOURS_HOURLYPOWERGENERATION",
+        "0_OFF_1_ON_INDIA_BOSH_SPECIALARM_SUPPORT",
+        "ERROR_MESSAGE",
+        "LOW_BYTE_OFTOTAL_FEEDINGHOURS_HOURLYPOWERGENERATION",
+        "HIGH_BYTE_OFTOTAL_FEEDPOWER_TOGRID_TOTAL_POWERGENERATION"
+      ],
+      "value_keywords": [
+        "acreactive",
+        "byte",
+        "controlstate",
+        "current",
+        "currentvalue",
+        "detectionvalue",
+        "factor",
+        "high",
+        "iso",
+        "istr",
+        "leak",
+        "low",
+        "output",
+        "pid",
+        "power",
+        "pvstring",
+        "spd",
+        "string"
+      ]
     }
   }
 }

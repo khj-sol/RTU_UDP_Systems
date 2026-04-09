@@ -19,46 +19,46 @@
     "date": "2026-04-03"
   },
   "47cba6ba9de6469bebc49d52037470bd837f95d7d18594e6c07a4cc5f6735afa": {
-    "manufacturer": "ABB-PV",
+    "manufacturer": "ABB",
     "pdf_filename": "ABB-PV_TRIO-20-TL-OUTD_Modbus_RTU.pdf",
     "h01": [
-      21,
-      21
+      20,
+      20
     ],
     "der": [
       33,
       33
     ],
     "info_match": {
-      "model": true,
-      "sn": true
+      "model": false,
+      "sn": false
     },
-    "max_mppt": 2,
-    "max_string": 2,
-    "date": "2026-04-03"
+    "max_mppt": 1,
+    "max_string": 1,
+    "date": "2026-04-08"
   },
   "2a82cbe3ad218814edf0314763f3345f7c1242be12b793cc948b63f3b04a5c78": {
     "manufacturer": "Goodwe",
-    "pdf_filename": "GoodWe Modbus Protocol Customer Version.pdf",
+    "pdf_filename": "Goodwe-PV_Modbus_Protocol.pdf",
     "h01": [
-      50,
-      50
+      49,
+      49
     ],
     "der": [
       33,
       33
     ],
     "info_match": {
-      "model": true,
+      "model": false,
       "sn": false
     },
     "max_mppt": 6,
     "max_string": 20,
-    "date": "2026-04-03"
+    "date": "2026-04-08"
   },
   "407aa7a5ed90058124701d64f68eff8a98554fbc9de621eae35bdb40a7de6438": {
-    "manufacturer": "Senergy",
-    "pdf_filename": "Senergy-PV_Modbus_Protocol-Korea-V1.2.4.pdf",
+    "manufacturer": "Solarize",
+    "pdf_filename": "Solarize-PV_Modbus_Protocol-Korea-V1.2.4.pdf",
     "h01": [
       60,
       60
@@ -73,7 +73,7 @@
     },
     "max_mppt": 9,
     "max_string": 24,
-    "date": "2026-04-03"
+    "date": "2026-04-08"
   },
   "02295407f4459314caa89635dbe639f53af26e08f7c69e3f02c404c8d71fa336": {
     "manufacturer": "Sungrow",
@@ -92,7 +92,7 @@
     },
     "max_mppt": 12,
     "max_string": 24,
-    "date": "2026-04-03"
+    "date": "2026-04-08"
   },
   "db77f2df41de2f099f4b609c1be0ee4dbacaf2bc8de4bf7ec513f103e123ad33": {
     "manufacturer": "Kstar",
@@ -130,7 +130,7 @@
     },
     "max_mppt": 8,
     "max_string": 8,
-    "date": "2026-04-03"
+    "date": "2026-04-08"
   },
   "36434d35ca6f48428bd5acd31cc2fea4f12115a68685a0ebf7ca82a5b034350e": {
     "manufacturer": "Ekos",
@@ -169,5 +169,43 @@
     "max_mppt": 3,
     "max_string": 8,
     "date": "2026-04-07"
+  },
+  "156045a89db37a4d9103913d355a7a8ff5e8382644c9ac0b21dd7ec8a6bfe313": {
+    "manufacturer": "CPS",
+    "pdf_filename": "CPS-PV_CPS-SCA-M_Modbus_Protocol_V4.16_EN.pdf",
+    "h01": [
+      28,
+      28
+    ],
+    "der": [
+      33,
+      33
+    ],
+    "info_match": {
+      "model": false,
+      "sn": false
+    },
+    "max_mppt": 4,
+    "max_string": 4,
+    "date": "2026-04-08"
+  },
+  "b6e5b967167f2087bb08025dee69f39458da92273057db5825580f96779bafe2": {
+    "manufacturer": "Sungrow",
+    "pdf_filename": "Sungrow-PV_ti_20230117_communication-protocol_v1.1.53_en.pdf",
+    "h01": [
+      81,
+      81
+    ],
+    "der": [
+      33,
+      33
+    ],
+    "info_match": {
+      "model": false,
+      "sn": false
+    },
+    "max_mppt": 16,
+    "max_string": 32,
+    "date": "2026-04-08"
   }
 }
