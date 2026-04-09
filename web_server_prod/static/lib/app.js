@@ -2207,9 +2207,9 @@ function StatsTab() {
   const memColor = (stats.mem_percent||0) > 85 ? 'text-red-400' : (stats.mem_percent||0) > 60 ? 'text-yellow-400' : 'text-green-400';
   const diskColor = (stats.disk_percent||0) > 90 ? 'text-red-400' : (stats.disk_percent||0) > 70 ? 'text-yellow-400' : 'text-green-400';
   const srvItems = [
-    ['CPU', stats.cpu_percent != null ? `${stats.cpu_percent}%` : '--', cpuColor],
-    ['Memory', stats.mem_percent != null ? `${stats.mem_used_mb}/${stats.mem_total_mb} MB (${stats.mem_percent}%)` : '--', memColor],
-    ['Process Mem', stats.proc_mem_mb != null ? `${stats.proc_mem_mb} MB` : '--', ''],
+    ['CPU (System)', stats.cpu_percent != null ? `${stats.cpu_percent}%` : '--', cpuColor],
+    ['RAM (System)', stats.mem_percent != null ? `${stats.mem_used_mb}/${stats.mem_total_mb} MB (${stats.mem_percent}%)` : '--', memColor],
+    ['RAM (Server)', stats.proc_mem_mb != null ? `${stats.proc_mem_mb} MB` : '--', ''],
     ['Disk', stats.disk_free_gb != null ? `${stats.disk_free_gb}/${stats.disk_total_gb} GB (${stats.disk_percent}%)` : '--', diskColor],
     ['DB Size', stats.db_size_mb != null ? `${stats.db_size_mb} MB` : '--', ''],
   ];
