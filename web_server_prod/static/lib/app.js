@@ -2195,17 +2195,55 @@ function StatsTab() {
     const iv = setInterval(load, 5000);
     return () => clearInterval(iv);
   }, []);
-  const fmtUptime = s => { if (s == null) return '--'; const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), sec = Math.floor(s%60); return `${h}h ${String(m).padStart(2,'0')}m ${String(sec).padStart(2,'0')}s`; };
-  const items = [['H01 Received', stats.h01_received], ['H02 Sent', stats.h02_sent], ['H03 Sent', stats.h03_sent], ['H04 Received', stats.h04_received], ['H05 Received', stats.h05_received], ['IV Scan Data', stats.iv_scan_count ?? 0], ['RTU Count', stats.rtu_count], ['Uptime', fmtUptime(stats.uptime)], ['Active Connections', stats.active_connections], ['Total Packets', stats.total_packets]];
-  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-    className: "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4"
-  }, items.map(([label, val]) => /*#__PURE__*/React.createElement(Card, {
-    key: label
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "text-gray-400 text-xs"
-  }, label), /*#__PURE__*/React.createElement("div", {
-    className: "text-2xl font-bold mt-1"
-  }, val != null ? val : '--')))), stats.per_rtu && /*#__PURE__*/React.createElement(Card, {
+  const fmtUptime = s => { if (s == null) return '--'; const d = Math.floor(s/86400), h = Math.floor((s%86400)/3600), m = Math.floor((s%3600)/60), sec = Math.floor(s%60); return d > 0 ? `${d}d ${h}h ${String(m).padStart(2,'0')}m` : `${h}h ${String(m).padStart(2,'0')}m ${String(sec).padStart(2,'0')}s`; };
+  const pktItems = [
+    ['H01 Received', stats.h01_received], ['H02 Sent', stats.h02_sent],
+    ['H03 Sent', stats.h03_sent], ['H04 Received', stats.h04_received],
+    ['H05 Received', stats.h05_received], ['Total Packets', stats.total_packets],
+    ['RTU Count', stats.rtu_count], ['WS Clients', stats.ws_clients],
+    ['Uptime', fmtUptime(stats.uptime)], ['IV Scans', stats.iv_scan_count ?? 0],
+  ];
+  const cpuColor = (stats.cpu_percent||0) > 80 ? 'text-red-400' : (stats.cpu_percent||0) > 50 ? 'text-yellow-400' : 'text-green-400';
+  const memColor = (stats.mem_percent||0) > 85 ? 'text-red-400' : (stats.mem_percent||0) > 60 ? 'text-yellow-400' : 'text-green-400';
+  const diskColor = (stats.disk_percent||0) > 90 ? 'text-red-400' : (stats.disk_percent||0) > 70 ? 'text-yellow-400' : 'text-green-400';
+  const srvItems = [
+    ['CPU', stats.cpu_percent != null ? `${stats.cpu_percent}%` : '--', cpuColor],
+    ['Memory', stats.mem_percent != null ? `${stats.mem_used_mb}/${stats.mem_total_mb} MB (${stats.mem_percent}%)` : '--', memColor],
+    ['Process Mem', stats.proc_mem_mb != null ? `${stats.proc_mem_mb} MB` : '--', ''],
+    ['Disk', stats.disk_free_gb != null ? `${stats.disk_free_gb}/${stats.disk_total_gb} GB (${stats.disk_percent}%)` : '--', diskColor],
+    ['DB Size', stats.db_size_mb != null ? `${stats.db_size_mb} MB` : '--', ''],
+  ];
+  const dbTables = stats.db_tables || {};
+  return /*#__PURE__*/React.createElement("div", null,
+    /*#__PURE__*/React.createElement("div", { className: "text-gray-400 text-sm mb-2 font-semibold" }, "Server Resources"),
+    /*#__PURE__*/React.createElement("div", {
+      className: "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-6"
+    }, srvItems.map(([label, val, color]) => /*#__PURE__*/React.createElement(Card, {
+      key: label
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "text-gray-400 text-xs"
+    }, label), /*#__PURE__*/React.createElement("div", {
+      className: "text-lg font-bold mt-1 " + (color || '')
+    }, val)))),
+    Object.keys(dbTables).length > 0 && /*#__PURE__*/React.createElement(Card, {
+      className: "mb-6"
+    }, /*#__PURE__*/React.createElement("div", { className: "text-gray-400 text-sm mb-2" }, "DB Table Rows"),
+    /*#__PURE__*/React.createElement("div", { className: "grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-1 text-sm" },
+      Object.entries(dbTables).map(([t, c]) => /*#__PURE__*/React.createElement("div", { key: t, className: "flex justify-between" },
+        /*#__PURE__*/React.createElement("span", { className: "text-gray-400 font-mono" }, t),
+        /*#__PURE__*/React.createElement("span", { className: c > 100000 ? "text-yellow-400 font-bold" : "" }, (c||0).toLocaleString())
+      ))
+    )),
+    /*#__PURE__*/React.createElement("div", { className: "text-gray-400 text-sm mb-2 font-semibold" }, "UDP Protocol Counters"),
+    /*#__PURE__*/React.createElement("div", {
+      className: "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-6"
+    }, pktItems.map(([label, val]) => /*#__PURE__*/React.createElement(Card, {
+      key: label
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "text-gray-400 text-xs"
+    }, label), /*#__PURE__*/React.createElement("div", {
+      className: "text-2xl font-bold mt-1"
+    }, val != null ? val : '--')))), stats.per_rtu && /*#__PURE__*/React.createElement(Card, {
     className: "mt-4"
   }, /*#__PURE__*/React.createElement("div", {
     className: "text-gray-400 text-sm mb-2"

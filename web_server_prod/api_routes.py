@@ -1066,4 +1066,55 @@ async def get_stats():
         stats.get('h05_received', 0) + stats.get('h06_sent', 0) +
         stats.get('h08_received', 0)
     )
+
+    # ── Server resource metrics ──────────────────────────────────────
+    import psutil, shutil
+    proc = psutil.Process()
+
+    # CPU / memory (system-wide)
+    stats['cpu_percent'] = psutil.cpu_percent(interval=0)
+    mem = psutil.virtual_memory()
+    stats['mem_total_mb'] = round(mem.total / 1048576)
+    stats['mem_used_mb'] = round(mem.used / 1048576)
+    stats['mem_percent'] = mem.percent
+
+    # Process memory (dashboard only)
+    pmem = proc.memory_info()
+    stats['proc_mem_mb'] = round(pmem.rss / 1048576, 1)
+
+    # Disk free
+    disk = shutil.disk_usage('.')
+    stats['disk_total_gb'] = round(disk.total / 1073741824, 1)
+    stats['disk_free_gb'] = round(disk.free / 1073741824, 1)
+    stats['disk_percent'] = round((disk.total - disk.free) / disk.total * 100, 1)
+
+    # DB file size
+    db_path = database.db_path if database else 'web_server_prod/rtu_dashboard.db'
+    db_size = 0
+    for ext in ('', '-wal', '-shm'):
+        try:
+            db_size += os.path.getsize(db_path + ext)
+        except OSError:
+            pass
+    stats['db_size_mb'] = round(db_size / 1048576, 2)
+
+    # DB table row counts
+    if database and database.db:
+        try:
+            table_counts = {}
+            for table in ('inverter_data', 'relay_data', 'weather_data',
+                          'event_log', 'control_status', 'control_monitor',
+                          'rtu_registry'):
+                async with database.db.execute(
+                        f"SELECT COUNT(*) FROM {table}") as cur:
+                    row = await cur.fetchone()
+                    table_counts[table] = row[0] if row else 0
+            stats['db_tables'] = table_counts
+        except Exception:
+            stats['db_tables'] = {}
+
+    # WebSocket clients
+    if ws:
+        stats['ws_clients'] = len(ws.active_connections)
+
     return stats
