@@ -580,6 +580,74 @@ async def control_rtu_info(cmd: ControlCommand):
 
 
 # =========================================================================
+# Modbus Test Endpoints
+# =========================================================================
+
+class ModbusTestCommand(BaseModel):
+    rtu_id: int
+    slave_id: int              # 1-247
+    function_code: int         # 3, 4, 6, or 16
+    register_address: int      # 0-65535
+    count: int = 1             # For FC03/04: 1-125 registers to read
+    values: list = []          # For FC06: [single_value], FC16: [v1, v2, ...]
+
+
+@router.post("/control/modbus_test")
+async def control_modbus_test(cmd: ModbusTestCommand):
+    """Send raw Modbus read/write test command to RTU."""
+    if cmd.slave_id < 1 or cmd.slave_id > 247:
+        raise HTTPException(400, "slave_id must be 1-247")
+    if cmd.function_code not in (3, 4, 6, 16):
+        raise HTTPException(400, "function_code must be 3, 4, 6, or 16")
+    if cmd.function_code in (3, 4) and (cmd.count < 1 or cmd.count > 125):
+        raise HTTPException(400, "count must be 1-125 for read operations")
+    if cmd.function_code == 6 and len(cmd.values) != 1:
+        raise HTTPException(400, "FC06 requires exactly 1 value")
+    if cmd.function_code == 16 and len(cmd.values) < 1:
+        raise HTTPException(400, "FC16 requires at least 1 value")
+    # For write, count = number of values
+    count = cmd.count
+    values = None
+    if cmd.function_code in (6, 16):
+        values = [int(v) & 0xFFFF for v in cmd.values]
+        count = len(values)
+
+    engine = _get_engine()
+    ok = engine.send_h03_modbus_test(
+        cmd.rtu_id, cmd.function_code, cmd.slave_id,
+        cmd.register_address, count, values)
+    if not ok:
+        raise HTTPException(404, f"RTU {cmd.rtu_id} not connected")
+
+    op = 'WRITE' if values else 'READ'
+    # Save event
+    try:
+        db = _get_db()
+        db.save_event(cmd.rtu_id, f"MODBUS_TEST_{op}",
+                      f"FC{cmd.function_code:02d} slave={cmd.slave_id} "
+                      f"addr=0x{cmd.register_address:04X} count={count}")
+    except Exception:
+        pass
+
+    return {"status": "sent", "rtu_id": cmd.rtu_id,
+            "function_code": cmd.function_code,
+            "slave_id": cmd.slave_id,
+            "address": f"0x{cmd.register_address:04X}",
+            "count": count}
+
+
+@router.get("/modbus_test/result/{rtu_id}")
+async def modbus_test_result(rtu_id: int):
+    """Get latest Modbus test result for an RTU (polling fallback)."""
+    engine = _get_engine()
+    results = getattr(engine, '_modbus_test_results', {})
+    result = results.get(rtu_id)
+    if not result:
+        return {"result": None}
+    return {"result": result}
+
+
+# =========================================================================
 # Firmware Endpoints
 # =========================================================================
 
@@ -1188,8 +1256,10 @@ async def mm2_ai_settings_get():
     masked = ('*' * max(0, len(key) - 8) + key[-8:]) if has_key else ''
     # modelmaker flag: YES=show tab, NO=hide tab
     mm_flag = cp.get('claude_api', 'modelmaker', fallback='NO').strip().upper()
+    mt_flag = cp.get('claude_api', 'modbustest', fallback='NO').strip().upper()
     return {"has_key": has_key, "masked_key": masked, "model": model,
-            "modelmaker_enabled": mm_flag == 'YES'}
+            "modelmaker_enabled": mm_flag == 'YES',
+            "modbustest_enabled": mt_flag == 'YES'}
 
 
 @router.post("/mm2/ai-settings")

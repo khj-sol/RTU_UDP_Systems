@@ -204,6 +204,7 @@ BODY_TYPE_CONTROL_RESULT = 14
 BODY_TYPE_IV_SCAN_DATA = 15
 BODY_TYPE_RTU_STATUS = 16     # RTU status (grid, modbus, server)
 BODY_TYPE_CONFIG_DATA = 17    # Configuration data response
+BODY_TYPE_MODBUS_RESULT = 18  # Raw Modbus test result
 
 # =============================================================================
 # Connection Status
@@ -243,6 +244,8 @@ CTRL_INV_ACTIVE_POWER = 16
 CTRL_INV_POWER_FACTOR = 17
 CTRL_INV_REACTIVE_POWER = 18
 CTRL_INV_BODY_TYPE = 19       # Set H01 body_type per inverter
+CTRL_MODBUS_READ = 20         # Raw Modbus register read (FC03/FC04) — extended H03
+CTRL_MODBUS_WRITE = 21        # Raw Modbus register write (FC06/FC16) — extended H03
 
 CONTROL_TYPE_NAMES = {
     CTRL_RTU_REBOOT: "RTU Reboot",
@@ -257,7 +260,9 @@ CONTROL_TYPE_NAMES = {
     CTRL_INV_ACTIVE_POWER: "Active Power Limit",
     CTRL_INV_POWER_FACTOR: "Power Factor",
     CTRL_INV_REACTIVE_POWER: "Reactive Power",
-    CTRL_INV_BODY_TYPE: "H01 Body Type"
+    CTRL_INV_BODY_TYPE: "H01 Body Type",
+    CTRL_MODBUS_READ: "Modbus Read",
+    CTRL_MODBUS_WRITE: "Modbus Write",
 }
 
 # =============================================================================

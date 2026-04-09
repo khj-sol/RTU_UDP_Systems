@@ -2382,6 +2382,225 @@ function H1LogTab({packets, rtus, onClear}) {
   );
 }
 
+// ==== MODBUS TEST TAB ====
+function ModbusTestTab({ rtus, selectedRtu }) {
+  const [rtuId, setRtuId] = useState(selectedRtu || '');
+  useEffect(() => { if (selectedRtu) setRtuId(selectedRtu); }, [selectedRtu]);
+  const [devices, setDevices] = useState([]);
+  const [slaveId, setSlaveId] = useState(1);
+  const [customSlave, setCustomSlave] = useState(false);
+  const [fc, setFc] = useState(3);
+  const [addr, setAddr] = useState('0x0000');
+  const [count, setCount] = useState(10);
+  const [writeVal, setWriteVal] = useState('0');
+  const [writeVals, setWriteVals] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState(null);
+  const [logs, setLogs] = useState([]);
+  const logRef = useRef(null);
+
+  // Load devices when RTU changes
+  useEffect(() => {
+    if (!rtuId) { setDevices([]); return; }
+    fetcher(`/rtus/${rtuId}/devices`).then(d => {
+      const devs = d?.devices ? Object.values(d.devices).map(v => ({
+        device_type: v.device_type, device_number: v.device_number, ...v.data
+      })) : Array.isArray(d) ? d : [];
+      const invs = devs.filter(dd => dd.device_type === 1)
+        .sort((a, b) => (a.device_number || 0) - (b.device_number || 0));
+      setDevices(invs);
+      if (invs.length > 0 && !customSlave) setSlaveId(invs[0].device_number || 1);
+    }).catch(() => {});
+  }, [rtuId]);
+
+  const addLog = (msg) => {
+    setLogs(p => [...p.slice(-99), { time: new Date().toLocaleTimeString(), msg }]);
+    setTimeout(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, 50);
+  };
+
+  const parseAddr = (s) => {
+    s = s.trim();
+    return s.startsWith('0x') || s.startsWith('0X') ? parseInt(s, 16) : parseInt(s, 10);
+  };
+
+  const execute = async () => {
+    const a = parseAddr(addr);
+    if (isNaN(a) || a < 0 || a > 0xFFFF) { addLog('Invalid address'); return; }
+    setLoading(true);
+    setResult(null);
+    const body = { rtu_id: parseInt(rtuId), slave_id: slaveId, function_code: fc, register_address: a };
+    if (fc === 3 || fc === 4) {
+      body.count = count;
+    } else if (fc === 6) {
+      body.count = 1;
+      body.values = [parseInt(writeVal) & 0xFFFF];
+    } else if (fc === 16) {
+      body.values = writeVals.split(',').map(v => parseInt(v.trim()) & 0xFFFF).filter(v => !isNaN(v));
+      body.count = body.values.length;
+    }
+    try {
+      const op = fc <= 4 ? 'READ' : 'WRITE';
+      addLog(`> FC${String(fc).padStart(2,'0')} ${op} slave=${slaveId} addr=0x${a.toString(16).toUpperCase().padStart(4,'0')} count=${body.count || count}`);
+      await post('/control/modbus_test', body);
+      // Poll for result (RTU responds via H05, takes ~1-3s)
+      let tries = 0;
+      const poll = setInterval(async () => {
+        tries++;
+        try {
+          const r = await fetcher(`/modbus_test/result/${rtuId}`);
+          if (r?.result && r.result.address === a && r.result.fc === fc) {
+            clearInterval(poll);
+            setResult(r.result);
+            setLoading(false);
+            const rc = r.result.result_code;
+            if (rc === 0) {
+              const regs = r.result.registers || [];
+              addLog(`< OK ${regs.length} registers: [${regs.map(v => '0x'+v.toString(16).toUpperCase().padStart(4,'0')).join(' ')}]`);
+            } else {
+              addLog(`< ${rc === -1 ? 'TIMEOUT' : 'ERROR'} (rc=${rc})`);
+            }
+          }
+        } catch (e) {}
+        if (tries >= 10) { clearInterval(poll); setLoading(false); addLog('< No response (timeout)'); }
+      }, 500);
+    } catch (e) {
+      addLog(`Error: ${e.message}`);
+      setLoading(false);
+    }
+  };
+
+  const isRead = fc === 3 || fc === 4;
+  const isWrite = fc === 6 || fc === 16;
+
+  return /*#__PURE__*/React.createElement("div", null,
+    // RTU + Inverter selector row
+    /*#__PURE__*/React.createElement("div", { className: "flex gap-3 mb-3 items-center flex-wrap" },
+      /*#__PURE__*/React.createElement("label", { className: "text-sm text-gray-400" }, "RTU:"),
+      /*#__PURE__*/React.createElement("select", {
+        value: rtuId, onChange: e => setRtuId(e.target.value),
+        className: "bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-sm"
+      }, /*#__PURE__*/React.createElement("option", { value: "" }, "-- Select RTU --"),
+        rtus.map(r => /*#__PURE__*/React.createElement("option", { key: r.rtu_id, value: r.rtu_id },
+          `RTU ${r.rtu_id} (${r.ip || '?'})`))),
+
+      /*#__PURE__*/React.createElement("label", { className: "text-sm text-gray-400" }, "Inverter:"),
+      !customSlave && /*#__PURE__*/React.createElement("select", {
+        value: slaveId, onChange: e => setSlaveId(parseInt(e.target.value)),
+        className: "bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-sm"
+      }, devices.length === 0
+        ? /*#__PURE__*/React.createElement("option", { value: 1 }, "No inverters")
+        : devices.map(d => /*#__PURE__*/React.createElement("option", {
+            key: d.device_number, value: d.device_number
+          }, `INV#${d.device_number} (slave=${d.device_number})`))),
+      customSlave && /*#__PURE__*/React.createElement("input", {
+        type: "number", min: 1, max: 247, value: slaveId,
+        onChange: e => setSlaveId(parseInt(e.target.value) || 1),
+        className: "bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-sm w-20"
+      }),
+      /*#__PURE__*/React.createElement("label", { className: "text-xs text-gray-500 flex items-center gap-1" },
+        /*#__PURE__*/React.createElement("input", {
+          type: "checkbox", checked: customSlave,
+          onChange: e => setCustomSlave(e.target.checked)
+        }), "Manual slave ID")
+    ),
+
+    // Modbus command row
+    /*#__PURE__*/React.createElement("div", { className: "flex gap-3 mb-3 items-end flex-wrap" },
+      /*#__PURE__*/React.createElement("div", null,
+        /*#__PURE__*/React.createElement("div", { className: "text-xs text-gray-500 mb-1" }, "Function Code"),
+        /*#__PURE__*/React.createElement("select", {
+          value: fc, onChange: e => setFc(parseInt(e.target.value)),
+          className: "bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-sm"
+        },
+          /*#__PURE__*/React.createElement("option", { value: 3 }, "FC03 Read Holding"),
+          /*#__PURE__*/React.createElement("option", { value: 4 }, "FC04 Read Input"),
+          /*#__PURE__*/React.createElement("option", { value: 6 }, "FC06 Write Single"),
+          /*#__PURE__*/React.createElement("option", { value: 16 }, "FC16 Write Multiple"))),
+
+      /*#__PURE__*/React.createElement("div", null,
+        /*#__PURE__*/React.createElement("div", { className: "text-xs text-gray-500 mb-1" }, "Address (hex/dec)"),
+        /*#__PURE__*/React.createElement("input", {
+          type: "text", value: addr, onChange: e => setAddr(e.target.value),
+          className: "bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-sm w-28",
+          placeholder: "0x1000"
+        })),
+
+      isRead && /*#__PURE__*/React.createElement("div", null,
+        /*#__PURE__*/React.createElement("div", { className: "text-xs text-gray-500 mb-1" }, "Count"),
+        /*#__PURE__*/React.createElement("input", {
+          type: "number", min: 1, max: 125, value: count,
+          onChange: e => setCount(parseInt(e.target.value) || 1),
+          className: "bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-sm w-20"
+        })),
+
+      fc === 6 && /*#__PURE__*/React.createElement("div", null,
+        /*#__PURE__*/React.createElement("div", { className: "text-xs text-gray-500 mb-1" }, "Value (U16)"),
+        /*#__PURE__*/React.createElement("input", {
+          type: "number", min: 0, max: 65535, value: writeVal,
+          onChange: e => setWriteVal(e.target.value),
+          className: "bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-sm w-24"
+        })),
+
+      fc === 16 && /*#__PURE__*/React.createElement("div", null,
+        /*#__PURE__*/React.createElement("div", { className: "text-xs text-gray-500 mb-1" }, "Values (comma-sep)"),
+        /*#__PURE__*/React.createElement("input", {
+          type: "text", value: writeVals, onChange: e => setWriteVals(e.target.value),
+          className: "bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-sm w-48",
+          placeholder: "100, 200, 300"
+        })),
+
+      /*#__PURE__*/React.createElement("button", {
+        onClick: execute, disabled: loading || !rtuId,
+        className: `${isWrite ? 'bg-orange-600 hover:bg-orange-500' : 'bg-blue-600 hover:bg-blue-500'} px-5 py-1.5 rounded text-sm font-medium disabled:opacity-50`
+      }, loading ? 'Waiting...' : isWrite ? 'Write' : 'Read')
+    ),
+
+    // Result table
+    result && result.result_code === 0 && result.registers && /*#__PURE__*/React.createElement(Card, null,
+      /*#__PURE__*/React.createElement("div", { className: "text-sm font-medium mb-2 text-green-400" },
+        `FC${String(result.fc).padStart(2,'0')} Response — ${result.registers.length} registers from slave ${result.slave_id}`),
+      /*#__PURE__*/React.createElement("div", { className: "overflow-auto", style: { maxHeight: '400px' } },
+        /*#__PURE__*/React.createElement("table", { className: "w-full text-sm font-mono" },
+          /*#__PURE__*/React.createElement("thead", null,
+            /*#__PURE__*/React.createElement("tr", { className: "text-gray-400 border-b border-gray-700" },
+              ['Addr', 'Hex', 'U16', 'S16', 'ASCII'].map(h =>
+                /*#__PURE__*/React.createElement("th", { key: h, className: "text-left px-2 py-1" }, h)))),
+          /*#__PURE__*/React.createElement("tbody", null,
+            result.registers.map((v, i) => {
+              const regAddr = result.address + i;
+              const s16 = v >= 0x8000 ? v - 0x10000 : v;
+              const ch1 = (v >> 8) & 0xFF, ch2 = v & 0xFF;
+              const ascii = (ch1 >= 32 && ch1 < 127 ? String.fromCharCode(ch1) : '.') +
+                            (ch2 >= 32 && ch2 < 127 ? String.fromCharCode(ch2) : '.');
+              return /*#__PURE__*/React.createElement("tr", {
+                key: i, className: "border-b border-gray-800 hover:bg-gray-800"
+              },
+                /*#__PURE__*/React.createElement("td", { className: "px-2 py-0.5 text-gray-400" }, `0x${regAddr.toString(16).toUpperCase().padStart(4, '0')}`),
+                /*#__PURE__*/React.createElement("td", { className: "px-2 py-0.5 text-yellow-300" }, `0x${v.toString(16).toUpperCase().padStart(4, '0')}`),
+                /*#__PURE__*/React.createElement("td", { className: "px-2 py-0.5" }, v),
+                /*#__PURE__*/React.createElement("td", { className: "px-2 py-0.5" }, s16),
+                /*#__PURE__*/React.createElement("td", { className: "px-2 py-0.5 text-gray-500" }, ascii));
+            }))))),
+
+    result && result.result_code !== 0 && /*#__PURE__*/React.createElement(Card, null,
+      /*#__PURE__*/React.createElement("div", { className: "text-red-400 text-sm" },
+        `Error: ${result.result_code === -1 ? 'TIMEOUT — No response from inverter' : 'Modbus communication error'}`)),
+
+    // Log
+    /*#__PURE__*/React.createElement("div", {
+      ref: logRef,
+      className: "mt-3 bg-gray-900 border border-gray-700 rounded p-3 text-xs font-mono overflow-auto",
+      style: { maxHeight: '200px' }
+    }, logs.length === 0
+      ? /*#__PURE__*/React.createElement("span", { className: "text-gray-500" }, "Modbus test log...")
+      : logs.map((l, i) => /*#__PURE__*/React.createElement("div", { key: i, className: "mb-0.5" },
+          /*#__PURE__*/React.createElement("span", { className: "text-gray-500" }, l.time, " "),
+          /*#__PURE__*/React.createElement("span", {
+            className: l.msg.startsWith('>') ? 'text-blue-400' : l.msg.startsWith('<') ? 'text-green-400' : 'text-red-400'
+          }, l.msg))))
+  );
+}
+
 // ==== MODEL MAKER TAB ====
 function ModelMakerTab() {
   const [running, setRunning] = useState(false);
@@ -2531,8 +2750,9 @@ function ModelMakerTab() {
 
 // ==== MAIN APP ====
 function App() {
-  const TABS = ['Overview', 'Devices', 'Control', 'History', 'Events', 'Firmware', 'Config', 'Stats', 'H1 Log', 'Model Maker'];
+  const TABS = ['Overview', 'Devices', 'Control', 'History', 'Events', 'Firmware', 'Config', 'Stats', 'H1 Log', 'Model Maker', 'Modbus Test'];
   const [mmEnabled, setMmEnabled] = useState(false);
+  const [mtEnabled, setMtEnabled] = useState(false);
   const [tab, setTab] = useState('Overview');
   const [rtus, setRtus] = useState([]);
   const [selectedRtu, setSelectedRtu] = useState('');
@@ -2541,8 +2761,11 @@ function App() {
 
   useEffect(() => {
     fetcher('/health').then(d => { if (d?.version) setServerVersion('v' + d.version); }).catch(() => {});
-    // Check modelmaker flag from ai_settings.ini
-    fetcher('/mm2/ai-settings').then(d => { setMmEnabled(!!d?.modelmaker_enabled); }).catch(() => {});
+    // Check modelmaker/modbustest flags from ai_settings.ini
+    fetcher('/mm2/ai-settings').then(d => {
+      setMmEnabled(!!d?.modelmaker_enabled);
+      setMtEnabled(!!d?.modbustest_enabled);
+    }).catch(() => {});
   }, []);
 
   // Load RTUs
@@ -2610,13 +2833,14 @@ function App() {
     const isRIP = selRtuObj && selRtuObj.rtu_type === 'RIP';
     const hiddenTabs = isRIP ? ['Firmware', 'Config'] : [];
     return TABS.filter(t => !hiddenTabs.includes(t)).map(t => {
-      const isDisabled = t === 'Model Maker' && !mmEnabled;
+      const isDisabled = (t === 'Model Maker' && !mmEnabled) || (t === 'Modbus Test' && !mtEnabled);
+      const disabledHint = t === 'Model Maker' ? 'modelmaker=NO' : t === 'Modbus Test' ? 'modbustest=NO' : '';
       return /*#__PURE__*/React.createElement("button", {
         key: t,
         onClick: isDisabled ? undefined : () => setTab(t),
         disabled: isDisabled,
         className: `px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${isDisabled ? 'border-transparent text-gray-600 cursor-not-allowed opacity-50' : tab === t ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500'}`,
-        title: isDisabled ? 'Model Maker is disabled (config/ai_settings.ini: modelmaker=NO)' : ''
+        title: isDisabled ? `Disabled (config/ai_settings.ini: ${disabledHint})` : ''
       }, t);
     });
   })())), /*#__PURE__*/React.createElement("main", {
@@ -2649,7 +2873,8 @@ function App() {
     packets: rawPackets,
     rtus: rtus,
     onClear: () => setRawPackets([])
-  }), tab === 'Model Maker' && /*#__PURE__*/React.createElement(ModelMakerTab, null)));
+  }), tab === 'Model Maker' && /*#__PURE__*/React.createElement(ModelMakerTab, null),
+  tab === 'Modbus Test' && /*#__PURE__*/React.createElement(ModbusTestTab, { rtus: rtus, selectedRtu: selectedRtu })));
 }
 ReactDOM.createRoot(document.getElementById('root')).render(/*#__PURE__*/React.createElement(App, null));
 

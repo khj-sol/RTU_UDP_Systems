@@ -652,6 +652,66 @@ class RTUClient:
             # H05(13) + H05(14) fire-and-forget
             self._send_h05_control_sequence(target_handler, dev_num, model)
 
+        elif ctrl_type in (CTRL_MODBUS_READ, CTRL_MODBUS_WRITE):
+            # Raw Modbus test — extended H03 body
+            fc = parsed.get('modbus_fc')
+            slave_id = parsed.get('modbus_slave_id')
+            addr = parsed.get('modbus_address')
+            count = parsed.get('modbus_count', 1)
+            values = parsed.get('modbus_values', [])
+            if fc is None or slave_id is None or addr is None:
+                self.logger.error(f"H03 Modbus test: missing extended body")
+                return
+            self.logger.info(f"H03 Modbus test: FC{fc:02d} slave={slave_id} "
+                             f"addr=0x{addr:04X} count={count}")
+            # Find a handler with a master on channel 1 (primary RS485)
+            master = None
+            for inv in self.inverters:
+                h = inv.get('handler')
+                if h and hasattr(h, 'master') and h.master:
+                    master = h.master
+                    break
+            if not master and hasattr(self.modbus, '_master'):
+                master = self.modbus._master
+            if not master:
+                self.logger.error("H03 Modbus test: no Modbus master available")
+                pkt, _ = self.protocol.create_h05_modbus_result(
+                    dev_num, fc, slave_id, addr, -2)
+                self._send_udp_no_ack(pkt)
+                return
+            # Execute Modbus operation in current thread (H03 handler is threaded)
+            try:
+                with self._modbus_lock:
+                    if ctrl_type == CTRL_MODBUS_READ:
+                        if fc == 4:
+                            regs = master.read_input_registers(addr, count, slave_id)
+                        else:
+                            regs = master.read_holding_registers(addr, count, slave_id)
+                        if regs is not None:
+                            pkt, _ = self.protocol.create_h05_modbus_result(
+                                dev_num, fc, slave_id, addr, 0, list(regs))
+                        else:
+                            pkt, _ = self.protocol.create_h05_modbus_result(
+                                dev_num, fc, slave_id, addr, -1)
+                    else:  # CTRL_MODBUS_WRITE
+                        if fc == 6 and len(values) == 1:
+                            ok = master.write_single_register(addr, values[0], slave_id)
+                        elif fc == 16 and values:
+                            ok = master.write_multiple_registers(addr, values, slave_id)
+                        else:
+                            ok = False
+                        rc = 0 if ok else -1
+                        pkt, _ = self.protocol.create_h05_modbus_result(
+                            dev_num, fc, slave_id, addr, rc,
+                            values if ok else None)
+                self._send_udp_no_ack(pkt)
+                self.logger.info(f"H03 Modbus test: result sent")
+            except Exception as e:
+                self.logger.error(f"H03 Modbus test error: {e}")
+                pkt, _ = self.protocol.create_h05_modbus_result(
+                    dev_num, fc, slave_id, addr, -2)
+                self._send_udp_no_ack(pkt)
+
     # =========================================================================
     # H05 Control Sequence (fire-and-forget)
     # =========================================================================

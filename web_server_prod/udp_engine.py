@@ -951,6 +951,29 @@ class UDPEngine:
                 else:
                     detail = f"INV{dev_num}: IV data string {str_num}/{total_str}, {point_count} points (no scan session)"
 
+        elif body_type == BODY_TYPE_MODBUS_RESULT:
+            # Raw Modbus test result: fc(1B)+slave(1B)+addr(2B)+rc(1B)+count(2B)+data
+            event_type = "modbus_test_result"
+            if len(body) >= 7:
+                mb_fc, mb_slave, mb_addr, mb_rc, mb_count = struct.unpack('>BBHbH', body[:7])
+                regs = []
+                if mb_count > 0 and len(body) >= 7 + mb_count * 2:
+                    regs = list(struct.unpack(f'>{mb_count}H', body[7:7 + mb_count * 2]))
+                rc_names = {0: 'OK', -1: 'TIMEOUT', -2: 'ERROR'}
+                # Build hex string for compact log
+                hex_vals = ' '.join(f'{v:04X}' for v in regs) if regs else ''
+                detail = (f"FC{mb_fc:02d} slave={mb_slave} addr=0x{mb_addr:04X} "
+                          f"rc={rc_names.get(mb_rc, mb_rc)} count={mb_count}"
+                          f"{' data=[' + hex_vals + ']' if regs else ''}")
+                # Store structured data for WebSocket broadcast
+                if not hasattr(self, '_modbus_test_results'):
+                    self._modbus_test_results = {}
+                self._modbus_test_results[rtu_id] = {
+                    'fc': mb_fc, 'slave_id': mb_slave, 'address': mb_addr,
+                    'result_code': mb_rc, 'count': mb_count, 'registers': regs,
+                    'timestamp': int(time.time()),
+                }
+
         logger.info(f"H05 from RTU:{rtu_id} type={event_type}: {detail}")
 
         # Skip heartbeat from event callbacks
@@ -1088,6 +1111,43 @@ class UDPEngine:
         else:
             logger.error(f"Failed to send H03 to RTU:{rtu_id}")
             return False
+
+    def send_h03_modbus_test(self, rtu_id: int, fc: int, slave_id: int,
+                              address: int, count: int,
+                              values: list = None) -> bool:
+        """Send extended H03 for raw Modbus test (ctrl_type 20 or 21).
+
+        For read (FC03/FC04): values=None, count=register count
+        For write (FC06):     values=[single_value], count=1
+        For write (FC16):     values=[v1,v2,...], count=len(values)
+        """
+        with self._lock:
+            state = self.rtu_registry.get(rtu_id)
+        if not state:
+            logger.warning(f"send_h03_modbus_test: RTU {rtu_id} not found")
+            return False
+
+        is_write = values is not None and len(values) > 0
+        ctrl_type = CTRL_MODBUS_WRITE if is_write else CTRL_MODBUS_READ
+        seq = self._next_seq()
+        # Standard H03 header (8 bytes)
+        packet = struct.pack(H03_FORMAT,
+                             VERSION_H03, seq, ctrl_type, DEVICE_INVERTER, 1, 0)
+        # Extended body: fc(1B) + slave_id(1B) + address(2B) + count(2B)
+        packet += struct.pack('>BBHH', fc, slave_id, address, count)
+        # Write values
+        if is_write:
+            packet += struct.pack(f'>{count}H', *values[:count])
+
+        dest_port = state.port if state.port else self.rtu_port
+        if self._safe_sendto(packet, (state.ip, dest_port)):
+            self.stats['h03_sent'] += 1
+            op = 'WRITE' if is_write else 'READ'
+            logger.info(f"Sent H03 Modbus {op} to RTU:{rtu_id}: "
+                        f"FC{fc:02d} slave={slave_id} addr=0x{address:04X} "
+                        f"count={count}")
+            return True
+        return False
 
     def send_h07(self, rtu_id: int, ftp_host: str, ftp_port: int,
                  ftp_user: str, ftp_pass: str, ftp_path: str, filename: str) -> bool:

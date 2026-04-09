@@ -245,12 +245,46 @@ class ProtocolHandler:
             return None
         try:
             v = struct.unpack(H03_FORMAT, data[:H03_SIZE])
-            return {
+            result = {
                 'version': v[0], 'sequence': v[1], 'control_type': v[2],
                 'device_type': v[3], 'device_number': v[4], 'control_value': v[5]
             }
+            # Extended body for Modbus test (ctrl_type 20/21)
+            if v[2] in (CTRL_MODBUS_READ, CTRL_MODBUS_WRITE):
+                ext = data[H03_SIZE:]
+                if len(ext) >= 6:
+                    fc, slave_id, addr, count = struct.unpack('>BBHH', ext[:6])
+                    result['modbus_fc'] = fc
+                    result['modbus_slave_id'] = slave_id
+                    result['modbus_address'] = addr
+                    result['modbus_count'] = count
+                    # For write: extract values after the 6-byte extended header
+                    if v[2] == CTRL_MODBUS_WRITE and len(ext) >= 6 + count * 2:
+                        values = list(struct.unpack(f'>{count}H', ext[6:6 + count * 2]))
+                        result['modbus_values'] = values
+            return result
         except Exception:
             return None
+
+    def create_h05_modbus_result(self, device_number, fc, slave_id,
+                                 address, result_code, registers=None,
+                                 sequence=None):
+        """Create H05 body_type=18 for Modbus test result.
+
+        result_code: 0=OK, -1=TIMEOUT, -2=ERROR
+        registers: list of U16 values (for read results)
+        """
+        header = self.create_header(
+            VERSION_H05, DEVICE_INVERTER, device_number, 0,
+            BODY_TYPE_MODBUS_RESULT, 0, sequence
+        )
+        reg_count = len(registers) if registers else 0
+        body = struct.pack('>BBHbH', fc, slave_id, address,
+                           result_code, reg_count)
+        if registers:
+            body += struct.pack(f'>{reg_count}H', *registers)
+        seq = struct.unpack('>xH', header[:3])[0]
+        return header + body, seq
 
     # =========================================================================
     # H04 Control Response
