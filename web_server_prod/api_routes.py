@@ -1154,12 +1154,14 @@ async def mm2_start():
     if _mm2_is_running():
         return {"status": "already_running", "port": _MM2_PORT}
     try:
+        _mm2_log = open(os.path.join(_MM2_DIR, 'mm2_server.log'), 'w', encoding='utf-8')
         _mm2_process = subprocess.Popen(
             [sys.executable, "-m", "uvicorn",
              "model_maker_web_v2.backend.main:app",
              "--host", "0.0.0.0", "--port", str(_MM2_PORT)],
             cwd=_MM2_DIR,
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            stdout=_mm2_log, stderr=_mm2_log,
+            env={**os.environ, 'PYTHONIOENCODING': 'utf-8'},
         )
         # Give it a moment to start
         import asyncio
