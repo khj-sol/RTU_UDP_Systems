@@ -1854,7 +1854,7 @@ function FirmwareTab({
     onChange: e => setRtuId(e.target.value)
   }, /*#__PURE__*/React.createElement("option", {
     value: ""
-  }, "-- RTU --"), rtus.map(r => /*#__PURE__*/React.createElement("option", {
+  }, "-- RTU --"), rtus.filter(r => r.rtu_type !== 'RIP').map(r => /*#__PURE__*/React.createElement("option", {
     key: r.rtu_id,
     value: r.rtu_id
   }, r.rtu_id)))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
@@ -2064,7 +2064,7 @@ function ConfigTab({
       },
         /*#__PURE__*/React.createElement("option", { value: "" }, "-- Push \uB300\uC0C1 RTU --"),
         /*#__PURE__*/React.createElement("option", { value: "localhost" }, "localhost (\uB85C\uCEEC \uC2DC\uBBAC\uB808\uC774\uD130)"),
-        rtus.filter(r => r.status === 'online').map(r => /*#__PURE__*/React.createElement("option", {
+        rtus.filter(r => r.status === 'online' && r.rtu_type !== 'RIP').map(r => /*#__PURE__*/React.createElement("option", {
           key: r.rtu_id,
           value: (r.ip || '').split(':')[0] || r.ip || ''
         }, r.rtu_id, " (", (r.ip || '').split(':')[0] || '-', ")"))
