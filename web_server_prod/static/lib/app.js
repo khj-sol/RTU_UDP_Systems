@@ -707,7 +707,10 @@ function ControlTab({
     fetcher(`/rtus/${rtuId}/devices`).then(d => {
       const devs = pd(d);
       setDevices(devs);
-      const invs = devs.filter(dd => dd.device_type === 1);
+      // Sort by device_number so the initial default picks INV#1 (not
+      // whichever inverter happens to be first in the API response).
+      const invs = devs.filter(dd => dd.device_type === 1)
+        .sort((a, b) => (a.device_number || 0) - (b.device_number || 0));
       if (invs.length > 0) {
         setSelectedDevs(new Set([invs[0].device_number]));
         if (!deviceNum) setDeviceNum(String(invs[0].device_number));
@@ -716,6 +719,15 @@ function ControlTab({
       }
     }).catch(() => {});
   }, [rtuId]);
+
+  // Keep the IV Scan target dropdown (deviceNum) in sync with the first
+  // inverter selected via the checkboxes. If the user checks INV#1, IV Scan
+  // should target INV#1 even though it has its own single-target dropdown.
+  useEffect(() => {
+    if (selectedDevs.size === 0) return;
+    const first = [...selectedDevs].sort((a, b) => a - b)[0];
+    setDeviceNum(String(first));
+  }, [selectedDevs]);
 
   // Load control values from DB ONCE when RTU changes (not on selectedDevs change)
   const lastSendTime = useRef(0);
