@@ -2992,15 +2992,15 @@ PDF Document:
     except Exception as api_err:
         err_msg = str(api_err)
         if 'credit balance' in err_msg.lower() or 'billing' in err_msg.lower():
-            log(f'[AI] ❌ API 크레딧 부족 — console.anthropic.com에서 충전 필요', 'error')
+            log(f'[AI] API credit balance too low - recharge at console.anthropic.com', 'error')
         elif 'authentication' in err_msg.lower() or '401' in err_msg:
-            log(f'[AI] ❌ API 키 인증 실패 — 키를 확인하세요', 'error')
+            log(f'[AI] API key authentication failed', 'error')
         else:
-            log(f'[AI] ❌ Claude API 오류: {err_msg[:200]}', 'error')
+            log(f'[AI] Claude API error: {err_msg[:200]}', 'error')
         raise
 
     ai_text = response.content[0].text if response.content else ''
-    log(f'[AI] ✅ 응답 수신: {len(ai_text)} chars, tokens={response.usage.input_tokens}+{response.usage.output_tokens}')
+    log(f'[AI] 응답 수신 완료: {len(ai_text)} chars, tokens={response.usage.input_tokens}+{response.usage.output_tokens}')
 
     # Parse JSON from response
     try:
