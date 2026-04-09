@@ -2382,9 +2382,89 @@ function H1LogTab({packets, rtus, onClear}) {
   );
 }
 
+// ==== MODEL MAKER TAB ====
+function ModelMakerTab() {
+  const [running, setRunning] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [status, setStatus] = useState('');
+  const MM2_PORT = 8082;
+  const mm2Url = `http://${location.hostname}:${MM2_PORT}`;
+
+  const checkStatus = async () => {
+    try {
+      const d = await fetcher('/mm2/status');
+      setRunning(d.running);
+    } catch (e) { setRunning(false); }
+  };
+  useEffect(() => { checkStatus(); const iv = setInterval(checkStatus, 5000); return () => clearInterval(iv); }, []);
+
+  const startMM2 = async () => {
+    setLoading(true);
+    setStatus('Starting Model Maker v2...');
+    try {
+      const d = await post('/mm2/start', {});
+      setStatus(d.status === 'started' ? `Started (PID ${d.pid})` : d.status === 'already_running' ? 'Already running' : `Failed: ${d.status}`);
+      await checkStatus();
+    } catch (e) { setStatus('Error: ' + e.message); }
+    setLoading(false);
+  };
+
+  const stopMM2 = async () => {
+    setLoading(true);
+    try {
+      const d = await post('/mm2/stop', {});
+      setStatus('Stopped');
+      await checkStatus();
+    } catch (e) { setStatus('Error: ' + e.message); }
+    setLoading(false);
+  };
+
+  return /*#__PURE__*/React.createElement("div", null,
+    /*#__PURE__*/React.createElement("div", { className: "flex gap-3 mb-4 items-center flex-wrap" },
+      /*#__PURE__*/React.createElement("span", { className: "text-sm" },
+        "Model Maker Web v2 ",
+        /*#__PURE__*/React.createElement("span", {
+          className: running ? "text-green-400 font-bold" : "text-red-400 font-bold"
+        }, running ? "Running" : "Stopped"),
+        running && /*#__PURE__*/React.createElement("span", { className: "text-gray-400 ml-2" }, `(port ${MM2_PORT})`)
+      ),
+      !running && /*#__PURE__*/React.createElement("button", {
+        onClick: startMM2, disabled: loading,
+        className: "bg-green-600 hover:bg-green-500 px-4 py-2 rounded text-sm disabled:opacity-50"
+      }, loading ? "Starting..." : "Start"),
+      running && /*#__PURE__*/React.createElement("button", {
+        onClick: stopMM2, disabled: loading,
+        className: "bg-red-600 hover:bg-red-500 px-4 py-2 rounded text-sm disabled:opacity-50"
+      }, "Stop"),
+      running && /*#__PURE__*/React.createElement("a", {
+        href: mm2Url, target: "_blank", rel: "noopener",
+        className: "bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded text-sm"
+      }, "Open in New Tab"),
+      status && /*#__PURE__*/React.createElement("span", { className: "text-xs text-yellow-400" }, status)
+    ),
+    running && /*#__PURE__*/React.createElement("div", {
+      className: "border border-gray-700 rounded overflow-hidden",
+      style: { height: 'calc(100vh - 180px)' }
+    },
+      /*#__PURE__*/React.createElement("iframe", {
+        src: mm2Url,
+        className: "w-full h-full border-0",
+        title: "Model Maker Web v2"
+      })
+    ),
+    !running && /*#__PURE__*/React.createElement(Card, null,
+      /*#__PURE__*/React.createElement("div", { className: "text-center text-gray-400 py-8" },
+        /*#__PURE__*/React.createElement("div", { className: "text-lg mb-2" }, "Model Maker Web v2"),
+        /*#__PURE__*/React.createElement("div", { className: "text-sm mb-4" }, "PDF \u2192 Stage1 \u2192 Stage2 \u2192 Stage3 \u2192 *_registers.py"),
+        /*#__PURE__*/React.createElement("div", { className: "text-xs text-gray-500" }, "Start \uBC84\uD2BC\uC744 \uB20C\uB7EC Model Maker \uC11C\uBC84\uB97C \uC2E4\uD589\uD558\uC138\uC694")
+      )
+    )
+  );
+}
+
 // ==== MAIN APP ====
 function App() {
-  const TABS = ['Overview', 'Devices', 'Control', 'History', 'Events', 'Firmware', 'Config', 'Stats', 'H1 Log'];
+  const TABS = ['Overview', 'Devices', 'Control', 'History', 'Events', 'Firmware', 'Config', 'Stats', 'H1 Log', 'Model Maker'];
   const [tab, setTab] = useState('Overview');
   const [rtus, setRtus] = useState([]);
   const [selectedRtu, setSelectedRtu] = useState('');
@@ -2494,7 +2574,7 @@ function App() {
     packets: rawPackets,
     rtus: rtus,
     onClear: () => setRawPackets([])
-  })));
+  }), tab === 'Model Maker' && /*#__PURE__*/React.createElement(ModelMakerTab, null)));
 }
 ReactDOM.createRoot(document.getElementById('root')).render(/*#__PURE__*/React.createElement(App, null));
 

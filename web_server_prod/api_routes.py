@@ -1118,3 +1118,67 @@ async def get_stats():
         stats['ws_clients'] = len(ws.active_connections)
 
     return stats
+
+
+# =========================================================================
+# Model Maker v2 Process Management
+# =========================================================================
+import subprocess, signal
+
+_mm2_process: subprocess.Popen | None = None
+_MM2_PORT = 8082
+_MM2_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                         'inverter_model_maker')
+
+
+def _mm2_is_running() -> bool:
+    global _mm2_process
+    if _mm2_process and _mm2_process.poll() is None:
+        return True
+    _mm2_process = None
+    return False
+
+
+@router.get("/mm2/status")
+async def mm2_status():
+    """Check if Model Maker v2 server is running."""
+    return {"running": _mm2_is_running(), "port": _MM2_PORT}
+
+
+@router.post("/mm2/start")
+async def mm2_start():
+    """Start Model Maker v2 server on port 8082."""
+    global _mm2_process
+    if _mm2_is_running():
+        return {"status": "already_running", "port": _MM2_PORT}
+    try:
+        _mm2_process = subprocess.Popen(
+            [sys.executable, "-m", "uvicorn",
+             "model_maker_web_v2.backend.main:app",
+             "--host", "0.0.0.0", "--port", str(_MM2_PORT)],
+            cwd=_MM2_DIR,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        # Give it a moment to start
+        import asyncio
+        await asyncio.sleep(1.5)
+        if _mm2_process.poll() is not None:
+            return {"status": "failed", "returncode": _mm2_process.returncode}
+        return {"status": "started", "port": _MM2_PORT, "pid": _mm2_process.pid}
+    except Exception as e:
+        return {"status": "error", "detail": str(e)}
+
+
+@router.post("/mm2/stop")
+async def mm2_stop():
+    """Stop Model Maker v2 server."""
+    global _mm2_process
+    if not _mm2_is_running():
+        return {"status": "not_running"}
+    try:
+        _mm2_process.terminate()
+        _mm2_process.wait(timeout=5)
+    except Exception:
+        _mm2_process.kill()
+    _mm2_process = None
+    return {"status": "stopped"}
