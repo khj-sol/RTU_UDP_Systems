@@ -382,8 +382,24 @@ class ErrorCode3:
 
 
 class ErrorCode4:
-    """Error Code Table4 (0x101E) — Bit field"""
+    """Error Code 1 (0x101E) — Inverter internal faults (Korean V1.2.4 Appendix)"""
     BITS = {
+        0:  "INVERTER_OVER_DC_BIAS_CURRENT",
+        1:  "INVERTER_RELAY_ABNORMAL",
+        2:  "REMOTE_OFF",
+        3:  "INVERTER_OVER_TEMPERATURE",
+        4:  "GFCI_ABNORMAL",
+        5:  "PV_STRING_REVERSE",
+        6:  "SYSTEM_TYPE_ERROR",
+        7:  "FAN_ABNORMAL",
+        8:  "DC_LINK_UNBALANCE_OR_UNDER_VOLTAGE",
+        9:  "DC_LINK_OVER_VOLTAGE",
+        10: "INTERNAL_COMMUNICATION_ERROR",
+        11: "SOFTWARE_INCOMPATIBILITY",
+        12: "INTERNAL_STORAGE_ERROR",
+        13: "DATA_INCONSISTENCY",
+        14: "INVERTER_ABNORMAL",
+        15: "BOOST_ABNORMAL",
     }
 
     @classmethod
@@ -396,8 +412,24 @@ class ErrorCode4:
 
 
 class ErrorCode5:
-    """Error Code Table5 (0x101F) — Bit field"""
+    """Error Code 2 (0x101F) — Grid/PV faults (Korean V1.2.4 Appendix)"""
     BITS = {
+        0:  "GRID_OVER_VOLTAGE",
+        1:  "GRID_UNDER_VOLTAGE",
+        2:  "GRID_ABSENT",
+        3:  "GRID_OVER_FREQUENCY",
+        4:  "GRID_UNDER_FREQUENCY",
+        5:  "PV_OVER_VOLTAGE",
+        6:  "PV_INSULATION_ABNORMAL",
+        7:  "LEAKAGE_CURRENT_ABNORMAL",
+        8:  "INVERTER_IN_POWER_LIMIT_STATE",
+        9:  "INTERNAL_POWER_SUPPLY_ABNORMAL",
+        10: "PV_STRING_ABNORMAL",
+        11: "PV_UNDER_VOLTAGE",
+        12: "PV_IRRADIATION_WEAK",
+        13: "GRID_ABNORMAL",
+        14: "ARC_FAULT_DETECTION",
+        15: "AC_MOVING_AVERAGE_VOLTAGE_HIGH",
     }
 
     @classmethod
@@ -410,8 +442,24 @@ class ErrorCode5:
 
 
 class ErrorCode6:
-    """Error Code Table6 (0x1020) — Bit field"""
+    """Error Code 3 (0x1020) — Peripheral faults (Korean V1.2.4 Appendix)"""
     BITS = {
+        # bit 0: Reserved
+        1:  "LOGGER_EDISPLAY_EEPROM_FAIL",
+        # bit 2: Reserved
+        3:  "SINGLE_TRACKER_DETECT_WARNING_PID_ABNORMAL",
+        4:  "AFCI_LOST",
+        5:  "DATA_LOGGER_LOST",
+        6:  "METER_LOST",
+        7:  "INVERTER_LOST",
+        8:  "GRID_N_ABNORMAL",
+        9:  "SPD_DEFECTIVE",
+        10: "PARALLEL_ID_WARNING",
+        11: "PARALLEL_SYN_SIGNAL_WARNING",
+        12: "PARALLEL_BAT_ABNORMAL",
+        13: "PARALLEL_GRID_ABNORMAL",
+        14: "GENERATOR_VOLTAGE_ABNORMAL",
+        # bit 15: Reserved
     }
 
     @classmethod
