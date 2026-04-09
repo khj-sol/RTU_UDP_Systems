@@ -1029,26 +1029,27 @@ class GenericInverterSimulator:
         return addr, reg_attr
 
     def _create_datastore(self):
-        """Create Modbus datastore — FC03 holding register or FC04 input register."""
+        """Create Modbus datastore.
+
+        Shares the SAME block between hr and ir so:
+        - Protocols that use FC03 (Read Holding Registers) work as-is
+        - Protocols that use FC04 (Read Input Registers, e.g. Kstar) also read
+          the data, AND DER-AVM control writes (FC06/FC16 → hr) reach the
+          same store that PV/grid data lives in.
+        Without this sharing, FC04 protocols would have their DER-AVM writes
+        go to a dummy 10-register hr block and silently fail.
+        """
         block = ModbusLoggedHoldingBlock(
             0, [0] * 0x8500, self.logger, simulator=self,
             name=self.protocol_name[:3].upper()
         )
 
-        if self.fc_code == 4:
-            store = ModbusSlaveContext(
-                di=ModbusSequentialDataBlock(0, [0] * 10),
-                co=ModbusSequentialDataBlock(0, [0] * 10),
-                hr=ModbusSequentialDataBlock(0, [0] * 10),
-                ir=block,
-            )
-        else:
-            store = ModbusSlaveContext(
-                di=ModbusSequentialDataBlock(0, [0] * 10),
-                co=ModbusSequentialDataBlock(0, [0] * 10),
-                hr=block,
-                ir=ModbusSequentialDataBlock(0, [0] * 10),
-            )
+        store = ModbusSlaveContext(
+            di=ModbusSequentialDataBlock(0, [0] * 10),
+            co=ModbusSequentialDataBlock(0, [0] * 10),
+            hr=block,  # shared — handles FC03 reads and FC06/FC16 writes
+            ir=block,  # shared — handles FC04 reads for Kstar etc.
+        )
 
         self.store = store
         block._internal_update = True
@@ -1058,7 +1059,7 @@ class GenericInverterSimulator:
 
     def _init_control_registers(self):
         """Set DER-AVM control register initial values."""
-        fc = self.fc_code + 1 if self.fc_code == 4 else 3  # FC04→fc_as_hex=4, FC03→3
+        fc = 4 if self.fc_code == 4 else 3  # FC03=hr, FC04=ir  # FC04→fc_as_hex=4, FC03→3
         addr = self._find_addr('DER_POWER_FACTOR_SET')
         if addr is not None:
             self.store.setValues(fc, addr, [self.power_factor_set])
@@ -1083,7 +1084,7 @@ class GenericInverterSimulator:
         get_iv_i_regs = getattr(self._module, 'get_iv_string_current_registers', None)
         if not all([get_iv_v, get_iv_i, get_iv_v_regs, get_iv_i_regs]):
             return
-        fc = self.fc_code + 1 if self.fc_code == 4 else 3
+        fc = 4 if self.fc_code == 4 else 3  # FC03=hr, FC04=ir
         strings_per_mppt = max(self.string_channels // max(self.mppt_channels, 1), 1)
         for mppt_idx in range(1, self.mppt_channels + 1):
             voc = 42.0 + mppt_idx * 0.5
@@ -1114,14 +1115,14 @@ class GenericInverterSimulator:
         """Write values to the correct function code store."""
         if addr is None:
             return
-        fc = self.fc_code + 1 if self.fc_code == 4 else 3
+        fc = 4 if self.fc_code == 4 else 3  # FC03=hr, FC04=ir
         self.store.setValues(fc, addr, values)
 
     def _get_reg(self, addr, count=1):
         """Read values from the correct function code store."""
         if addr is None:
             return [0] * count
-        fc = self.fc_code + 1 if self.fc_code == 4 else 3
+        fc = 4 if self.fc_code == 4 else 3  # FC03=hr, FC04=ir
         return self.store.getValues(fc, addr, count=count)
 
     def _write_u32(self, low_addr, value):
@@ -1474,13 +1475,13 @@ class GenericInverterSimulator:
             # Advance state machine: ACTIVE write → mark FINISHED so the RTU
             # polling loop can read iv_status == FINISHED on its next poll.
             self.iv_scan_status = IVScanStatus.FINISHED
-            fc = self.fc_code + 1 if self.fc_code == 4 else 3
+            fc = 4 if self.fc_code == 4 else 3  # FC03=hr, FC04=ir
             self.store.setValues(fc, iv_status_addr, [IVScanStatus.FINISHED])
             self.logger.info(f"[{self.protocol_name}] IV Scan -> FINISHED")
         elif val and val[0] == IVScanCommand.NON_ACTIVE and self.iv_scan_status == IVScanStatus.FINISHED:
             # RTU clears the command after reading IV data → reset to IDLE for next scan.
             self.iv_scan_status = IVScanStatus.IDLE
-            fc = self.fc_code + 1 if self.fc_code == 4 else 3
+            fc = 4 if self.fc_code == 4 else 3  # FC03=hr, FC04=ir
             self.store.setValues(fc, iv_status_addr, [IVScanStatus.IDLE])
 
 
