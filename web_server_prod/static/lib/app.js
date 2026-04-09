@@ -1804,52 +1804,51 @@ function FirmwareTab({
   useEffect(() => {
     loadFiles();
   }, []);
-  const upload = async () => {
-    if (!fileRef.current || !fileRef.current.files[0]) return;
-    const fd = new FormData();
-    fd.append('file', fileRef.current.files[0]);
-    setStatus('Uploading...');
-    try {
-      const r = await fetch(API + '/firmware/upload', {
-        method: 'POST',
-        body: fd
-      });
-      const j = await r.json();
-      setStatus('Upload: ' + JSON.stringify(j));
-      loadFiles();
-    } catch (e) {
-      setStatus('Error: ' + e.message);
-    }
-  };
+  // Single-step update: if a local file is picked, upload it first then
+  // dispatch to the selected RTU. If a server library file is picked from
+  // the dropdown, dispatch directly. The previous separate "Upload Firmware"
+  // panel was redundant — users always followed Upload with Send Update.
   const update = async () => {
-    if (!rtuId || !selFile) return;
-    setStatus('Sending update...');
+    if (!rtuId) { setStatus('Pick an RTU first.'); return; }
+    let filename = selFile;
+    const localFile = fileRef.current && fileRef.current.files[0];
+    if (localFile) {
+      // Upload the locally picked file first.
+      setStatus(`Uploading ${localFile.name}...`);
+      try {
+        const fd = new FormData();
+        fd.append('file', localFile);
+        const r = await fetch(API + '/firmware/upload', { method: 'POST', body: fd });
+        const j = await r.json();
+        if (!r.ok) { setStatus('Upload failed: ' + JSON.stringify(j)); return; }
+        filename = j.filename || localFile.name;
+        await loadFiles();
+      } catch (e) {
+        setStatus('Upload error: ' + e.message);
+        return;
+      }
+    }
+    if (!filename) { setStatus('Pick a firmware file (local or library).'); return; }
+    setStatus(`Sending ${filename} to RTU ${rtuId}...`);
     try {
       const r = await post('/firmware/update', {
         rtu_id: Number(rtuId),
-        filename: selFile
+        filename: filename
       });
       setStatus('Update: ' + JSON.stringify(r));
     } catch (e) {
       setStatus('Error: ' + e.message);
     }
   };
-  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-    className: "grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4"
-  }, /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("div", {
+  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(Card, {
+    className: "mb-4"
+  }, /*#__PURE__*/React.createElement("div", {
     className: "text-gray-400 text-sm mb-2"
-  }, "Upload Firmware"), /*#__PURE__*/React.createElement("input", {
-    type: "file",
-    ref: fileRef,
-    className: "text-sm mb-2"
-  }), /*#__PURE__*/React.createElement("button", {
-    onClick: upload,
-    className: "bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded text-sm"
-  }, "Upload")), /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("div", {
-    className: "text-gray-400 text-sm mb-2"
-  }, "Send Update"), /*#__PURE__*/React.createElement("div", {
-    className: "flex gap-2 flex-wrap"
-  }, /*#__PURE__*/React.createElement("select", {
+  }, "Send Firmware Update"), /*#__PURE__*/React.createElement("div", {
+    className: "flex gap-3 flex-wrap items-end"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    className: "text-gray-500 text-xs block mb-1"
+  }, "RTU"), /*#__PURE__*/React.createElement("select", {
     className: "bg-gray-700 rounded px-3 py-2 text-sm",
     value: rtuId,
     onChange: e => setRtuId(e.target.value)
@@ -1858,7 +1857,9 @@ function FirmwareTab({
   }, "-- RTU --"), rtus.map(r => /*#__PURE__*/React.createElement("option", {
     key: r.rtu_id,
     value: r.rtu_id
-  }, r.rtu_id))), /*#__PURE__*/React.createElement("select", {
+  }, r.rtu_id)))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    className: "text-gray-500 text-xs block mb-1"
+  }, "Library File"), /*#__PURE__*/React.createElement("select", {
     className: "bg-gray-700 rounded px-3 py-2 text-sm",
     value: selFile,
     onChange: e => setSelFile(e.target.value)
@@ -1867,10 +1868,17 @@ function FirmwareTab({
   }, "-- File --"), files.map(f => /*#__PURE__*/React.createElement("option", {
     key: f.filename,
     value: f.filename
-  }, f.filename))), /*#__PURE__*/React.createElement("button", {
+  }, f.filename)))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    className: "text-gray-500 text-xs block mb-1"
+  }, "or Upload Local File"), /*#__PURE__*/React.createElement("input", {
+    type: "file",
+    ref: fileRef,
+    accept: ".tar.gz,.tgz,.zip",
+    className: "text-sm bg-gray-700 rounded px-2 py-1.5"
+  })), /*#__PURE__*/React.createElement("button", {
     onClick: update,
-    className: "bg-green-600 hover:bg-green-500 px-4 py-2 rounded text-sm"
-  }, "Update")))), status && /*#__PURE__*/React.createElement(Card, {
+    className: "bg-green-600 hover:bg-green-500 px-5 py-2 rounded text-sm font-medium"
+  }, "Update"))), status && /*#__PURE__*/React.createElement(Card, {
     className: "mb-4"
   }, /*#__PURE__*/React.createElement("div", {
     className: "text-sm font-mono"
