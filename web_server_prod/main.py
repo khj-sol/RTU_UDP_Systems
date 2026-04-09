@@ -171,9 +171,15 @@ async def websocket_endpoint(websocket: WebSocket):
 async def _handle_h01_async(rtu_id: int, device_key: tuple, parsed: dict):
     """Save H01 data to DB and broadcast via WebSocket."""
     dev_type, dev_num = device_key
+    logger.info(f"_handle_h01_async ENTER rtu={rtu_id} dev_type={dev_type} dev_num={dev_num}")
 
     # Skip hidden (deleted) RTUs entirely — no DB update, no WS broadcast
-    _rtu_check = await database.get_rtu(rtu_id)
+    try:
+        _rtu_check = await database.get_rtu(rtu_id)
+    except Exception as e:
+        logger.error(f"_handle_h01_async get_rtu failed: {type(e).__name__}: {e}")
+        return
+    logger.info(f"_handle_h01_async got rtu_check: {_rtu_check is not None}")
     if _rtu_check and _rtu_check.get('hidden'):
         with engine._lock:
             engine.rtu_registry.pop(rtu_id, None)  # remove from memory too

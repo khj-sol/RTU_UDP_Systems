@@ -320,11 +320,13 @@ class DB:
     # ----- Inverter Data -----
 
     async def save_inverter_data(self, rtu_id: int, parsed: dict):
+        logger.info(f"save_inverter_data CALLED rtu={rtu_id} dev={parsed.get('device_number')} pv_p={parsed.get('pv_power')} ac_p={parsed.get('ac_power')}")
         is_backup = parsed.get('backup', 0)
         original_ts = parsed.get('original_timestamp')
         ts = original_ts if (is_backup and original_ts) else now_kst()
 
-        await self.db.execute("""
+        try:
+            await self.db.execute("""
             INSERT INTO inverter_data (
                 timestamp, rtu_id, device_number, model,
                 pv_voltage, pv_current, pv_power,
@@ -342,7 +344,12 @@ class DB:
               parsed.get('r_voltage', 0), parsed.get('s_voltage', 0), parsed.get('t_voltage', 0),
               parsed.get('r_current', 0), parsed.get('s_current', 0), parsed.get('t_current', 0),
               parsed.get('raw_hex', ''), is_backup, original_ts))
-        await self._maybe_commit()
+            await self._maybe_commit()
+            logger.info(f"save_inverter_data OK rtu={rtu_id} dev={parsed.get('device_number')}")
+        except Exception as e:
+            logger.error(f"save_inverter_data FAILED rtu={rtu_id} dev={parsed.get('device_number')}: {type(e).__name__}: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
 
     async def get_inverter_history(self, rtu_id=None, device_num=None,
                                    from_ts=None, to_ts=None, limit=100):
