@@ -2962,129 +2962,156 @@ def _run_ai_pdf_extraction(pdf_path: str, ai_settings: dict,
     client = anthropic.Anthropic(api_key=ai_settings['api_key'])
 
     prompt = f"""You are a Modbus protocol expert specializing in solar inverter register maps.
-Extract ALL register definitions from this inverter protocol document and output them as a JSON array.
+Extract ONLY the essential operational registers from this inverter protocol document.
+
+## IMPORTANT: REGISTER COUNT GUIDELINE
+A typical solar inverter has **30-50 unique register addresses** needed for RTU monitoring.
+- AC grid: ~7 (3 voltages + 3 currents + frequency)
+- DC/PV per-MPPT: 2-3 per MPPT (voltage, current, [power])
+- Per-string currents: 1 per string (if documented separately from MPPT)
+- Power totals: 3-5 (active, reactive, PF, PV total, [per-phase power])
+- Energy: 1-2 (cumulative, [daily])
+- Temperature: 1-2
+- Status: 1 (inverter mode)
+- Alarm: 1-3 error code registers
+- Control: 3-5 (on/off, power limit, PF, reactive power)
+- Device info: 2-4 (model, serial, firmware)
+Total: roughly 30-60 registers. If you extract more than 80, you are likely including
+unnecessary registers. Be SELECTIVE — only extract what an RTU needs for monitoring & control.
+
+## DO NOT EXTRACT these types of registers:
+- Communication settings (baud rate, slave address, protocol version)
+- Time/date/clock registers
+- Reserved or unused registers
+- Manufacturer-specific debug/test registers
+- Grid protection limit settings (over/under voltage thresholds, frequency limits)
+  UNLESS they are actively writable control parameters
+- Statistics/counters that are not energy (e.g., run hours, boot count)
+- Duplicate representations of the same physical quantity (e.g., if both "Total power"
+  and "Active power" exist at different addresses for the same value, pick ONE)
+- Line-to-line voltages (AB/BC/CA) if phase-to-neutral (L1/L2/L3) voltages are also present
+- Registers from "Reserved for future use" sections
 
 ## Required JSON fields for each register:
 - "address": hex string like "0x1037"
-- "name": register name in UPPER_SNAKE_CASE (English). Use the STANDARD NAMES below when applicable.
-- "data_type": one of "U16", "S16", "U32", "S32", "FLOAT32", "STRING"
+- "name": register name in UPPER_SNAKE_CASE (English). Use STANDARD NAMES below.
+- "data_type": one of "U16", "S16", "U32", "S32", "STRING"
 - "scale": numeric scale factor (e.g., 0.1, 0.01, 1)
-- "unit": physical unit (e.g., "V", "A", "W", "Hz", "kWh", "degC", "")
-- "fc": function code (3 or 4). Use 3 for Holding registers, 4 for Input registers
-- "rw": "R" for read-only, "RW" for read-write (control/setting registers)
+- "unit": physical unit ("V", "A", "W", "Hz", "kWh", "degC", "")
+- "fc": function code (3 or 4). 3=Holding, 4=Input
+- "rw": "R" for read-only, "RW" for read-write
 - "description": short English description
 - "category": one of "MONITORING", "CONTROL", "STATUS", "ALARM", "DEVICE_INFO"
 
 ## STANDARD REGISTER NAMES — USE THESE EXACT NAMES:
 
-### AC Grid (per-phase):
-L1_VOLTAGE, L2_VOLTAGE, L3_VOLTAGE (or PHASE_A/B/C_VOLTAGE)
-L1_CURRENT, L2_CURRENT, L3_CURRENT (or PHASE_A/B/C_CURRENT)
-PHASE_A_POWER, PHASE_B_POWER, PHASE_C_POWER (if per-phase power exists)
-FREQUENCY (grid frequency, use the first/primary one)
+### AC Grid (per-phase, category=MONITORING):
+L1_VOLTAGE, L2_VOLTAGE, L3_VOLTAGE (phase-to-neutral voltages)
+L1_CURRENT, L2_CURRENT, L3_CURRENT
+PHASE_A_POWER, PHASE_B_POWER, PHASE_C_POWER (only if per-phase power exists)
+FREQUENCY (grid frequency — only the PRIMARY one, not L2/L3 frequency)
 
-### Per-MPPT DC input (for N MPPT channels):
-PV1_VOLTAGE, PV1_CURRENT, MPPT1_POWER
-PV2_VOLTAGE, PV2_CURRENT, MPPT2_POWER
-PV3_VOLTAGE, PV3_CURRENT, MPPT3_POWER (etc.)
+### Per-MPPT DC input (category=MONITORING):
+PV1_VOLTAGE, PV1_CURRENT, MPPT1_POWER (MPPT channel 1)
+PV2_VOLTAGE, PV2_CURRENT, MPPT2_POWER (MPPT channel 2)
+...continue for each MPPT in the PDF (PV3, PV4, etc.)
+NOTE: Some PDFs call these "PV input 1/2/3" or "MPPT 1/2/3" — same thing.
 
-### Per-String currents (if available in PDF):
-STRING1_CURRENT, STRING2_CURRENT, ... STRING_N_CURRENT
+### Per-String currents (category=MONITORING):
+STRING1_CURRENT, STRING2_CURRENT, ... (if PDF has per-string current registers)
+Note: If string currents are the SAME registers as PVn_CURRENT, do NOT duplicate.
+Only add STRING_N_CURRENT if the PDF has separate dedicated string current registers
+(e.g., in a different address range from MPPT registers).
 
-### Power totals:
-ACTIVE_POWER or AC_POWER — total AC output power (W)
+### Power totals (category=MONITORING):
+ACTIVE_POWER — total AC active power output (W)
 REACTIVE_POWER — total reactive power (Var)
-POWER_FACTOR — grid power factor (signed, scale 0.001)
-PV_POWER — total DC input power (if separate register exists)
+POWER_FACTOR — grid power factor
+PV_POWER — total DC input power (only if a separate register exists)
 
-### Energy:
-CUMULATIVE_ENERGY or TOTAL_ENERGY — lifetime energy (kWh)
-DAILY_ENERGY — today's energy (kWh or Wh, specify unit)
+### Energy (category=MONITORING):
+CUMULATIVE_ENERGY — lifetime total energy (kWh)
+DAILY_ENERGY — today's energy (only if exists)
 
-### Temperature:
-INNER_TEMP or INTERNAL_TEMP — inverter internal temperature
+### Temperature (category=MONITORING):
+INNER_TEMP — inverter internal/heatsink temperature
+(Add IPM_TEMP/MODULE_TEMP only if PDF has a second distinct temperature sensor)
 
-### Status:
-INVERTER_MODE or DEVICE_STATUS — operating state register
+### Bus voltage (category=MONITORING, only if present):
+PBUS_VOLTAGE, NBUS_VOLTAGE — DC bus voltages (some brands expose these)
 
-### Error/Alarm:
-ERROR_CODE1, ERROR_CODE2, ERROR_CODE3 — fault/alarm registers
+### Status register (category=STATUS):
+INVERTER_MODE — operating state register. Add a "modes" field:
+  "modes": {{"0": "INITIAL", "1": "STANDBY", "3": "ON_GRID", "5": "FAULT"}}
+  Map the PDF's status codes to these NORMALIZED names:
+  - Initialization/boot → INITIAL
+  - Waiting/standby/idle → STANDBY
+  - Normal/running/grid-tied/generating → ON_GRID
+  - Fault/error/abnormal → FAULT
+  - Shutdown/off/stopped → SHUTDOWN
+  - Starting/MPPT → STARTUP (optional)
+  Include ALL mode values from the PDF, normalized to the names above.
 
-### Device info:
-DEVICE_MODEL — model name/number
-DEVICE_SERIAL_NUMBER — serial number
-FIRMWARE_VERSION or SOFTWARE_VERSION
+### Error/Alarm registers (category=ALARM):
+ERROR_CODE1, ERROR_CODE2, ERROR_CODE3 — fault/alarm registers.
+Name them in order of address (lowest address = ERROR_CODE1).
 
-### Control (writable):
-INVERTER_ON_OFF — remote on/off (0=run, 1=stop or vice versa)
-ACTIVE_POWER_LIMIT — power curtailment (0-1000 = 0-100.0%)
-POWER_FACTOR_SET — PF setpoint (S16, -1000 to 1000 = -1.0 to 1.0)
-REACTIVE_POWER_PCT — reactive power percentage
+**CRITICAL — BITFIELD extraction:**
+Many inverters use bitfield alarm registers where each bit indicates a different fault.
+You MUST search the ENTIRE PDF — including appendices, annexes, and tables at the end —
+for bit-level fault definitions. They often appear as:
+- "Bit 0: Over-temperature" / "Bit 1: Ground fault" etc.
+- A table with columns like "Bit", "Name/Description"
+- "Fault Word 1: bit0=xxx, bit1=yyy"
 
-## CRITICAL extraction rules:
+If the register IS a bitfield, add "bits" with ALL defined bits:
+  "bits": {{"0": "OVER_TEMPERATURE", "1": "GROUND_FAULT", "2": "DC_OVERVOLTAGE", ...}}
+  - Use UPPER_SNAKE_CASE for bit names
+  - Include EVERY defined bit (not just examples)
+  - A single alarm register typically has 8-16 defined bits
 
-### 1. Monitoring registers (category: "MONITORING")
-Extract ALL of these if present in PDF. This is the MOST IMPORTANT category.
-Include every per-MPPT voltage/current/power register (PV1, PV2, PV3...).
-Include every per-string current register if available.
+If the register is an ENUM (the register value itself is a fault code number), add:
+  "fault_codes": {{"1": "Grid overvoltage", "2": "Grid undervoltage", ...}}
+  Include ALL fault codes from the PDF's fault code table/appendix.
 
-### 2. Control registers (category: "CONTROL") — VERY IMPORTANT
-Look for holding registers (FC03/FC06) that are writable (RW):
-- ON/OFF or remote shutdown command
-- Active power limit / curtailment percentage
-- Reactive power setting / percentage
-- Power factor setting
-- Operating mode / regulation code
-These are often in a SEPARATE section titled "Control", "Command", "Setting",
-"Write registers", or "Holding registers (RW)".
-Mark these with "rw": "RW".
+### Device info (category=DEVICE_INFO):
+DEVICE_MODEL — model name (STRING type, add "length" = register count)
+DEVICE_SERIAL_NUMBER — serial number (STRING type)
+FIRMWARE_VERSION — firmware/software version
+(Add RATED_POWER/NOMINAL_POWER only if available as a readable register)
 
-### 3. Error/Alarm/Fault registers (category: "ALARM")
-- Extract ALL error/alarm/fault code registers
-- If the register is a BITFIELD (each bit = different fault), add a "bits" field:
-  "bits": {{"0": "BIT_0_NAME", "1": "BIT_1_NAME", ...}}
-  Extract the COMPLETE bit definition table from the PDF appendix or fault code table.
-  Include ALL defined bits, not just a few examples.
-- If the register is an ENUM (single value = one fault code), add a "fault_codes" field:
-  "fault_codes": {{"2": "Grid overvoltage", "3": "Grid undervoltage", ...}}
-  Include ALL fault codes from the appendix table.
+### Control registers (category=CONTROL, rw=RW):
+ONLY extract these specific control registers:
+- INVERTER_ON_OFF — remote start/stop command
+- ACTIVE_POWER_LIMIT — active power curtailment (%)
+- POWER_FACTOR_SET — power factor setpoint
+- REACTIVE_POWER_PCT — reactive power percentage setpoint
+Look for them in "Control", "Command", "Setting", or "Write" sections.
+Do NOT classify read-only configuration/threshold registers as CONTROL.
+Typically an inverter has only 3-5 true control registers.
 
-### 4. Status/Mode register (category: "STATUS")
-- Find the inverter operating mode/status register
-- Add a "modes" field mapping numeric values to mode names:
-  "modes": {{"0": "INITIAL", "1": "STANDBY", "3": "ON_GRID", "5": "FAULT", "9": "SHUTDOWN"}}
-  Use values from PDF, but normalize names to: INITIAL, STANDBY, ON_GRID, FAULT, SHUTDOWN
+## For 32-bit registers (U32/S32):
+- Use the LOW word address (first/lower register address)
+- Do NOT create separate entries for the HIGH word
+- The system will automatically handle 2-register reads
 
-### 5. Device information (category: "DEVICE_INFO")
-- Model name/number (often STRING type spanning multiple registers)
-- Serial number (STRING type)
-- Firmware/software version
-- For STRING types, add "length" field with register count (e.g., 8 = 16 chars)
+## SCALE values:
+Use the PDF's documented scale factor or gain. Common patterns:
+- Voltage: 0.1V/bit, Current: 0.01A/bit, Power: varies (check W vs kW)
+- Frequency: 0.01Hz/bit, Power factor: 0.001, Temperature: 0.1°C/bit
+- If the PDF says "Gain: 10" that means scale=0.1 (divide by gain)
+- If the PDF says "Unit: 0.1V" that means scale=0.1
 
-### 6. For 32-bit registers (U32/S32):
-- Use the LOW word address (first register address)
-- Do NOT create separate entries for HIGH word
-
-### 7. SCALE values:
-Use the PDF's documented scale factor. Common conventions:
-- Voltage: 0.1 (1 raw = 0.1V), Current: 0.01 (1 raw = 0.01A)
-- Power: 0.1 or 1 (check unit: W vs kW), Frequency: 0.01 (1 raw = 0.01Hz)
-- Power factor: 0.001, Temperature: 0.1 or 1, Energy: varies
-
-## COMPLETENESS CHECK:
-Before outputting, verify you have extracted:
-- [ ] At least 3 AC voltage registers (L1/L2/L3 or R/S/T)
-- [ ] At least 3 AC current registers
-- [ ] FREQUENCY register
-- [ ] ACTIVE_POWER or AC_POWER
-- [ ] POWER_FACTOR
-- [ ] CUMULATIVE_ENERGY
-- [ ] INVERTER_MODE / DEVICE_STATUS
-- [ ] At least 1 ERROR_CODE register
-- [ ] Per-MPPT voltage & current for each MPPT
-- [ ] INNER_TEMP
-- [ ] At least 1 writable CONTROL register (ON/OFF or power limit)
-If any are missing, search the PDF again more carefully.
+## FINAL CHECKLIST — verify before output:
+✓ 3 AC voltages (L1/L2/L3) + 3 AC currents + FREQUENCY
+✓ Per-MPPT voltage & current for EACH MPPT channel in the PDF
+✓ ACTIVE_POWER + POWER_FACTOR + CUMULATIVE_ENERGY
+✓ INVERTER_MODE with "modes" mapping
+✓ 1-3 ERROR_CODE registers with "bits" or "fault_codes" from PDF appendix
+✓ INNER_TEMP
+✓ At least INVERTER_ON_OFF control register
+✓ DEVICE_MODEL + DEVICE_SERIAL_NUMBER
+✓ Total register count is 30-60 (NOT 100+)
 
 ## Output format:
 Output ONLY a valid JSON array. No markdown, no explanation, no code blocks.
@@ -3096,7 +3123,7 @@ PDF Document:
     try:
         response = client.messages.create(
             model=ai_settings['model'],
-            max_tokens=16000,
+            max_tokens=32000,
             messages=[{"role": "user", "content": prompt}],
         )
     except Exception as api_err:
