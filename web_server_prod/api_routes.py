@@ -612,7 +612,8 @@ async def control_modbus_test(cmd: ModbusTestCommand):
         values = [int(v) & 0xFFFF for v in cmd.values]
         count = len(values)
 
-    engine = _get_engine()
+    if not engine:
+        raise HTTPException(503, "UDP engine not running")
     ok = engine.send_h03_modbus_test(
         cmd.rtu_id, cmd.function_code, cmd.slave_id,
         cmd.register_address, count, values)
@@ -622,10 +623,10 @@ async def control_modbus_test(cmd: ModbusTestCommand):
     op = 'WRITE' if values else 'READ'
     # Save event
     try:
-        db = _get_db()
-        db.save_event(cmd.rtu_id, f"MODBUS_TEST_{op}",
-                      f"FC{cmd.function_code:02d} slave={cmd.slave_id} "
-                      f"addr=0x{cmd.register_address:04X} count={count}")
+        await database.save_event(
+            cmd.rtu_id, f"MODBUS_TEST_{op}",
+            f"FC{cmd.function_code:02d} slave={cmd.slave_id} "
+            f"addr=0x{cmd.register_address:04X} count={count}")
     except Exception:
         pass
 
@@ -639,7 +640,8 @@ async def control_modbus_test(cmd: ModbusTestCommand):
 @router.get("/modbus_test/result/{rtu_id}")
 async def modbus_test_result(rtu_id: int):
     """Get latest Modbus test result for an RTU (polling fallback)."""
-    engine = _get_engine()
+    if not engine:
+        return {"result": None}
     results = getattr(engine, '_modbus_test_results', {})
     result = results.get(rtu_id)
     if not result:
