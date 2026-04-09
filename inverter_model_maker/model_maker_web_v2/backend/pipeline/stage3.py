@@ -267,7 +267,7 @@ def _load_error_bits_from_reference(manufacturer: str) -> dict:
     patterns = glob.glob(os.path.join(COMMON_DIR, f'REF_{manufacturer}_*_registers.py'))
     patterns += glob.glob(os.path.join(COMMON_DIR, f'{manufacturer}_*_registers.py'))
     patterns += [os.path.join(COMMON_DIR, 'REF_Solarize_PV_registers.py'),
-                 os.path.join(COMMON_DIR, 'Solarize_50_3_registers.py')]
+                 os.path.join(COMMON_DIR, 'Solarize_50_3_MPPT4_STR8_registers.py')]
 
     for fpath in patterns:
         if not os.path.exists(fpath):
@@ -2396,17 +2396,17 @@ def run_stage3(
     # 레지스터 파일은 Model Maker가 자동 덮어쓰지 않는다.
     # 이 파일들은 대시보드 Config 탭에서 수동으로만 수정할 수 있다.
     _PROTECTED_FILES = {
-        'Solarize_50_3_registers.py',
-        'Sungrow_50_3_registers.py',
-        'Kstar_60_3_registers.py',
-        'Huawei_50_3_registers.py',
-        'Ekos_10_3_registers.py',
-        'Senergy_50_3_registers.py',
-        'Sofar_50_3_registers.py',
-        'Solis_50_3_registers.py',
-        'Growatt_30_3_registers.py',
-        'CPS_50_3_registers.py',
-        'Sunways_30_3_registers.py',
+        'Solarize_50_3_MPPT4_STR8_registers.py',
+        'Sungrow_50_3_MPPT4_STR8_registers.py',
+        'Kstar_60_3_MPPT3_STR9_registers.py',
+        'Huawei_50_3_MPPT4_STR8_registers.py',
+        'Ekos_10_3_MPPT1_STR2_registers.py',
+        'Senergy_50_3_MPPT4_STR8_registers.py',
+        'Sofar_50_3_MPPT4_STR8_registers.py',
+        'Solis_50_3_MPPT4_STR8_registers.py',
+        'Growatt_30_3_MPPT3_STR6_registers.py',
+        'CPS_50_3_MPPT3_STR9_registers.py',
+        'Sunways_30_3_MPPT3_STR6_registers.py',
     }
 
     # common/ 레퍼런스 등록 — 모든 검증 통과 시에만 (오염 방지)
