@@ -1449,43 +1449,52 @@ class ModbusHandlerHAT:
                 return None
             
             # Parse the block
-            # Helper to combine two 16-bit registers into signed 32-bit
-            def to_s32(low, high):
+            # Helper to combine two 16-bit registers into signed 32-bit,
+            # honoring the module's U32_WORD_ORDER. Block layout (offset i, i+1)
+            # is always (LOW_addr, HIGH_addr) — HL means the value at LOW_addr
+            # is the high word, at HIGH_addr is the low word.
+            _word_order = getattr(self.reg_module, 'U32_WORD_ORDER', 'LH')
+
+            def to_s32(r0, r1):
+                if _word_order == 'HL':
+                    high, low = r0, r1
+                else:
+                    low, high = r0, r1
                 raw = (high << 16) | low
                 if raw > 0x7FFFFFFF:
                     raw = raw - 0x100000000
                 return raw
-            
+
             data = {}
-            
+
             # Phase Currents (scale 0.1A)
             # Offset: 0=L1_LOW, 1=L1_HIGH, 2=L2_LOW, 3=L2_HIGH, 4=L3_LOW, 5=L3_HIGH
             data['current_r'] = to_s32(result[0], result[1]) / 10.0
             data['current_s'] = to_s32(result[2], result[3]) / 10.0
             data['current_t'] = to_s32(result[4], result[5]) / 10.0
-            
+
             # Phase Voltages (scale 0.1V)
             # Offset: 6=V1_LOW, 7=V1_HIGH, 8=V2_LOW, 9=V2_HIGH, 10=V3_LOW, 11=V3_HIGH
             data['voltage_rs'] = to_s32(result[6], result[7]) / 10.0
             data['voltage_st'] = to_s32(result[8], result[9]) / 10.0
             data['voltage_tr'] = to_s32(result[10], result[11]) / 10.0
-            
+
             # Active Power (scale 0.1kW)
             # Offset: 12=P_LOW, 13=P_HIGH
             data['active_power_kw'] = to_s32(result[12], result[13]) / 10.0
-            
+
             # Reactive Power (scale 1 Var)
             # Offset: 14=Q_LOW, 15=Q_HIGH
             data['reactive_power_var'] = to_s32(result[14], result[15])
-            
+
             # Power Factor (scale 0.001)
             # Offset: 16=PF_LOW, 17=PF_HIGH
             data['power_factor'] = to_s32(result[16], result[17]) / 1000.0
-            
+
             # Frequency (scale 0.1Hz)
             # Offset: 18=F_LOW, 19=F_HIGH
             data['frequency'] = to_s32(result[18], result[19]) / 10.0
-            
+
             # Status Flags
             # Offset: 20=STS_LOW, 21=STS_HIGH
             data['status_flags'] = to_s32(result[20], result[21])
