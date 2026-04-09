@@ -170,13 +170,15 @@ async def websocket_endpoint(websocket: WebSocket):
 # ---------------------------------------------------------------------------
 async def _handle_h01_async(rtu_id: int, device_key: tuple, parsed: dict):
     """Save H01 data to DB and broadcast via WebSocket."""
+    print(f"[DBG] _handle_h01_async ENTER rtu={rtu_id} key={device_key}", flush=True)
     dev_type, dev_num = device_key
 
     try:
         _rtu_check = await database.get_rtu(rtu_id)
     except Exception as e:
-        logger.error(f"_handle_h01_async get_rtu failed: {type(e).__name__}: {e}")
+        print(f"[DBG] _handle_h01_async get_rtu failed: {type(e).__name__}: {e}", flush=True)
         return
+    print(f"[DBG] _handle_h01_async after get_rtu rtu_check={_rtu_check is not None}", flush=True)
     if _rtu_check and _rtu_check.get('hidden'):
         with engine._lock:
             engine.rtu_registry.pop(rtu_id, None)  # remove from memory too
