@@ -233,7 +233,6 @@
   <h1>Model Maker Web v2</h1>
   <span>Inverter Modbus PDF → RTU Register Map  |  Stage 1 → 2 → 3</span>
   <span id="ai-badge" style="display:none; margin-left:16px; background:#7c3aed; color:white; padding:2px 10px; border-radius:4px; font-size:13px;">🤖 AI Mode</span>
-  <script>if(typeof _aiMode!=='undefined'&&_aiMode)document.getElementById('ai-badge').style.display='inline';</script>
 </header>
 
 <div class="pipeline">
@@ -396,6 +395,11 @@
   const API = _isProxied ? '/api/mm2-app/api' : '/api';
   // AI mode flag from dashboard: ?ai_mode=1 in iframe URL
   const _aiMode = new URLSearchParams(window.location.search).get('ai_mode') === '1';
+  // Show AI badge in header
+  if (_aiMode) {
+    const badge = document.getElementById('ai-badge');
+    if (badge) badge.style.display = 'inline';
+  }
   let sessionId = null;
   let ws = null;
   let uploadedFilename = null;
@@ -519,6 +523,14 @@
   async function runStage1() {
     document.getElementById('btn-s1').disabled = true;
     clearLog('s1');
+    // Show AI mode status immediately in log
+    if (_aiMode) {
+      appendLog('s1', '🤖 AI Mode ON — Claude API로 PDF 분석을 보강합니다', 'ok');
+      appendLog('s1', '  Rule-based 파싱 + AI 추출 병합 모드', 'info');
+    } else {
+      appendLog('s1', 'Rule-based 파싱 모드 (AI Mode OFF)', 'info');
+    }
+    appendLog('s1', `Stage 1 실행 중... (${uploadedFilename})`, 'info');
     await fetch(`${API}/stage1/run`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
