@@ -2387,7 +2387,10 @@ function ModelMakerTab() {
   const [running, setRunning] = useState(false);
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState('');
-  const [aiMode, setAiMode] = useState(() => localStorage.getItem('mm2_ai_mode') === 'true');
+  const [aiMode, setAiMode] = useState(() => {
+    const saved = localStorage.getItem('mm2_ai_mode');
+    return saved === null ? true : saved === 'true';  // default ON
+  });
   const [aiKey, setAiKey] = useState('');
   const [aiModel, setAiModel] = useState('claude-sonnet-4-6');
   const [aiHasKey, setAiHasKey] = useState(false);

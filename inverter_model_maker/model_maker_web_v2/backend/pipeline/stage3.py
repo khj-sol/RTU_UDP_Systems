@@ -2392,10 +2392,31 @@ def run_stage3(
         save_review_history(review_history)
         log(f'  review_history: +{rv_recorded}개 판정')
 
+    # 등록 프로토콜 보호 — 현재 운영 중인 11종 인버터의 수동 작성된
+    # 레지스터 파일은 Model Maker가 자동 덮어쓰지 않는다.
+    # 이 파일들은 대시보드 Config 탭에서 수동으로만 수정할 수 있다.
+    _PROTECTED_FILES = {
+        'Solarize_50_3_registers.py',
+        'Sungrow_50_3_registers.py',
+        'Kstar_60_3_registers.py',
+        'Huawei_50_3_registers.py',
+        'Ekos_10_3_registers.py',
+        'Senergy_50_3_registers.py',
+        'Sofar_50_3_registers.py',
+        'Solis_50_3_registers.py',
+        'Growatt_30_3_registers.py',
+        'CPS_50_3_registers.py',
+        'Sunways_30_3_registers.py',
+    }
+
     # common/ 레퍼런스 등록 — 모든 검증 통과 시에만 (오염 방지)
     all_passed = all(validation.values())
+    is_protected = output_name in _PROTECTED_FILES
     common_path = os.path.join(COMMON_DIR, output_name)
-    if all_passed:
+    if is_protected:
+        log(f'  ⚠ {output_name} 은 등록 프로토콜 보호 파일 — 자동 배포 건너뜀', 'warn')
+        log(f'    수정이 필요하면 대시보드 Config 탭에서 직접 편집하세요', 'warn')
+    elif all_passed:
         import shutil
         # 1) Model Maker common/ (레퍼런스용)
         shutil.copy2(output_path, common_path)
