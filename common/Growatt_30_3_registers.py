@@ -21,6 +21,10 @@ class RegisterMap:
     MODULE_H                                 = 0x001C
     COM_ADDRESS                              = 0x001E
     DTC                                      = 0x002B
+    # DEVICE_MODEL: U16 Module code at 0x001C
+    # Note: 0x001C does NOT collide with AC measurement (AC is 0x000E-0x0019)
+    DEVICE_MODEL                             = 0x001C
+    DEVICE_MODEL_SIZE                        = 1
     TP                                       = 0x002C
     DEVICE_SERIAL_NUMBER                     = 0x0017
     DEVICE_SERIAL_NUMBER_SIZE                = 5
@@ -358,3 +362,10 @@ H01_FIELD_MAP = {
 
 U32_WORD_ORDER = 'HL'
 RTU_FC_CODE = 4
+
+
+# Growatt module code mapping (PDF §0x001C Module H register)
+MODEL_CODE_MAP = {
+    0x0303: 'MOD-30KTL3-SIM',  # 3 MPPT + 3 phase topology marker
+}
+MODEL_CODE_DEFAULT = 0x0303

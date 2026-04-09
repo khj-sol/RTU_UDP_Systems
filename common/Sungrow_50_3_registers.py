@@ -144,8 +144,10 @@ class RegisterMap:
 
 
     # Device info (FC04) — Sungrow String Inverter v1.1.37
-    # DEVICE_MODEL: only U16 type code at 0x1388 (Appendix 6 lookup) — not a string
+    # DEVICE_MODEL: U16 type code at 0x1388 (Appendix 6 lookup)
     # Serial: UTF-8 STRING 10 regs at 0x137E (4990)
+    DEVICE_MODEL                             = 0x1388
+    DEVICE_MODEL_SIZE                        = 1
     DEVICE_SERIAL_NUMBER                     = 0x137E
     DEVICE_SERIAL_NUMBER_SIZE                = 10
 
@@ -438,3 +440,10 @@ H01_FIELD_MAP = {
 
 U32_WORD_ORDER = 'LH'
 RTU_FC_CODE = 3
+
+
+# Sungrow device type code → model name (Appendix 6 excerpt, simulator use)
+MODEL_CODE_MAP = {
+    0x0E01: 'SG50CX-SIM',
+}
+MODEL_CODE_DEFAULT = 0x0E01

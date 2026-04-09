@@ -2332,15 +2332,24 @@ class ModbusHandlerSerial:
             model_regs = getattr(self.RegMap, 'DEVICE_MODEL_SIZE', None) or 16
             serial_regs = getattr(self.RegMap, 'DEVICE_SERIAL_NUMBER_SIZE', None) or 8
 
-            # Model name — skip when the register file has no DEVICE_MODEL
-            # (inverters that only expose a U16 type code, not a string).
+            # Model name. When DEVICE_MODEL_SIZE == 1 the register holds a
+            # single U16 type code (Sungrow/Solis/Growatt/Sunways PDFs do
+            # not expose an ASCII model string). Resolve it through the
+            # register file's MODEL_CODE_MAP {code: name} lookup; if the
+            # code is unknown, format it as hex so the dashboard still
+            # shows something traceable to the PDF Appendix tables.
             if device_model_addr is not None:
                 result = _read(device_model_addr, model_regs)
                 if result is not None and not result.isError():
-                    model_bytes = b''
-                    for reg in result.registers:
-                        model_bytes += bytes([(reg >> 8) & 0xFF, reg & 0xFF])
-                    info['model'] = model_bytes.rstrip(b'\x00').decode('utf-8', errors='ignore')
+                    if model_regs == 1:
+                        code = result.registers[0] & 0xFFFF
+                        code_map = getattr(self.reg_module, 'MODEL_CODE_MAP', {}) or {}
+                        info['model'] = code_map.get(code, f'CODE_0x{code:04X}')
+                    else:
+                        model_bytes = b''
+                        for reg in result.registers:
+                            model_bytes += bytes([(reg >> 8) & 0xFF, reg & 0xFF])
+                        info['model'] = model_bytes.rstrip(b'\x00').decode('utf-8', errors='ignore')
                 else:
                     info['model'] = ''
             else:

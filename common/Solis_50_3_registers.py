@@ -123,6 +123,11 @@ class RegisterMap:
     STRING7_CURRENT                          = 0x0CEB
     STRING8_CURRENT                          = 0x0CEC
 
+    # DEVICE_MODEL: U16 product model code at 0x0BB8 (3000)
+    # Real Solis 50K falls in model group 0x1121 per PDF §3000
+    DEVICE_MODEL                             = 0x0BB8
+    DEVICE_MODEL_SIZE                        = 1
+
     # Control — vendor ON/OFF reg 3007 (0x0BBF) collides with DC_OUTPUT_POWER
     # so we route ON/OFF through the standard Solarize DER-AVM 0x0834 address
     # which the simulator initializes. Real Solis hardware would need a
@@ -371,3 +376,10 @@ H01_FIELD_MAP = {
 
 U32_WORD_ORDER = 'HL'
 RTU_FC_CODE = 4
+
+
+# Solis product model code → name (§3000 model id reference)
+MODEL_CODE_MAP = {
+    0x1121: 'SOLIS-50K-SIM',
+}
+MODEL_CODE_DEFAULT = 0x1121

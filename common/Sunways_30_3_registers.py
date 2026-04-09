@@ -158,8 +158,10 @@ class RegisterMap:
 
 
     # Device info (FC03) — Sunways PV Protocol V00.07
-    # DEVICE_MODEL: only U16 type code at 0x2718 — not a string
+    # DEVICE_MODEL: U16 type code at 0x2718 (hi=MPPT count, lo=rating index)
     # Serial: STRING 8 regs at 0x2710 (10000)
+    DEVICE_MODEL                             = 0x2718
+    DEVICE_MODEL_SIZE                        = 1
     DEVICE_SERIAL_NUMBER                     = 0x2710
     DEVICE_SERIAL_NUMBER_SIZE                = 8
 
@@ -344,3 +346,12 @@ H01_FIELD_MAP = {
 
 U32_WORD_ORDER = 'HL'
 RTU_FC_CODE = 3
+
+
+# Sunways type code: high byte = MPPT count, low byte = rating index
+# (15 = 3-phase four-MPPT, 1 = STT-30KTL per PDF)
+MODEL_CODE_MAP = {
+    0x0F01: 'STT-30KTL-SIM',
+    0x1001: 'STT-50KTL-SIM',
+}
+MODEL_CODE_DEFAULT = 0x0F01

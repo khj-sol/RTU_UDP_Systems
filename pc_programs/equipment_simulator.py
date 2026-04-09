@@ -953,10 +953,19 @@ class GenericInverterSimulator:
         # DEVICE_MODEL_SIZE / DEVICE_SERIAL_NUMBER_SIZE attrs when present.
         # Without a size constant the default matches the Solarize Korean
         # V1.2.4 convention (16 regs model, 8 regs serial).
+        # DEVICE_MODEL_SIZE == 1 means the PDF exposes the model as a single
+        # U16 type code (Sungrow, Solis, Growatt, Sunways). In that case we
+        # write MODEL_CODE_DEFAULT (from the register file's code-to-name
+        # lookup table) as a raw numeric value rather than packing ASCII.
         device_model_addr = self._find_addr('DEVICE_MODEL', 'DEVICE_MODEL_NAME', 'MODEL')
         if device_model_addr is not None:
             model_regs = getattr(self.reg_map, 'DEVICE_MODEL_SIZE', None) or 16
-            self._write_string_regs(device_model_addr, model_name, model_regs)
+            if model_regs == 1:
+                code_default = getattr(self._module, 'MODEL_CODE_DEFAULT', None)
+                if code_default is not None:
+                    self._set_reg(device_model_addr, [int(code_default) & 0xFFFF])
+            else:
+                self._write_string_regs(device_model_addr, model_name, model_regs)
 
         serial_addr = self._find_addr('SERIAL_NUMBER', 'DEVICE_SERIAL_NUMBER',
                                        'SERIAL_NUMBER_BASE')
