@@ -1239,6 +1239,32 @@ def _get_mm2_client():
         _mm2_http_client = httpx.AsyncClient(base_url=f"http://127.0.0.1:{_MM2_PORT}", timeout=30.0)
     return _mm2_http_client
 
+@router.websocket("/mm2-app/api/ws/{session_id}")
+async def mm2_ws_proxy(websocket: WebSocket, session_id: str):
+    """WebSocket reverse proxy to MM2 server."""
+    import websockets
+    await websocket.accept()
+    mm2_ws_url = f"ws://127.0.0.1:{_MM2_PORT}/api/ws/{session_id}"
+    try:
+        async with websockets.connect(mm2_ws_url) as mm2_ws:
+            import asyncio
+            async def forward_to_client():
+                async for msg in mm2_ws:
+                    await websocket.send_text(msg)
+            async def forward_to_mm2():
+                while True:
+                    data = await websocket.receive_text()
+                    await mm2_ws.send(data)
+            await asyncio.gather(forward_to_client(), forward_to_mm2())
+    except Exception:
+        pass
+    finally:
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+
+
 @router.api_route("/mm2-app/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
 async def mm2_proxy(request: Request, path: str = ""):
     """Reverse-proxy all requests to the local MM2 server."""

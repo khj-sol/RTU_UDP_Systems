@@ -388,7 +388,10 @@
 </div>
 
 <script>
-  const API = '/api';
+  // Detect if running inside dashboard iframe (proxy at /api/mm2-app/).
+  // When proxied, API calls must go through the proxy path, not root /api.
+  const _isProxied = window.location.pathname.includes('/mm2-app');
+  const API = _isProxied ? '/api/mm2-app/api' : '/api';
   let sessionId = null;
   let ws = null;
   let uploadedFilename = null;
@@ -440,7 +443,9 @@
       sessionStorage.removeItem('mm_orig_name');
     }
 
-    ws = new WebSocket(`ws://${location.host}/api/ws/${sessionId}`);
+    const _wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const _wsPath = _isProxied ? `/api/mm2-app/api/ws/${sessionId}` : `/api/ws/${sessionId}`;
+    ws = new WebSocket(`${_wsProto}//${location.host}${_wsPath}`);
     ws.onmessage = (e) => {
       const msg = JSON.parse(e.data);
       appendLog(msg.stage, msg.text, msg.level);
