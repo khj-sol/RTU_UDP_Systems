@@ -2940,9 +2940,9 @@ def _run_ai_pdf_extraction(pdf_path: str, ai_settings: dict,
                            progress: 'ProgressCallback' = None) -> List[Dict]:
     """Use Claude API to extract register tables from PDF text.
 
-    Sends the first ~100 pages of PDF text to Claude with a structured
-    prompt requesting Modbus register table extraction. Returns a list
-    of register dicts compatible with the normal stage1 table format.
+    Sends the first ~100 pages of PDF text to Claude with a comprehensive
+    prompt that produces RTU-compatible register data including control
+    registers, alarm bitfields, and inverter mode table.
     """
     import anthropic
 
@@ -2961,24 +2961,71 @@ def _run_ai_pdf_extraction(pdf_path: str, ai_settings: dict,
     log(f'[AI] Claude API 호출 중... (model={ai_settings["model"]}, {len(full_text)} chars)')
     client = anthropic.Anthropic(api_key=ai_settings['api_key'])
 
-    prompt = f"""You are a Modbus protocol expert. Extract ALL register definitions from this inverter protocol document.
+    prompt = f"""You are a Modbus protocol expert specializing in solar inverter register maps.
+Extract ALL register definitions from this inverter protocol document and output them as a JSON array.
 
-For each register, output a JSON object with these fields:
+## Required JSON fields for each register:
 - "address": hex string like "0x1037"
 - "name": register name in UPPER_SNAKE_CASE (English)
 - "data_type": one of "U16", "S16", "U32", "S32", "FLOAT32", "STRING"
 - "scale": numeric scale factor (e.g., 0.1, 0.01, 1)
-- "unit": physical unit (e.g., "V", "A", "W", "Hz", "kWh", "°C", "")
-- "fc": function code (3 or 4)
-- "rw": "R" or "RW"
+- "unit": physical unit (e.g., "V", "A", "W", "Hz", "kWh", "degC", "")
+- "fc": function code (3 or 4). Use 3 for Holding registers, 4 for Input registers
+- "rw": "R" for read-only, "RW" for read-write (control/setting registers)
 - "description": short English description
+- "category": one of "MONITORING", "CONTROL", "STATUS", "ALARM", "DEVICE_INFO"
 
-Rules:
-1. Include ALL registers: monitoring, status, error codes, device info, control
-2. For 32-bit registers, use the LOW word address
-3. Detect if error/fault registers are bitfields — if so add "bits" field with {{bit_num: "BIT_NAME"}}
-4. Detect inverter mode/status register — add "modes" field with {{value: "MODE_NAME"}}
-5. Output ONLY a JSON array, no other text
+## CRITICAL extraction rules:
+
+### 1. Monitoring registers (category: "MONITORING")
+Extract ALL of these if present in PDF:
+- Per-phase AC: voltage (R/S/T or L1/L2/L3), current, power, frequency
+- Per-MPPT: PV voltage, PV current, MPPT power (for EACH MPPT channel)
+- Total: AC power, reactive power, power factor, daily energy, cumulative energy
+- Temperature: internal/ambient/heatsink temperature
+- Generation time, peak power
+
+### 2. Control registers (category: "CONTROL") — VERY IMPORTANT
+Look for holding registers (FC03 or FC06) that are writable (RW):
+- ON/OFF or remote shutdown command register
+- Active power limit/curtailment (typically 0-100% or 0-1000)
+- Reactive power setting / percentage
+- Power factor setting (typically -1000 to 1000 = -1.0 to 1.0)
+- Operating mode / regulation code
+These are often in a SEPARATE section titled "Control", "Command", "Setting", "Write registers", or "Holding registers (RW)".
+Mark these with "rw": "RW".
+
+### 3. Error/Alarm/Fault registers (category: "ALARM")
+- Extract ALL error/alarm/fault code registers
+- If the register is a BITFIELD (each bit = different fault), add a "bits" field:
+  "bits": {{"0": "BIT_0_NAME", "1": "BIT_1_NAME", ...}}
+  Extract the full bit definition table from the PDF appendix or fault code table.
+- If the register is an ENUM (single value = one fault code), add a "fault_codes" field:
+  "fault_codes": {{"2": "Grid overvoltage", "3": "Grid undervoltage", ...}}
+
+### 4. Status/Mode register (category: "STATUS")
+- Find the inverter operating mode/status register
+- Add a "modes" field mapping numeric values to mode names:
+  "modes": {{"0": "INITIAL", "1": "STANDBY", "3": "ON_GRID", "5": "FAULT", "9": "SHUTDOWN"}}
+
+### 5. Device information (category: "DEVICE_INFO")
+- Model name/number (often STRING type, multiple consecutive registers)
+- Serial number
+- Firmware version
+- Rated power, rated voltage, rated frequency
+- MPPT count, string count
+
+### 6. For 32-bit registers (U32/S32):
+- Use the LOW word address (first register)
+- The HIGH word is address+1
+
+### 7. STRING type registers:
+- Use the starting address
+- Add "length" field with number of registers (e.g., 8 for 16-char string)
+
+## Output format:
+Output ONLY a valid JSON array. No markdown, no explanation, no code blocks.
+Start with [ and end with ].
 
 PDF Document:
 {full_text}"""
@@ -2986,7 +3033,8 @@ PDF Document:
     try:
         response = client.messages.create(
             model=ai_settings['model'],
-            max_tokens=16000,
+            max_tokens=32000,
+            thinking={"type": "enabled", "budget_tokens": 10000},
             messages=[{"role": "user", "content": prompt}],
         )
     except Exception as api_err:
@@ -2995,26 +3043,49 @@ PDF Document:
             log(f'[AI] API credit balance too low - recharge at console.anthropic.com', 'error')
         elif 'authentication' in err_msg.lower() or '401' in err_msg:
             log(f'[AI] API key authentication failed', 'error')
+        elif 'thinking' in err_msg.lower():
+            # Fallback: retry without thinking for models that don't support it
+            log('[AI] Thinking not supported, retrying without...')
+            try:
+                response = client.messages.create(
+                    model=ai_settings['model'],
+                    max_tokens=32000,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+            except Exception as retry_err:
+                log(f'[AI] Claude API error: {str(retry_err)[:200]}', 'error')
+                raise
         else:
             log(f'[AI] Claude API error: {err_msg[:200]}', 'error')
-        raise
+            raise
 
-    ai_text = response.content[0].text if response.content else ''
+    # Extract text from response (skip thinking blocks)
+    ai_text = ''
+    for block in (response.content or []):
+        if hasattr(block, 'text'):
+            ai_text = block.text
+            break
     log(f'[AI] 응답 수신 완료: {len(ai_text)} chars, tokens={response.usage.input_tokens}+{response.usage.output_tokens}')
 
     # Parse JSON from response
     try:
-        # Find JSON array in response
-        start = ai_text.find('[')
-        end = ai_text.rfind(']') + 1
+        # Find JSON array in response (skip any markdown fences)
+        text = ai_text.replace('```json', '').replace('```', '')
+        start = text.find('[')
+        end = text.rfind(']') + 1
         if start >= 0 and end > start:
-            registers = json.loads(ai_text[start:end])
+            registers = json.loads(text[start:end])
         else:
-            registers = json.loads(ai_text)
+            registers = json.loads(text)
         log(f'[AI] {len(registers)}개 레지스터 추출 완료')
     except json.JSONDecodeError as e:
         log(f'[AI] JSON 파싱 실패: {e}', 'error')
         registers = []
+
+    # Post-process: normalize bit keys to int
+    for reg in registers:
+        if 'bits' in reg and isinstance(reg['bits'], dict):
+            reg['bits'] = {int(k): v for k, v in reg['bits'].items()}
 
     return registers
 

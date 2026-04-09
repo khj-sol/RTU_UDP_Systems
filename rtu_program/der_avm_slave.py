@@ -419,17 +419,21 @@ class DerAvmSlave:
         self.logger.info("[DER-AVM] CM4 receive loop ended")
 
     def _process_buffer(self, buffer: bytearray):
-        """Process received buffer as Modbus frame"""
-        # Check slave ID range (slave_id to slave_id + inverter_count - 1)
+        """Process received buffer as Modbus frame.
+
+        Supports:
+        - Individual control: slave_id in [self.slave_id .. slave_id + count - 1]
+        - Group/broadcast control: slave_id == 0x00 (all inverters, no response)
+        """
         request_slave_id = buffer[0]
         max_slave_id = self.slave_id + self.inverter_count - 1
 
-        if request_slave_id < self.slave_id or request_slave_id > max_slave_id:
+        # Broadcast address 0x00: group control for ALL inverters (no response)
+        is_broadcast = (request_slave_id == 0x00)
+
+        if not is_broadcast and (request_slave_id < self.slave_id or request_slave_id > max_slave_id):
             self.logger.debug(f"[DER-AVM] Not for us: slave_id={request_slave_id}, valid range={self.slave_id}-{max_slave_id}")
             return
-
-        # Calculate inverter ID (1-based)
-        inverter_id = request_slave_id - self.slave_id + 1
 
         # Verify CRC
         if not ModbusCRC.verify(bytes(buffer)):
@@ -443,7 +447,25 @@ class DerAvmSlave:
             lock_acquired = acquire_hat_lock(2, timeout=5.0)
 
         try:
-            self._process_request(bytes(buffer), inverter_id)
+            if is_broadcast:
+                # Broadcast: apply write command to ALL inverters, send NO response
+                fc = buffer[1]
+                if fc not in (self.FC_WRITE_SINGLE, self.FC_WRITE_MULTIPLE):
+                    self.logger.warning(f"[DER-AVM] Broadcast only supports write FC, got 0x{fc:02X}")
+                    return
+                self.logger.info(f"[DER-AVM] BROADCAST (0x00) FC=0x{fc:02X} to {self.inverter_count} inverters")
+                # Temporarily disable response sending
+                orig_send = self._send_response
+                self._send_response = lambda r: None  # suppress response
+                try:
+                    for inv_id in range(1, self.inverter_count + 1):
+                        self._process_request(bytes(buffer), inv_id)
+                finally:
+                    self._send_response = orig_send
+            else:
+                # Individual control: single inverter
+                inverter_id = request_slave_id - self.slave_id + 1
+                self._process_request(bytes(buffer), inverter_id)
         finally:
             if not self.use_cm4 and HAT_LOCK_AVAILABLE and lock_acquired:
                 release_hat_lock(2)
