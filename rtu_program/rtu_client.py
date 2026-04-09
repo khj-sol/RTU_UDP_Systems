@@ -664,25 +664,60 @@ class RTUClient:
                 return
             self.logger.info(f"H03 Modbus test: FC{fc:02d} slave={slave_id} "
                              f"addr=0x{addr:04X} count={count}")
-            # Find a handler with a master on channel 1 (primary RS485)
+            # Find handler and master for the target slave_id
             master = None
+            target_handler = None
             for inv in self.inverters:
                 h = inv.get('handler')
-                if h and hasattr(h, 'master') and h.master:
-                    master = h.master
-                    break
+                if h:
+                    # Match by slave_id
+                    h_slave = getattr(h, 'slave_id', None)
+                    if h_slave == slave_id:
+                        target_handler = h
+                        if hasattr(h, 'master') and h.master:
+                            master = h.master
+                        break
+            # Fallback: first handler with a master
+            if not master and not target_handler:
+                for inv in self.inverters:
+                    h = inv.get('handler')
+                    if h and hasattr(h, 'master') and h.master:
+                        master = h.master
+                        break
             if not master and hasattr(self.modbus, '_master'):
                 master = self.modbus._master
-            if not master:
+
+            # Simulation mode: handler exists but no physical master
+            is_sim = target_handler and not master
+            if is_sim:
+                self.logger.info(f"H03 Modbus test: SIM mode for slave={slave_id}")
+
+            if not master and not is_sim:
                 self.logger.error("H03 Modbus test: no Modbus master available")
                 pkt, _ = self.protocol.create_h05_modbus_result(
                     dev_num, fc, slave_id, addr, -2)
                 self._send_udp_no_ack(pkt)
                 return
-            # Execute Modbus operation in current thread (H03 handler is threaded)
+
             try:
                 with self._modbus_lock:
-                    if ctrl_type == CTRL_MODBUS_READ:
+                    if is_sim:
+                        # Simulation: read register data from handler's sim data
+                        sim_regs = self._sim_read_registers(
+                            target_handler, fc, addr, count)
+                        if ctrl_type == CTRL_MODBUS_READ:
+                            if sim_regs is not None:
+                                pkt, _ = self.protocol.create_h05_modbus_result(
+                                    dev_num, fc, slave_id, addr, 0, sim_regs)
+                            else:
+                                pkt, _ = self.protocol.create_h05_modbus_result(
+                                    dev_num, fc, slave_id, addr, 0,
+                                    [0] * count)  # return zeros for unmapped
+                        else:
+                            # Write in sim mode: just acknowledge
+                            pkt, _ = self.protocol.create_h05_modbus_result(
+                                dev_num, fc, slave_id, addr, 0, values)
+                    elif ctrl_type == CTRL_MODBUS_READ:
                         if fc == 4:
                             regs = master.read_input_registers(addr, count, slave_id)
                         else:
@@ -711,6 +746,55 @@ class RTUClient:
                 pkt, _ = self.protocol.create_h05_modbus_result(
                     dev_num, fc, slave_id, addr, -2)
                 self._send_udp_no_ack(pkt)
+
+    def _sim_read_registers(self, handler, fc, addr, count):
+        """Read registers from simulation handler by building a register map
+        from the handler's last read_inverter_data() or read_monitor_data()."""
+        try:
+            # Get simulation data as dict
+            data = None
+            if hasattr(handler, 'read_inverter_data'):
+                data = handler.read_inverter_data()
+            if not data:
+                return [0] * count
+
+            # Build address -> value map from RegisterMap attributes
+            reg_module = getattr(handler, 'reg_module', None)
+            if not reg_module:
+                return [0] * count
+
+            reg_map_cls = getattr(reg_module, 'RegisterMap', None)
+            if not reg_map_cls:
+                return [0] * count
+
+            # Map: register_name -> address
+            addr_to_name = {}
+            for attr_name in dir(reg_map_cls):
+                if attr_name.startswith('_'):
+                    continue
+                val = getattr(reg_map_cls, attr_name, None)
+                if isinstance(val, int) and 0 <= val <= 0xFFFF:
+                    addr_to_name[val] = attr_name
+
+            # Map data keys to register values
+            reg_values = {}
+            for key, value in data.items():
+                # Find register address for this data key
+                upper_key = key.upper()
+                for reg_addr, reg_name in addr_to_name.items():
+                    if reg_name == upper_key or reg_name.replace('_', '') == upper_key.replace('_', ''):
+                        if isinstance(value, (int, float)):
+                            reg_values[reg_addr] = int(value) & 0xFFFF
+                        break
+
+            # Build result array
+            result = []
+            for i in range(count):
+                result.append(reg_values.get(addr + i, 0))
+            return result
+        except Exception as e:
+            self.logger.error(f"_sim_read_registers error: {e}")
+            return [0] * count
 
     # =========================================================================
     # H05 Control Sequence (fire-and-forget)
