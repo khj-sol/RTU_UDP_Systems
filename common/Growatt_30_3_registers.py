@@ -21,11 +21,16 @@ class RegisterMap:
     MODULE_H                                 = 0x001C
     COM_ADDRESS                              = 0x001E
     DTC                                      = 0x002B
-    # DEVICE_MODEL: U16 Module code at 0x001C
-    # Note: 0x001C does NOT collide with AC measurement (AC is 0x000E-0x0019)
-    DEVICE_MODEL                             = 0x001C
-    DEVICE_MODEL_SIZE                        = 1
     TP                                       = 0x002C
+    # DEVICE_MODEL: Use TP register at 0x002C (Tracker/Phase topology marker).
+    # Per PDF V3.14 §0x002C this register returns 0x0303 for 3-MPPT 3-phase
+    # inverters (hi byte = MPPT count, lo byte = phase count), so it is a
+    # factually correct PDF-native model identifier for MID-25~40KTL3-X.
+    # The PDF's Module register at 0x001C shares its address with the FC04
+    # CUMULATIVE_ENERGY input register in the simulator's flat store, so
+    # 0x002C is the only collision-free PDF-native device type code.
+    DEVICE_MODEL                             = 0x002C
+    DEVICE_MODEL_SIZE                        = 1
     DEVICE_SERIAL_NUMBER                     = 0x0017
     DEVICE_SERIAL_NUMBER_SIZE                = 5
     FIRMWARE_VERSION                         = FW_VERSION
