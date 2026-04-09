@@ -157,6 +157,15 @@ class RegisterMap:
     INVERTER_ON_OFF                          = 0x0834
 
 
+    # --- Simulator/RTU compatible device info registers ---
+    # Standardized at 0x1A00 (model, 16 regs = 32 bytes) and 0x1A10 (serial,
+    # 8 regs = 16 bytes) so the equipment simulator's _populate_device_info
+    # can write string data without colliding with measurement registers.
+    # Matches the Solarize/Senergy/CPS convention for consistent behavior.
+    DEVICE_MODEL                             = 0x1A00
+    DEVICE_SERIAL_NUMBER                     = 0x1A10
+
+
 class InverterMode:
     INITIAL  = 0x01  # check
     STANDBY  = 0x00  # wait
