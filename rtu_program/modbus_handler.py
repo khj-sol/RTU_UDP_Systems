@@ -302,7 +302,7 @@ _H01_CONVERTERS = {
     'frequency_to_01Hz': lambda raw, sc: int(raw * sc.get('frequency', 0.01) * 10),
     'power_to_W':        lambda raw, sc: int(raw * sc.get('power', 0.1)),
     'pf_raw':            lambda raw, sc: int(raw),
-    'energy_kwh_to_Wh':  lambda raw, sc: int(raw * 1000),
+    'energy_kwh_to_Wh':  lambda raw, sc: int(raw * sc.get('energy_to_kwh', 1.0) * 1000),
     'raw':               lambda raw, sc: int(raw),
 }
 _H01_FLOAT_CONVERTERS = {
@@ -772,7 +772,7 @@ class ModbusHandlerHAT:
             else:
                 data['status'] = INV_STATUS_STANDBY
 
-            # ── MPPT Data ───────────────────────────────────────────────────
+            # ── MPPT Data (direct from MPPT{N}_VOLTAGE/CURRENT regs) ─────────
             mppt_data = []
             for i in range(1, 17):
                 v_field = f'MPPT{i}_VOLTAGE'
@@ -790,6 +790,54 @@ class ModbusHandlerHAT:
                 mppt_c = (int((c_val or 0) * 100) if c_dtype == 'float32'
                           else int(c_val) if c_val else 0)
                 mppt_data.append({'voltage': mppt_v, 'current': mppt_c})
+
+            # ── String data (voltage + current) ──────────────────────────────
+            # Some inverters (Huawei, Ekos) have only per-string registers.
+            # Store both voltage and current for optional MPPT aggregation below.
+            strings = []           # per-H01 output: string current array
+            string_details = []    # internal: (v_raw, c_raw) per string
+            for i in range(1, 33):
+                c_field = f'STRING{i}_CURRENT'
+                v_field = f'STRING{i}_VOLTAGE'
+                c_addr = getattr(rm, c_field, None)
+                if c_addr is None:
+                    break
+                v_addr = getattr(rm, v_field, None)
+                c_val = _read_field(c_field, c_addr, cache)
+                c_dtype = self._resolve_dtype(c_field)
+                c_raw = (int((c_val or 0) * 100) if c_dtype == 'float32'
+                         else int(c_val) if c_val else 0)
+                strings.append(c_raw)
+                # Read voltage for aggregation (may alias to MPPT voltage)
+                if v_addr is not None:
+                    v_val = _read_field(v_field, v_addr, cache)
+                    v_dtype = self._resolve_dtype(v_field)
+                    v_raw = (int((v_val or 0) * 10) if v_dtype == 'float32'
+                             else int(v_val) if v_val else 0)
+                else:
+                    v_raw = 0
+                string_details.append({'voltage': v_raw, 'current': c_raw})
+            data['strings'] = strings
+
+            # ── MPPT from strings (Huawei/Ekos pattern) ──────────────────────
+            # If register file exposes strings but not MPPT, compute MPPT data
+            # by aggregating strings: voltage = average of strings on this
+            # MPPT, current = sum of string currents (parallel connection).
+            strings_per_mppt = getattr(self.reg_module, 'STRINGS_PER_MPPT', 0)
+            if (not mppt_data and string_details and strings_per_mppt > 0
+                    and len(string_details) >= strings_per_mppt):
+                num_mppt = len(string_details) // strings_per_mppt
+                for mi in range(num_mppt):
+                    group = string_details[mi*strings_per_mppt:(mi+1)*strings_per_mppt]
+                    # Only count connected strings (voltage > 10V raw = 1.0V) for avg
+                    active = [s for s in group if s['voltage'] > 100]
+                    if active:
+                        avg_v = sum(s['voltage'] for s in active) // len(active)
+                    else:
+                        avg_v = sum(s['voltage'] for s in group) // max(1, len(group))
+                    sum_i = sum(s['current'] for s in group)
+                    mppt_data.append({'voltage': avg_v, 'current': sum_i})
+
             data['mppt'] = mppt_data
 
             if mppt_data:
@@ -797,22 +845,19 @@ class ModbusHandlerHAT:
                 data['pv_voltage'] = (int(sum(m['voltage'] for m in connected)
                                          / len(connected) / 10) if connected else 0)
                 data['pv_current'] = int(sum(m['current'] for m in mppt_data) / 10)
+            elif string_details:
+                # Single-MPPT central type with no MPPT aggregation: compute
+                # pv_voltage = average string voltage, pv_current = sum string currents.
+                active = [s for s in string_details if s['voltage'] > 100]
+                if active:
+                    data['pv_voltage'] = int(sum(s['voltage'] for s in active)
+                                              / len(active) / 10)
+                else:
+                    data['pv_voltage'] = 0
+                data['pv_current'] = int(sum(s['current'] for s in string_details) / 10)
             else:
                 data['pv_voltage'] = 0
                 data['pv_current'] = 0
-
-            # ── String Currents ─────────────────────────────────────────────
-            strings = []
-            for i in range(1, 33):
-                s_field = f'STRING{i}_CURRENT'
-                s_addr = getattr(rm, s_field, None)
-                if s_addr is None:
-                    break
-                s_val = _read_field(s_field, s_addr, cache)
-                s_dtype = dtypes.get(s_field, 'u16').lower()
-                strings.append(int((s_val or 0) * 100) if s_dtype == 'float32'
-                               else int(s_val) if s_val else 0)
-            data['strings'] = strings
 
             if hasattr(self, '_check_stats_log'):
                 self._check_stats_log()
