@@ -1466,14 +1466,21 @@ class RTUClient:
     # =========================================================================
 
     def _heartbeat_loop(self):
-        """Send H05 heartbeat every HEARTBEAT_INTERVAL seconds"""
+        """Send H05 heartbeat every HEARTBEAT_INTERVAL seconds.
+
+        Uses H05 body_type=2 (RTU_EVENT) with event name 'HEARTBEAT'
+        instead of the legacy empty body_type=0 ping. The server classifies
+        body_type=2 'HEARTBEAT' events into _LOG_ONLY_EVENTS so they do not
+        spam the dashboard Response Log but still serve as NAT keep-alive
+        and liveness signal.
+        """
         time.sleep(10)  # Initial delay
         while self.running:
             try:
                 now = time.time()
                 if now - self.last_heartbeat_time >= HEARTBEAT_INTERVAL:
-                    pkt, seq = self.protocol.create_h05_heartbeat()
-                    self.logger.debug(f"H05 HB TX (seq={seq})")
+                    pkt, seq = self.protocol.create_h05_event('HEARTBEAT')
+                    self.logger.debug(f"H05 HB TX (seq={seq}) body_type=2 'HEARTBEAT'")
                     self._send_to_servers(pkt, save_on_fail=False)
                     self.last_heartbeat_time = now
             except Exception as e:

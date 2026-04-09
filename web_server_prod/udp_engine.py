@@ -778,11 +778,19 @@ class UDPEngine:
             detail = "Heartbeat ping"
 
         elif body_type == BODY_TYPE_RTU_EVENT:
-            event_type = "rtu_event"
             if len(body) > 0:
                 event_len = body[0]
                 if len(body) > event_len:
                     detail = body[1:1 + event_len].decode('utf-8', errors='ignore')
+            # RTU_EVENT body carrying the literal string 'HEARTBEAT' is the
+            # new-form heartbeat (replaces empty body_type=0). Classify it as
+            # 'heartbeat' so main.py routes it to _LOG_ONLY_EVENTS and the
+            # dashboard Response Log stays clean, identical to the legacy
+            # body_type=0 heartbeat behavior.
+            if detail == 'HEARTBEAT':
+                event_type = "heartbeat"
+            else:
+                event_type = "rtu_event"
 
         elif body_type == BODY_TYPE_RTU_INFO:
             event_type = "rtu_info"
