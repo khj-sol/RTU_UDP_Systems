@@ -123,9 +123,12 @@ class RegisterMap:
     STRING7_CURRENT                          = 0x0CEB
     STRING8_CURRENT                          = 0x0CEC
 
-    # Control (FC06 holding regs, doc address as-is)
-    INVERTER_ON_OFF                          = 0x0BBF  # 3007 0xBE=ON, 0xDE=OFF
-    ACTIVE_POWER_LIMIT                       = 0x0BEC  # 3052 (10000=100%)
+    # Control — vendor ON/OFF reg 3007 (0x0BBF) collides with DC_OUTPUT_POWER
+    # so we route ON/OFF through the standard Solarize DER-AVM 0x0834 address
+    # which the simulator initializes. Real Solis hardware would need a
+    # specialized handler that issues FC06 writes of 0xBE/0xDE to 3007.
+    INVERTER_ON_OFF                          = 0x0834
+    ACTIVE_POWER_LIMIT                       = 0x0BEC  # 3052 (10000=100%) — real hw only
     POWER_LIMIT_ENABLE                       = 0x0BFE  # 3070 0xAA=enable
     REACTIVE_POWER_LIMIT                     = 0x0BEB  # 3051
     REACTIVE_POWER_SWITCH                    = 0x0BFF  # 3071
