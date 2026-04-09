@@ -1297,7 +1297,12 @@ function HistoryTab({
   const [devices, setDevices] = useState([]);
   const [deviceNum, setDeviceNum] = useState('');
   const [deviceType, setDeviceType] = useState('inverter');
-  const [limit, setLimit] = useState(100);
+  // Time-range filter state. Default 1 hour back from now. Options:
+  //   '1h','6h','1d','7d','30d' = preset rolling windows ending now
+  //   'custom' = use fromDt/toDt manually entered datetimes
+  const [timeRange, setTimeRange] = useState('1h');
+  const [fromDt, setFromDt] = useState('');
+  const [toDt, setToDt] = useState('');
   const [data, setData] = useState([]);
   const [clearTs, setClearTs] = useState(() => sessionStorage.getItem('history_clear_ts') || '');
   useEffect(() => {
@@ -1322,14 +1327,39 @@ function HistoryTab({
       }
     }).catch(() => {});
   }, [rtuId]);
+  // KST timestamp formatter — matches DB column format `YYYY-MM-DD HH:MM:SS`.
+  const fmtKstTs = (date) => {
+    const k = new Date(date.getTime() + 9 * 3600 * 1000);
+    return k.toISOString().replace('T', ' ').substring(0, 19);
+  };
+  // datetime-local input value (YYYY-MM-DDTHH:MM in local tz) → KST DB string
+  const dtLocalToKst = (s) => s ? s.replace('T', ' ') + (s.length === 16 ? ':00' : '') : '';
   const loadData = () => {
     if (!rtuId || !deviceNum) return;
-    const fromParam = clearTs ? `&from_ts=${encodeURIComponent(clearTs)}` : '';
-    fetcher(`/data/${deviceType}?rtu_id=${rtuId}&device_num=${deviceNum}&limit=${limit}${fromParam}`).then(d => setData(Array.isArray(d?.data) ? d.data : Array.isArray(d) ? d : [])).catch(() => setData([]));
+    let from_ts = '';
+    let to_ts = '';
+    if (timeRange === 'custom') {
+      from_ts = dtLocalToKst(fromDt);
+      to_ts = dtLocalToKst(toDt);
+    } else {
+      const ms = {
+        '1h': 1*3600e3, '6h': 6*3600e3,
+        '1d': 24*3600e3, '7d': 7*24*3600e3, '30d': 30*24*3600e3,
+      }[timeRange] || 3600e3;
+      const now = new Date();
+      from_ts = fmtKstTs(new Date(now.getTime() - ms));
+      to_ts = fmtKstTs(now);
+    }
+    // Honor the Clear button: never load data older than the clear timestamp.
+    if (clearTs && (!from_ts || from_ts < clearTs)) from_ts = clearTs;
+    const params = [`rtu_id=${rtuId}`, `device_num=${deviceNum}`, `limit=10000`];
+    if (from_ts) params.push(`from_ts=${encodeURIComponent(from_ts)}`);
+    if (to_ts) params.push(`to_ts=${encodeURIComponent(to_ts)}`);
+    fetcher(`/data/${deviceType}?${params.join('&')}`).then(d => setData(Array.isArray(d?.data) ? d.data : Array.isArray(d) ? d : [])).catch(() => setData([]));
   };
   useEffect(() => {
     loadData();
-  }, [rtuId, deviceNum, deviceType, limit, clearTs]);
+  }, [rtuId, deviceNum, deviceType, timeRange, fromDt, toDt, clearTs]);
   const rev = useMemo(() => data.slice().reverse(), [data]);
   const powerSeries = useMemo(() => deviceType === 'inverter' ? [{
     name: 'PV Power',
@@ -1490,14 +1520,34 @@ function HistoryTab({
     value: d.device_number
   }, "#", d.device_number, " (", d.device_type === 1 ? MODEL_NAMES[d.model] || 'Inverter' : d.device_type === 5 ? 'Weather' : 'Relay', ")")))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
     className: "text-gray-400 text-xs block mb-1"
-  }, "Limit"), /*#__PURE__*/React.createElement("select", {
+  }, "Time Range"), /*#__PURE__*/React.createElement("select", {
     className: "bg-gray-700 rounded px-3 py-2",
-    value: limit,
-    onChange: e => setLimit(Number(e.target.value))
-  }, [50, 100, 200, 500].map(n => /*#__PURE__*/React.createElement("option", {
-    key: n,
-    value: n
-  }, n)))), /*#__PURE__*/React.createElement("button", {
+    value: timeRange,
+    onChange: e => setTimeRange(e.target.value)
+  }, [
+    {v:'1h',  l:'Last 1 hour'},
+    {v:'6h',  l:'Last 6 hours'},
+    {v:'1d',  l:'Last 1 day'},
+    {v:'7d',  l:'Last 7 days'},
+    {v:'30d', l:'Last 30 days'},
+    {v:'custom', l:'Custom range'},
+  ].map(o => /*#__PURE__*/React.createElement("option", {
+    key: o.v, value: o.v
+  }, o.l)))), timeRange === 'custom' && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    className: "text-gray-400 text-xs block mb-1"
+  }, "From"), /*#__PURE__*/React.createElement("input", {
+    type: "datetime-local",
+    className: "bg-gray-700 rounded px-3 py-2",
+    value: fromDt,
+    onChange: e => setFromDt(e.target.value)
+  })), timeRange === 'custom' && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    className: "text-gray-400 text-xs block mb-1"
+  }, "To"), /*#__PURE__*/React.createElement("input", {
+    type: "datetime-local",
+    className: "bg-gray-700 rounded px-3 py-2",
+    value: toDt,
+    onChange: e => setToDt(e.target.value)
+  })), /*#__PURE__*/React.createElement("button", {
     onClick: loadData,
     className: "bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded"
   }, "Refresh"), data.length > 0 && /*#__PURE__*/React.createElement("button", {
