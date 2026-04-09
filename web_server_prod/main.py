@@ -641,7 +641,13 @@ async def startup():
     _background_tasks.append(asyncio.create_task(_data_retention_task()))
     _background_tasks.append(asyncio.create_task(_wal_checkpoint_task()))
     _background_tasks.append(asyncio.create_task(_downsample_task()))
-    engine.on_h01_cycle_complete = send_control_check_for_rtu
+    # Disabled: automatic Status Check after every H01 cycle caused duplicate
+    # H04/H05(check)/H05(result) pairs in the Response Log whenever a manual
+    # control command was sent within the 30s manual-command window. The RTU
+    # already sends control_check+control_result spontaneously after every
+    # control write, and H01 data carries live inverter status, so the
+    # server-initiated periodic Status Check is redundant noise.
+    # engine.on_h01_cycle_complete = send_control_check_for_rtu
     logger.info("Background tasks started (stale checker, data retention, WAL checkpoint, downsample)")
 
     # Start built-in FTP server for firmware updates
