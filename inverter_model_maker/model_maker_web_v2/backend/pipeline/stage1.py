@@ -2965,18 +2965,19 @@ def _run_ai_pdf_extraction(pdf_path: str, ai_settings: dict,
 Extract ONLY the essential operational registers from this inverter protocol document.
 
 ## IMPORTANT: REGISTER COUNT GUIDELINE
-A typical solar inverter has **30-50 unique register addresses** needed for RTU monitoring.
-- AC grid: ~7 (3 voltages + 3 currents + frequency)
+A typical solar inverter has **40-80 unique register addresses** needed for RTU monitoring.
+- AC grid: ~8 (3 voltages + 3 currents + frequency + [per-phase frequency])
 - DC/PV per-MPPT: 2-3 per MPPT (voltage, current, [power])
-- Per-string currents: 1 per string (if documented separately from MPPT)
+- Per-string currents: 1-2 per string (voltage+current if separate from MPPT)
+- Grid meter/Load: 0-18 (some inverters have CT/meter registers)
 - Power totals: 3-5 (active, reactive, PF, PV total, [per-phase power])
-- Energy: 1-2 (cumulative, [daily])
+- Energy: 2-5 (cumulative, daily, import, export, load)
 - Temperature: 1-2
 - Status: 1 (inverter mode)
 - Alarm: 1-3 error code registers
 - Control: 3-5 (on/off, power limit, PF, reactive power)
-- Device info: 2-4 (model, serial, firmware)
-Total: roughly 30-60 registers. If you extract more than 80, you are likely including
+- Device info: 3-8 (model, serial, firmware versions, nominal values)
+Total: roughly 40-80 registers. If you extract more than 100, you are likely including
 unnecessary registers. Be SELECTIVE — only extract what an RTU needs for monitoring & control.
 
 ## DO NOT EXTRACT these types of registers:
@@ -3009,7 +3010,8 @@ unnecessary registers. Be SELECTIVE — only extract what an RTU needs for monit
 L1_VOLTAGE, L2_VOLTAGE, L3_VOLTAGE (phase-to-neutral voltages)
 L1_CURRENT, L2_CURRENT, L3_CURRENT
 PHASE_A_POWER, PHASE_B_POWER, PHASE_C_POWER (only if per-phase power exists)
-FREQUENCY (grid frequency — only the PRIMARY one, not L2/L3 frequency)
+FREQUENCY (grid frequency, primary/L1)
+L2_FREQUENCY, L3_FREQUENCY (if per-phase frequency registers exist)
 
 ### Per-MPPT DC input (category=MONITORING):
 PV1_VOLTAGE, PV1_CURRENT, MPPT1_POWER (MPPT channel 1)
@@ -3019,9 +3021,11 @@ NOTE: Some PDFs call these "PV input 1/2/3" or "MPPT 1/2/3" — same thing.
 
 ### Per-String currents (category=MONITORING):
 STRING1_CURRENT, STRING2_CURRENT, ... (if PDF has per-string current registers)
-Note: If string currents are the SAME registers as PVn_CURRENT, do NOT duplicate.
-Only add STRING_N_CURRENT if the PDF has separate dedicated string current registers
-(e.g., in a different address range from MPPT registers).
+IMPORTANT: Many inverters have BOTH per-MPPT registers (PV1_VOLTAGE/PV1_CURRENT at one
+address range) AND per-string registers (String1 voltage/current at a DIFFERENT address
+range). These are NOT duplicates — they are physically separate registers.
+Extract BOTH sets if they exist at different addresses.
+Only skip string registers if they are literally the SAME address as MPPT registers.
 
 ### Power totals (category=MONITORING):
 ACTIVE_POWER — total AC active power output (W)
@@ -3029,9 +3033,23 @@ REACTIVE_POWER — total reactive power (Var)
 POWER_FACTOR — grid power factor
 PV_POWER — total DC input power (only if a separate register exists)
 
+### Grid meter / Load measurement (category=MONITORING, if present):
+Some inverters have CT/meter registers for grid-side and load-side measurement:
+L1_WATT_OF_GRID, L2_WATT_OF_GRID, L3_WATT_OF_GRID — per-phase grid power
+L1_WATT_OF_LOAD, L2_WATT_OF_LOAD, L3_WATT_OF_LOAD — per-phase load power
+L1_N_PHASE_VOLTAGE_OF_GRID, L2_N_PHASE_VOLTAGE_OF_GRID, L3_N_PHASE_VOLTAGE_OF_GRID
+L1_CURRENT_OF_GRID, L2_CURRENT_OF_GRID, L3_CURRENT_OF_GRID
+L1_N_PHASE_VOLTAGE_OF_LOAD, L2_N_PHASE_VOLTAGE_OF_LOAD, L3_N_PHASE_VOLTAGE_OF_LOAD
+L1_CURRENT_OF_LOAD, L2_CURRENT_OF_LOAD, L3_CURRENT_OF_LOAD
+ACCUMULATED_ENERGY_OFIMPORT, ACCUMULATED_ENERGY_OFEXPORT, ACCUMULATED_ENERGY_OF_LOAD
+These are NOT duplicates of inverter AC output — they measure the grid connection point.
+Include ALL of them if present in the PDF.
+
 ### Energy (category=MONITORING):
 CUMULATIVE_ENERGY — lifetime total energy (kWh)
 DAILY_ENERGY — today's energy (only if exists)
+ACCUMULATED_ENERGY_OFIMPORT — import energy from grid (if present)
+ACCUMULATED_ENERGY_OFEXPORT — export energy to grid (if present)
 
 ### Temperature (category=MONITORING):
 INNER_TEMP — inverter internal/heatsink temperature
@@ -3075,10 +3093,15 @@ If the register is an ENUM (the register value itself is a fault code number), a
   Include ALL fault codes from the PDF's fault code table/appendix.
 
 ### Device info (category=DEVICE_INFO):
-DEVICE_MODEL — model name (STRING type, add "length" = register count)
+DEVICE_MODEL or DEVICE_MODEL_NAME — model name (STRING type, add "length" = register count)
 DEVICE_SERIAL_NUMBER — serial number (STRING type)
-FIRMWARE_VERSION — firmware/software version
-(Add RATED_POWER/NOMINAL_POWER only if available as a readable register)
+FIRMWARE_VERSION or MASTER_FIRMWARE_VERSION — main firmware version
+SLAVE_FIRMWARE_VERSION — secondary firmware (if present)
+EMS_FIRMWARE_VERSION, LCD_FIRMWARE_VERSION — additional firmware versions (if present)
+NOMINAL_VOLTAGE, NOMINAL_FREQUENCY — rated values (if present)
+NOMINAL_POWER or RATED_POWER — rated power (if present)
+GRID_PHASE_NUMBER — number of phases (if present)
+Include ALL device information registers found in the PDF.
 
 ### Control registers (category=CONTROL, rw=RW):
 ONLY extract these specific control registers:
@@ -3105,13 +3128,15 @@ Use the PDF's documented scale factor or gain. Common patterns:
 ## FINAL CHECKLIST — verify before output:
 ✓ 3 AC voltages (L1/L2/L3) + 3 AC currents + FREQUENCY
 ✓ Per-MPPT voltage & current for EACH MPPT channel in the PDF
+✓ Per-String voltage & current if PDF has dedicated string registers (different addresses from MPPT)
+✓ Grid meter/Load registers if PDF has CT/meter section (L1_WATT_OF_GRID etc.)
 ✓ ACTIVE_POWER + POWER_FACTOR + CUMULATIVE_ENERGY
 ✓ INVERTER_MODE with "modes" mapping
 ✓ 1-3 ERROR_CODE registers with "bits" or "fault_codes" from PDF appendix
 ✓ INNER_TEMP
 ✓ At least INVERTER_ON_OFF control register
-✓ DEVICE_MODEL + DEVICE_SERIAL_NUMBER
-✓ Total register count is 30-60 (NOT 100+)
+✓ DEVICE_MODEL + DEVICE_SERIAL_NUMBER + all firmware versions
+✓ Total register count is 40-80 (NOT 100+)
 
 ## Output format:
 Output ONLY a valid JSON array. No markdown, no explanation, no code blocks.
