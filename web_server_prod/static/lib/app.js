@@ -361,7 +361,7 @@ function OverviewTab({
     className: "text-left"
   }, "Last Seen"), /*#__PURE__*/React.createElement("th", {
     className: "text-left"
-  }, "Devices"), /*#__PURE__*/React.createElement("th", {
+  }, "ON/OFF"), /*#__PURE__*/React.createElement("th", {
     className: "text-left"
   }, "Power"), /*#__PURE__*/React.createElement("th", {
     className: "text-center",
@@ -387,7 +387,10 @@ function OverviewTab({
     onClick: () => onSelectRtu(r.rtu_id)
   }, r.ip || '--', ":", r.port || '--'), /*#__PURE__*/React.createElement("td", {
     className: "text-center text-gray-400"
-  }, r.avg_interval > 0 ? Math.round(r.avg_interval / 60) + '\uBD84' : '-'), /*#__PURE__*/React.createElement("td", null, fmtTime(r.last_seen)), /*#__PURE__*/React.createElement("td", null, r.device_count || 0), /*#__PURE__*/React.createElement("td", null, fmt((r.total_solar_power || 0) / 1000, 2), " kW"), /*#__PURE__*/React.createElement("td", {
+  }, r.avg_interval > 0 ? Math.round(r.avg_interval / 60) + '\uBD84' : '-'), /*#__PURE__*/React.createElement("td", null, fmtTime(r.last_seen)), /*#__PURE__*/React.createElement("td", null,
+    /*#__PURE__*/React.createElement("span", { className: "text-green-400" }, r.devices_on || 0),
+    /*#__PURE__*/React.createElement("span", { className: "text-gray-500" }, "/"),
+    /*#__PURE__*/React.createElement("span", { className: (r.devices_off || 0) > 0 ? "text-red-400" : "text-gray-500" }, r.devices_off || 0)), /*#__PURE__*/React.createElement("td", null, fmt((r.total_solar_power || 0) / 1000, 2), " kW"), /*#__PURE__*/React.createElement("td", {
     className: "text-center"
   }, /*#__PURE__*/React.createElement("button", {
     className: "text-gray-500 hover:text-red-400 text-xs px-1",
