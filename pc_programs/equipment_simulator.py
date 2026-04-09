@@ -115,19 +115,19 @@ from common.REF_weather_registers import (
     wind_speed_to_raw, wind_direction_to_raw, module_temp_to_raw,
     accum_radiation_to_raw
 )
-from common.Kstar_60_3_registers import RegisterMap as KstarRegisters
-from common.Huawei_50_3_registers import RegisterMap as HuaweiRegisters
+from common.Kstar_60_3_MPPT3_STR9_registers import RegisterMap as KstarRegisters
+from common.Huawei_50_3_MPPT4_STR8_registers import RegisterMap as HuaweiRegisters
 try:
-    from common.Huawei_50_3_registers import HuaweiStatusConverter
+    from common.Huawei_50_3_MPPT4_STR8_registers import HuaweiStatusConverter
 except ImportError:
-    from common.Huawei_50_3_registers import HuaweiPvStatusConverter as HuaweiStatusConverter
+    from common.Huawei_50_3_MPPT4_STR8_registers import HuaweiPvStatusConverter as HuaweiStatusConverter
 try:
-    from common.Ekos_10_3_registers import RegisterMap as EkosRegisters, InverterMode as EkosInverterMode
+    from common.Ekos_10_3_MPPT1_STR2_registers import RegisterMap as EkosRegisters, InverterMode as EkosInverterMode
 except ImportError:
     EkosRegisters = None
     EkosInverterMode = None
 try:
-    from common.Sungrow_50_3_registers import RegisterMap as SungrowRegisters, InverterMode as SungrowInverterMode
+    from common.Sungrow_50_3_MPPT4_STR8_registers import RegisterMap as SungrowRegisters, InverterMode as SungrowInverterMode
 except ImportError:
     SungrowRegisters = None
     SungrowInverterMode = None
