@@ -1223,7 +1223,14 @@ class ModbusHandlerHAT:
             return False
         
         try:
-            # Helper: try multiple alias names (DER_* fallback for newer register files)
+            # Helper: try multiple alias names (DER_* FIRST for sim/standard DER-AVM).
+            # Resolution order (first match wins):
+            #   1. DER-AVM Solarize-standard aliases (0x07D0-0x07D3, 0x0834)
+            #   2. Vendor-specific register names (ACTIVE_POWER_PCT etc.)
+            # DER_* first ensures sim+RTU round-trip works across all 11 inverter
+            # protocols because the simulator always initializes DER-AVM block,
+            # whereas vendor-specific control registers (e.g. Solis 0x0BED) may
+            # collide with monitoring space or be uninitialized in the sim.
             def _get(*names, default=None):
                 for n in names:
                     v = getattr(self.RegMap, n, None)
@@ -1233,9 +1240,9 @@ class ModbusHandlerHAT:
 
             reg_map = {
                 CTRL_INV_ON_OFF: _get('INVERTER_ON_OFF', default=0x0834),
-                CTRL_INV_ACTIVE_POWER: _get('ACTIVE_POWER_PCT', 'DER_ACTIVE_POWER_PCT', default=0x07D3),
-                CTRL_INV_POWER_FACTOR: _get('POWER_FACTOR_SET', 'DER_POWER_FACTOR_SET', default=0x07D0),
-                CTRL_INV_REACTIVE_POWER: _get('REACTIVE_POWER_SET', 'DER_REACTIVE_POWER_PCT', default=0x07D2),
+                CTRL_INV_ACTIVE_POWER: _get('DER_ACTIVE_POWER_PCT', 'ACTIVE_POWER_PCT', default=0x07D3),
+                CTRL_INV_POWER_FACTOR: _get('DER_POWER_FACTOR_SET', 'POWER_FACTOR_SET', default=0x07D0),
+                CTRL_INV_REACTIVE_POWER: _get('DER_REACTIVE_POWER_PCT', 'REACTIVE_POWER_SET', default=0x07D2),
                 CTRL_INV_IV_SCAN: _get('IV_SCAN_COMMAND', default=0x600D),
             }
 
@@ -1243,18 +1250,14 @@ class ModbusHandlerHAT:
                 # Control Init: Reset all control values to default
                 # ON_OFF: 0=Run(ON), 1=Stop(OFF) in register
                 success = True
-                if getattr(self.RegMap, 'INVERTER_ON_OFF', None) is not None:
-                    success &= self.master.write_single_register(
-                        self.RegMap.INVERTER_ON_OFF, 0, self.slave_id)  # 0=Run(ON)
-                if getattr(self.RegMap, 'ACTIVE_POWER_PCT', None) is not None:
-                    success &= self.master.write_single_register(
-                        self.RegMap.ACTIVE_POWER_PCT, 1000, self.slave_id)
-                if getattr(self.RegMap, 'POWER_FACTOR_SET', None) is not None:
-                    success &= self.master.write_single_register(
-                        self.RegMap.POWER_FACTOR_SET, 1000, self.slave_id)
-                if getattr(self.RegMap, 'REACTIVE_POWER_SET', None) is not None:
-                    success &= self.master.write_single_register(
-                        self.RegMap.REACTIVE_POWER_SET, 0, self.slave_id)
+                on_off_reg = _get('INVERTER_ON_OFF', default=0x0834)
+                active_reg = _get('DER_ACTIVE_POWER_PCT', 'ACTIVE_POWER_PCT', default=0x07D3)
+                pf_reg = _get('DER_POWER_FACTOR_SET', 'POWER_FACTOR_SET', default=0x07D0)
+                q_reg = _get('DER_REACTIVE_POWER_PCT', 'REACTIVE_POWER_SET', default=0x07D2)
+                success &= self.master.write_single_register(on_off_reg, 0, self.slave_id)
+                success &= self.master.write_single_register(active_reg, 1000, self.slave_id)
+                success &= self.master.write_single_register(pf_reg, 1000, self.slave_id)
+                success &= self.master.write_single_register(q_reg, 0, self.slave_id)
                 return success
 
             reg = reg_map.get(control_type)
@@ -1286,14 +1289,25 @@ class ModbusHandlerHAT:
         
         try:
             status = {}
-            
+
+            # Prefer DER-AVM aliases (0x07D0-0x07D3, 0x0834) over vendor-specific
+            # registers so sim-mode read/write round-trip works for every protocol.
+            # Vendor-specific registers (POWER_FACTOR_SET etc.) are a fallback
+            # used only when the register file lacks the DER_* alias.
+            def _reg(*names, default=None):
+                for n in names:
+                    v = getattr(self.RegMap, n, None)
+                    if v is not None:
+                        return v
+                return default
+
             # ON/OFF: 0=ON(기동), 1=OFF(정지)
-            result = self.master.read_holding_registers(self.RegMap.INVERTER_ON_OFF, 1, self.slave_id)
+            on_off_reg = _reg('INVERTER_ON_OFF', default=0x0834)
+            result = self.master.read_holding_registers(on_off_reg, 1, self.slave_id)
             status['on_off'] = result[0] if result else 0  # 0=ON, 1=OFF (no conversion needed)
 
             # Power Factor (signed, raw value -1000~1000)
-            pf_reg = getattr(self.RegMap, 'POWER_FACTOR_SET',
-                             getattr(self.RegMap, 'DER_POWER_FACTOR_SET', 0x07D0))
+            pf_reg = _reg('DER_POWER_FACTOR_SET', 'POWER_FACTOR_SET', default=0x07D0)
             result = self.master.read_holding_registers(pf_reg, 1, self.slave_id)
             if result:
                 pf = result[0]
@@ -1304,14 +1318,12 @@ class ModbusHandlerHAT:
                 status['power_factor'] = 1000
 
             # Operation Mode
-            mode_reg = getattr(self.RegMap, 'OPERATION_MODE',
-                               getattr(self.RegMap, 'DER_ACTION_MODE', 0x07D1))
+            mode_reg = _reg('DER_ACTION_MODE', 'OPERATION_MODE', default=0x07D1)
             result = self.master.read_holding_registers(mode_reg, 1, self.slave_id)
             status['operation_mode'] = result[0] if result else 0
 
             # Reactive Power % (signed, raw value -1000~1000)
-            rp_reg = getattr(self.RegMap, 'REACTIVE_POWER_SET',
-                             getattr(self.RegMap, 'DER_REACTIVE_POWER_PCT', 0x07D2))
+            rp_reg = _reg('DER_REACTIVE_POWER_PCT', 'REACTIVE_POWER_SET', default=0x07D2)
             result = self.master.read_holding_registers(rp_reg, 1, self.slave_id)
             if result:
                 rp = result[0]
@@ -1322,8 +1334,7 @@ class ModbusHandlerHAT:
                 status['reactive_power_pct'] = 0
 
             # Active Power % (raw value 0~1000)
-            ap_reg = getattr(self.RegMap, 'ACTIVE_POWER_PCT',
-                             getattr(self.RegMap, 'DER_ACTIVE_POWER_PCT', 0x07D3))
+            ap_reg = _reg('DER_ACTIVE_POWER_PCT', 'ACTIVE_POWER_PCT', default=0x07D3)
             result = self.master.read_holding_registers(ap_reg, 1, self.slave_id)
             status['active_power_pct'] = result[0] if result else 1000
 
