@@ -2506,7 +2506,10 @@ function ModelMakerTab() {
         className: "bg-purple-600 hover:bg-purple-500 px-3 py-1.5 rounded text-xs disabled:opacity-50"
       }, aiSaving ? "Saving..." : "Save Key")
     ),
-    running && /*#__PURE__*/React.createElement("div", {
+    // AI Mode ON + key set → show AI Direct Generate (no iframe)
+    aiMode && aiHasKey && /*#__PURE__*/React.createElement(AiDirectGenerate, null),
+    // AI Mode OFF or no key → show iframe MM2 (Stage 1/2/3)
+    !aiMode && running && /*#__PURE__*/React.createElement("div", {
       className: "border border-gray-700 rounded overflow-hidden",
       style: { height: 'calc(100vh - 180px)' }
     },
@@ -2516,11 +2519,99 @@ function ModelMakerTab() {
         title: "Model Maker Web v2"
       })
     ),
-    !running && /*#__PURE__*/React.createElement(Card, null,
+    !aiMode && !running && /*#__PURE__*/React.createElement(Card, null,
       /*#__PURE__*/React.createElement("div", { className: "text-center text-gray-400 py-8" },
         /*#__PURE__*/React.createElement("div", { className: "text-lg mb-2" }, "Model Maker Web v2"),
         /*#__PURE__*/React.createElement("div", { className: "text-sm mb-4" }, "PDF \u2192 Stage1 \u2192 Stage2 \u2192 Stage3 \u2192 *_registers.py"),
         /*#__PURE__*/React.createElement("div", { className: "text-xs text-gray-500" }, "Start \uBC84\uD2BC\uC744 \uB20C\uB7EC Model Maker \uC11C\uBC84\uB97C \uC2E4\uD589\uD558\uC138\uC694")
+      )
+    )
+  );
+}
+
+// AI Direct Generate sub-component
+function AiDirectGenerate() {
+  const [file, setFile] = useState(null);
+  const [mppt, setMppt] = useState(4);
+  const [str, setStr] = useState(8);
+  const [cap, setCap] = useState('50kW');
+  const [generating, setGenerating] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState('');
+  const fileRef = useRef(null);
+
+  const generate = async () => {
+    if (!fileRef.current?.files[0]) { setError('PDF \uD30C\uC77C\uC744 \uC120\uD0DD\uD558\uC138\uC694'); return; }
+    setGenerating(true); setError(''); setResult(null);
+    const fd = new FormData();
+    fd.append('file', fileRef.current.files[0]);
+    fd.append('mppt_count', String(mppt));
+    fd.append('string_count', String(str));
+    fd.append('capacity', cap);
+    try {
+      const r = await fetch(API + '/mm2/ai-generate', { method: 'POST', body: fd });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.detail || JSON.stringify(d));
+      setResult(d);
+    } catch (e) { setError(e.message); }
+    setGenerating(false);
+  };
+
+  return /*#__PURE__*/React.createElement(Card, null,
+    /*#__PURE__*/React.createElement("div", { className: "text-gray-400 text-sm mb-3 font-semibold" },
+      "\uD83E\uDD16 AI Direct Generate — PDF \u2192 *_registers.py"),
+    /*#__PURE__*/React.createElement("div", { className: "flex gap-3 mb-4 items-end flex-wrap" },
+      /*#__PURE__*/React.createElement("div", null,
+        /*#__PURE__*/React.createElement("label", { className: "text-gray-500 text-xs block mb-1" }, "Modbus PDF"),
+        /*#__PURE__*/React.createElement("input", {
+          type: "file", ref: fileRef, accept: ".pdf",
+          className: "text-sm bg-gray-700 rounded px-2 py-1.5",
+          onChange: e => setFile(e.target.files[0]?.name || null)
+        })
+      ),
+      /*#__PURE__*/React.createElement("div", null,
+        /*#__PURE__*/React.createElement("label", { className: "text-gray-500 text-xs block mb-1" }, "MPPT"),
+        /*#__PURE__*/React.createElement("input", {
+          type: "number", min: 1, max: 10, value: mppt,
+          onChange: e => setMppt(Number(e.target.value)),
+          className: "bg-gray-700 rounded px-2 py-1.5 w-16 text-sm"
+        })
+      ),
+      /*#__PURE__*/React.createElement("div", null,
+        /*#__PURE__*/React.createElement("label", { className: "text-gray-500 text-xs block mb-1" }, "Strings"),
+        /*#__PURE__*/React.createElement("input", {
+          type: "number", min: 1, max: 20, value: str,
+          onChange: e => setStr(Number(e.target.value)),
+          className: "bg-gray-700 rounded px-2 py-1.5 w-16 text-sm"
+        })
+      ),
+      /*#__PURE__*/React.createElement("div", null,
+        /*#__PURE__*/React.createElement("label", { className: "text-gray-500 text-xs block mb-1" }, "Capacity"),
+        /*#__PURE__*/React.createElement("input", {
+          type: "text", value: cap,
+          onChange: e => setCap(e.target.value),
+          className: "bg-gray-700 rounded px-2 py-1.5 w-20 text-sm",
+          placeholder: "50kW"
+        })
+      ),
+      /*#__PURE__*/React.createElement("button", {
+        onClick: generate, disabled: generating || !file,
+        className: "bg-purple-600 hover:bg-purple-500 px-5 py-2 rounded text-sm font-semibold disabled:opacity-50"
+      }, generating ? "\uD83E\uDD16 Generating..." : "\uD83E\uDD16 Generate")
+    ),
+    generating && /*#__PURE__*/React.createElement("div", { className: "text-purple-400 text-sm mb-3 animate-pulse" },
+      "Claude API\uB85C PDF \uBD84\uC11D \uC911... (30\uCD08~2\uBD84 \uC18C\uC694)"),
+    error && /*#__PURE__*/React.createElement("div", { className: "text-red-400 text-sm mb-3" }, "\u274C ", error),
+    result && /*#__PURE__*/React.createElement("div", { className: "bg-gray-800 rounded p-4 text-sm" },
+      /*#__PURE__*/React.createElement("div", { className: "text-green-400 font-bold mb-2" }, "\u2705 \uC0DD\uC131 \uC644\uB8CC"),
+      /*#__PURE__*/React.createElement("div", { className: "grid grid-cols-2 gap-x-4 gap-y-1 text-gray-300" },
+        /*#__PURE__*/React.createElement("span", null, "\uD30C\uC77C:"), /*#__PURE__*/React.createElement("span", { className: "font-mono text-white" }, result.output_name),
+        /*#__PURE__*/React.createElement("span", null, "\uCF54\uB4DC \uD589:"), /*#__PURE__*/React.createElement("span", null, result.lines),
+        /*#__PURE__*/React.createElement("span", null, "\uD1A0\uD070:"), /*#__PURE__*/React.createElement("span", null, result.tokens),
+        /*#__PURE__*/React.createElement("span", null, "\uBAA8\uB378:"), /*#__PURE__*/React.createElement("span", null, result.model),
+        /*#__PURE__*/React.createElement("span", null, "\uBC30\uD3EC:"), /*#__PURE__*/React.createElement("span", {
+          className: result.deployed ? "text-green-400" : "text-yellow-400"
+        }, result.deployed ? "common/ \uBC30\uD3EC \uC644\uB8CC" : result.protected ? "\uBCF4\uD638 \uD30C\uC77C (\uC218\uB3D9 \uBC30\uD3EC)" : "results/ \uC800\uC7A5")
       )
     )
   );

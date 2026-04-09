@@ -1209,6 +1209,157 @@ async def mm2_ai_settings_save(request: Request):
     return {"status": "saved", "model": model}
 
 
+@router.post("/mm2/ai-generate")
+async def mm2_ai_generate(request: Request):
+    """AI 1-click: PDF → Claude API → *_registers.py directly.
+
+    Bypasses Stage 1/2/3 entirely. Claude reads the full PDF text and
+    generates the complete register file in one shot.
+    """
+    import anthropic, configparser, tempfile
+    from starlette.datastructures import UploadFile as StarletteUpload
+
+    # Parse multipart form
+    form = await request.form()
+    file: StarletteUpload = form.get('file')
+    mppt_count = int(form.get('mppt_count', 4))
+    string_count = int(form.get('string_count', 8))
+    capacity = form.get('capacity', '50kW')
+
+    if not file:
+        raise HTTPException(400, "No file uploaded")
+
+    # Read AI settings
+    cfg_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            'config', 'ai_settings.ini')
+    cp = configparser.ConfigParser()
+    cp.read(cfg_path, encoding='utf-8')
+    api_key = cp.get('claude_api', 'api_key', fallback='')
+    model = cp.get('claude_api', 'model', fallback='claude-sonnet-4-6')
+    if not api_key or api_key == 'YOUR_ANTHROPIC_API_KEY_HERE':
+        raise HTTPException(400, "Claude API key not configured")
+
+    # Save uploaded file temporarily
+    content = await file.read()
+    fname = file.filename or 'upload.pdf'
+    manufacturer = fname.split('-')[0].split('_')[0].replace('PV', '').strip()
+
+    # Extract text from PDF
+    import fitz
+    doc = fitz.open(stream=content, filetype='pdf')
+    pdf_text = '\n\n'.join(
+        f'--- Page {i+1} ---\n{page.get_text()}'
+        for i, page in enumerate(doc) if i < 80
+    )[:200000]
+    doc.close()
+
+    # Call Claude API
+    client = anthropic.Anthropic(api_key=api_key)
+
+    # Read Solarize register file as reference template
+    ref_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            'common', 'Solarize_50_3_MPPT4_STR8_registers.py')
+    ref_code = ''
+    if os.path.exists(ref_path):
+        with open(ref_path, 'r', encoding='utf-8') as f:
+            ref_code = f.read()[:15000]
+
+    prompt = f"""You are a Modbus protocol expert. Generate a complete Python register file for an RTU system.
+
+INVERTER: {manufacturer} {capacity}, 3-phase, {mppt_count} MPPT, {string_count} strings
+PDF FILENAME: {fname}
+
+REQUIREMENTS:
+1. Output a COMPLETE Python file (class RegisterMap, InverterMode, StatusConverter, SCALE, DATA_TYPES, H01_FIELD_MAP, etc.)
+2. Follow the EXACT same structure as the reference template below
+3. Map ALL registers from the PDF: monitoring, status, error codes, device info, control, DER-AVM
+4. MPPT_CHANNELS = {mppt_count}, STRING_CHANNELS = {string_count}
+5. Use Solarize SCALE convention: voltage=0.1, current=0.01, power=0.1, frequency=0.01, power_factor=0.001
+6. Include DER-AVM block (0x03E8-0x03FD) and DER control (0x07D0-0x07D3, 0x0834)
+7. ErrorCode BITS dict: extract actual alarm bit definitions from PDF if available
+8. U32_WORD_ORDER: detect from PDF (HL or LH)
+9. RTU_FC_CODE: detect from PDF (3 for FC03, 4 for FC04)
+
+REFERENCE TEMPLATE (Solarize — follow this structure exactly):
+```python
+{ref_code}
+```
+
+PDF DOCUMENT TEXT:
+{pdf_text}
+
+OUTPUT: Complete Python register file. ONLY Python code, no markdown fences, no explanation."""
+
+    response = client.messages.create(
+        model=model,
+        max_tokens=32000,
+        thinking={"type": "adaptive"},
+        messages=[{"role": "user", "content": prompt}],
+    )
+
+    # Extract Python code from response
+    code = ''
+    for block in response.content:
+        if block.type == 'text':
+            code += block.text
+
+    # Clean up markdown fences if present
+    if '```python' in code:
+        code = code.split('```python', 1)[1]
+        if '```' in code:
+            code = code.rsplit('```', 1)[0]
+    code = code.strip()
+
+    # Validate syntax
+    try:
+        compile(code, '<ai_generated>', 'exec')
+    except SyntaxError as e:
+        raise HTTPException(422, f"AI generated code has syntax error: {e}")
+
+    # Determine output filename
+    proto_name = f"{manufacturer}_{capacity.replace('kW','')}_3_MPPT{mppt_count}_STR{string_count}"
+    output_name = f"{proto_name}_registers.py"
+
+    # Save to results/
+    results_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                               'inverter_model_maker', 'model_maker_web_v2', 'results', manufacturer)
+    os.makedirs(results_dir, exist_ok=True)
+    output_path = os.path.join(results_dir, output_name)
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write(code)
+
+    # Also save to common/ (if not protected)
+    common_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'common')
+    common_path = os.path.join(common_dir, output_name)
+    deployed = False
+    protected = output_name in {
+        'Solarize_50_3_MPPT4_STR8_registers.py', 'Sungrow_50_3_MPPT4_STR8_registers.py',
+        'Kstar_60_3_MPPT3_STR9_registers.py', 'Huawei_50_3_MPPT4_STR8_registers.py',
+        'Ekos_10_3_MPPT1_STR2_registers.py', 'Senergy_50_3_MPPT4_STR8_registers.py',
+        'Sofar_50_3_MPPT4_STR8_registers.py', 'Solis_50_3_MPPT4_STR8_registers.py',
+        'Growatt_30_3_MPPT3_STR6_registers.py', 'CPS_50_3_MPPT3_STR9_registers.py',
+        'Sunways_30_3_MPPT3_STR6_registers.py',
+    }
+    if not protected:
+        import shutil
+        shutil.copy2(output_path, common_path)
+        deployed = True
+
+    tokens_in = response.usage.input_tokens
+    tokens_out = response.usage.output_tokens
+
+    return {
+        "status": "success",
+        "output_name": output_name,
+        "output_path": output_path,
+        "deployed": deployed,
+        "protected": protected,
+        "lines": len(code.split('\n')),
+        "tokens": f"{tokens_in}+{tokens_out}",
+        "model": model,
+    }
+
+
 @router.post("/mm2/stop")
 async def mm2_stop():
     """Stop Model Maker v2 server."""
