@@ -120,10 +120,16 @@ class RegisterMap:
     DER_ACTIVE_POWER_PCT                     = 0x07D3
     INVERTER_ON_OFF                          = 0x0834
 
-
-    # Device info: Sofar 1-70KTL G1/G2 PDF v1.01 does NOT expose model name
-    # or serial number registers. RTU Model Info response will be empty —
-    # this is a protocol limitation, not a bug.
+    # Device info: Sofar 1-70KTL G1/G2 PDF v1.01 does NOT document model name
+    # or serial number registers. Allocate synthetic simulator-only addresses
+    # at 0x1A00/0x1A10 (same Korean V1.2.4 convention as Solarize/Senergy/CPS)
+    # so the equipment simulator can write and the RTU read_model_info can
+    # return non-empty values. These are NOT valid on real Sofar hardware —
+    # they only exist in the simulator's address space to enable sim testing.
+    DEVICE_MODEL                             = 0x1A00
+    DEVICE_MODEL_SIZE                        = 16
+    DEVICE_SERIAL_NUMBER                     = 0x1A10
+    DEVICE_SERIAL_NUMBER_SIZE                = 8
 
 
 class InverterMode:
