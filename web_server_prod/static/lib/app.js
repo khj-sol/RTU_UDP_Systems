@@ -1024,7 +1024,7 @@ function ControlTab({
       setDevices(pd(d));
     }).catch(() => {});
   };
-  const sendControl = async (endpoint, body) => {
+  const sendControl = async (endpoint, body, opts = {}) => {
     const ENDPOINT_NAMES = {on_off:'On/Off',active_power:'Active Power',power_factor:'Power Factor',reactive_power:'Reactive Power',rtu_info:'RTU Info',model_info:'INV Model',reboot:'Reboot',iv_scan:'IV Scan'};
     const name = ENDPOINT_NAMES[endpoint] || endpoint;
     try {
@@ -1037,9 +1037,11 @@ function ControlTab({
       if (endpoint === 'power_factor' && body.value !== undefined) setPowerFactor(body.value);
       if (endpoint === 'reactive_power' && body.value !== undefined) setReactivePower(body.value);
       if (endpoint === 'on_off' && body.value !== undefined) setOnOff(body.value);
-      setTimeout(refreshDevices, 1000);
-      setTimeout(refreshDevices, 3000);
-      setTimeout(refreshDevices, 5000);
+      // Skip redundant polling when sending to multiple devices — the final
+      // refreshDevices at the end of sendToSelected handles it once.
+      if (!opts.skipRefresh) {
+        setTimeout(refreshDevices, 1500);
+      }
     } catch (e) {
       addLog(`<span class="text-red-400">✗ ${name} Error: ${e.message}</span>`);
     }
@@ -1047,10 +1049,16 @@ function ControlTab({
   const sendToSelected = async (endpoint, makeBody) => {
     const devNums = [...selectedDevs].sort((a, b) => a - b);
     if (devNums.length === 0) { addLog('No inverters selected'); return; }
+    const multi = devNums.length > 1;
     for (const dn of devNums) {
-      await sendControl(endpoint, makeBody(dn));
-      if (devNums.length > 1) await new Promise(r => setTimeout(r, 100));
+      // Skip per-command refreshDevices polling when sending to many devices —
+      // 3x polls per inverter (11 inv → 33 fetches) would thrash the UI and
+      // interfere with WebSocket event processing, dropping control responses.
+      await sendControl(endpoint, makeBody(dn), { skipRefresh: multi });
+      if (multi) await new Promise(r => setTimeout(r, 250));
     }
+    // Single final refresh after all commands complete
+    if (multi) setTimeout(refreshDevices, 1500);
   };
   const inverters = devices.filter(d => d.device_type === 1);
   const allSelected = inverters.length > 0 && inverters.every(d => selectedDevs.has(d.device_number));
@@ -2263,7 +2271,10 @@ function App() {
       setWsUpdateCounter(c => c + 1);
     }
     if (msg.type === 'event') {
-      setWsEvents(p => [...p.slice(-99), {
+      // Buffer up to 499 prior events + 1 new. Bulk control (11 inverters ×
+      // 4 events = 44) fits easily with headroom for concurrent H01/H05
+      // background traffic.
+      setWsEvents(p => [...p.slice(-499), {
         time: new Date().toLocaleTimeString(),
         rtu_id: msg.rtu_id,
         event_type: msg.event_type,
