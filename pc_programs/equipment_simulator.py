@@ -1330,11 +1330,50 @@ class GenericInverterSimulator:
         # PV Power
         _h01_write('pv_power', pv_power_raw, 'PV_POWER')
 
-        # Power factor — always written
-        pf = self.power_factor_set / 1000.0
-        pf = max(0.85, min(1.0, abs(pf)))
-        pf_raw = int(pf * 1000)
-        _h01_write('power_factor', pf_raw, 'POWER_FACTOR')
+        # Power factor / reactive power — compute from active power and setpoint.
+        # Two control modes (tracked via self.control_mode set in _check_control_changes):
+        #   'PF' : fixed PF setpoint → Q = P × tan(acos(|PF|)), signed by PF sign
+        #   'RP' : fixed reactive power % → Q = NOMINAL_POWER × q_pct/100,
+        #          actual PF = P / sqrt(P² + Q²), signed by Q sign
+        # Sign convention: reactive_power_set > 0 → inductive (Q>0), PF signed negative.
+        # When P=0 (night/off), Q=0 and PF defaults to the setpoint.
+        pf_setpoint = self.power_factor_set / 1000.0           # -1.0..1.0
+        q_pct = self.reactive_power_set / 10.0                 # -100..100 %
+        # Handle signed 16-bit wrap-around for negative setpoints.
+        if pf_setpoint > 32.767:
+            pf_setpoint -= 65.536
+        if q_pct > 3276.7:
+            q_pct -= 6553.6
+
+        if self.control_mode == 'RP' and abs(q_pct) > 0.1:
+            # Q control mode: Q set directly, PF derived.
+            # q_pct is percent of rated apparent power (NOMINAL_POWER used as S_rated).
+            q_var = self.NOMINAL_POWER * q_pct / 100.0
+            if ac_power_w > 0:
+                s_va = math.sqrt(ac_power_w * ac_power_w + q_var * q_var)
+                pf_actual = ac_power_w / s_va if s_va > 0 else 1.0
+                # PF sign follows Q sign (lagging Q > 0 → leading PF convention negative).
+                if q_var < 0:
+                    pf_actual = -pf_actual
+            else:
+                pf_actual = 1.0
+                q_var = 0.0
+        else:
+            # PF control mode: PF fixed, Q derived from P.
+            pf_abs = max(0.0, min(1.0, abs(pf_setpoint)))
+            pf_actual = pf_setpoint if pf_setpoint != 0 else 1.0
+            if ac_power_w > 0 and pf_abs > 0 and pf_abs < 1.0:
+                # Q = P × tan(acos(PF))
+                q_var = ac_power_w * math.tan(math.acos(pf_abs))
+                if pf_setpoint < 0:
+                    q_var = -q_var
+            else:
+                q_var = 0.0
+
+        pf_raw = int(pf_actual * 1000)
+        # Clamp to S16 range for register write (-32768..32767)
+        pf_raw = max(-32768, min(32767, pf_raw))
+        _h01_write('power_factor', pf_raw & 0xFFFF, 'POWER_FACTOR')
 
         # --- DER-AVM Real-time Monitoring (0x03E8~0x03FD, S32) ---
         # Mirrors the H01 baseline values so the dashboard "Monitor" line
@@ -1345,7 +1384,11 @@ class GenericInverterSimulator:
         dea_freq = int(env.frequency * 10)                    # 0.1 Hz
         dea_power = int(ac_power_w / 100)                     # 0.1 kW (× 10)
         dea_voltage = int(380 * 10)                           # 0.1 V (always present)
-        dea_current = int(ac_power_w / 3 / 380 * 10) if ac_power_w > 0 else 0  # 0.1 A
+        # Apparent current = sqrt(P² + Q²) / (sqrt(3) × V) for 3-phase.
+        # Use S/3/380 per-phase approximation consistent with P path.
+        s_va = math.sqrt(ac_power_w * ac_power_w + q_var * q_var) if ac_power_w > 0 else 0
+        dea_current = int(s_va / 3 / 380 * 10) if s_va > 0 else 0  # 0.1 A per phase
+        dea_reactive = int(q_var)                             # 1 Var (signed)
         for dea_name_aliases, dea_val in [
             (('DEA_L1_CURRENT', 'DEA_L1_CURRENT_LOW'), dea_current),
             (('DEA_L2_CURRENT', 'DEA_L2_CURRENT_LOW'), dea_current),
@@ -1356,7 +1399,7 @@ class GenericInverterSimulator:
             (('DEA_TOTAL_ACTIVE_POWER', 'DEA_TOTAL_ACTIVE_POWER_LOW',
               'DEA_ACTIVE_POWER_LOW'), dea_power),
             (('DEA_TOTAL_REACTIVE_POWER', 'DEA_TOTAL_REACTIVE_POWER_LOW',
-              'DEA_REACTIVE_POWER', 'DEA_REACTIVE_POWER_LOW'), 0),
+              'DEA_REACTIVE_POWER', 'DEA_REACTIVE_POWER_LOW'), dea_reactive),
             (('DEA_POWER_FACTOR', 'DEA_POWER_FACTOR_LOW'), dea_pf),
             (('DEA_FREQUENCY', 'DEA_FREQUENCY_LOW'), dea_freq),
             (('DEA_STATUS_FLAG', 'DEA_STATUS_FLAG_LOW'), 1),
