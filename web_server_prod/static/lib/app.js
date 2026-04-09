@@ -2388,7 +2388,9 @@ function ModelMakerTab() {
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState('');
   const MM2_PORT = 8082;
-  const mm2Url = `http://${location.hostname}:${MM2_PORT}`;
+  // Use reverse proxy through dashboard port (same origin) so DDNS/NAT
+  // access works without forwarding port 8082.
+  const mm2Url = `${API}/mm2-app/`;
 
   const checkStatus = async () => {
     try {

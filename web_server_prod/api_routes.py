@@ -1182,3 +1182,52 @@ async def mm2_stop():
         _mm2_process.kill()
     _mm2_process = None
     return {"status": "stopped"}
+
+
+# ── MM2 Reverse Proxy ──────────────────────────────────────────────────
+# Proxy /mm2-app/* to localhost:8082/* so the iframe works through the
+# same origin (port 8080) without requiring port 8082 to be forwarded
+# through the router/NAT. This avoids the "connection refused" error
+# when accessing the dashboard via a DDNS hostname.
+import httpx
+
+_mm2_http_client: httpx.AsyncClient | None = None
+
+def _get_mm2_client():
+    global _mm2_http_client
+    if _mm2_http_client is None:
+        _mm2_http_client = httpx.AsyncClient(base_url=f"http://127.0.0.1:{_MM2_PORT}", timeout=30.0)
+    return _mm2_http_client
+
+from starlette.requests import Request
+from starlette.responses import StreamingResponse
+
+@router.api_route("/mm2-app/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
+async def mm2_proxy(request: Request, path: str = ""):
+    """Reverse-proxy all requests to the local MM2 server."""
+    if not _mm2_is_running():
+        raise HTTPException(status_code=503, detail="Model Maker v2 is not running. Start it first.")
+    client = _get_mm2_client()
+    url = f"/{path}"
+    if request.query_params:
+        url += f"?{request.query_params}"
+    try:
+        body = await request.body()
+        resp = await client.request(
+            method=request.method,
+            url=url,
+            headers={k: v for k, v in request.headers.items()
+                     if k.lower() not in ('host', 'content-length', 'transfer-encoding')},
+            content=body if body else None,
+        )
+        excluded = {'content-encoding', 'content-length', 'transfer-encoding'}
+        headers = {k: v for k, v in resp.headers.items() if k.lower() not in excluded}
+        return StreamingResponse(
+            content=iter([resp.content]),
+            status_code=resp.status_code,
+            headers=headers,
+        )
+    except httpx.ConnectError:
+        raise HTTPException(status_code=502, detail="Cannot connect to MM2 server on port 8082")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
