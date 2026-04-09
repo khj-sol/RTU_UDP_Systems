@@ -797,12 +797,19 @@ function ControlTab({
     }
     return `${tag} ${e.detail}`;
   };
-  // Only show control-related events in Response Log (not duplicating Events tab)
+  // Control Response Log shows ONLY user-initiated power-control round-trips
+  // (Active Power / PF / Q / ON-OFF / Init Reset / IV Scan / RTU Info).
+  // These system / metadata events go ONLY to the Events tab, not here:
+  //   - rtu_event       (RTU First Connection, port open, etc.)
+  //   - inverter_model  (per-inverter model name / serial metadata — now
+  //                      only emitted on user click, but user requested
+  //                      that it be visible in Events tab instead of
+  //                      cluttering the Control Response Log)
   const RESPONSE_LOG_TYPES = new Set([
-    'h04_response', 'H03_SENT', 'inverter_model', 'rtu_info',
+    'h04_response', 'H03_SENT',
     'control_check', 'control_result',
     'iv_scan_success', 'iv_scan_data', 'iv_scan_complete',
-    'rtu_event',
+    'rtu_info',
   ]);
   // Deduplicate: track last logged event per type to suppress repeats
   const lastLoggedRef = useRef({});

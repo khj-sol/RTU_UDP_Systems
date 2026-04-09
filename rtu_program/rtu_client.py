@@ -1406,27 +1406,13 @@ class RTUClient:
         # an explicit H03 ctrl_type=2 (CTRL_RTU_INFO) request from the server.
         now = time.time()
 
-        # ── Phase 1.6: H05 Inverter Model Info (Body Type 11) — 인버터별 10분 간격 ──
-        for inv in self.inverters:
-            dev_num = inv['device_number']
-            last = self._last_inv_info_time.get(dev_num, 0.0)
-            if now - last < self._inv_info_interval:
-                continue
-            handler = inv.get('handler')
-            try:
-                info = handler.read_model_info() if (handler and hasattr(handler, 'read_model_info')) else {}
-                if info is None:
-                    info = {}
-                cap = (1 if inv.get('iv_scan') else 0) | (2 if inv.get('control') else 0)
-                info['capabilities'] = cap
-                pkt, s = self.protocol.create_h05_inverter_model(dev_num, inv['model'], info)
-                self._send_udp_no_ack(pkt)
-                self.logger.info(
-                    f"H05 INV{dev_num} Model Info sent (seq={s}) [periodic] "
-                    f"model={info.get('model','')} sn={info.get('serial','')}")
-                self._last_inv_info_time[dev_num] = now
-            except Exception as e:
-                self.logger.error(f"H05 INV{dev_num} Model Info error: {e}")
+        # ── Phase 1.6: (removed) periodic H05 Inverter Model Info ───────
+        # Previously sent every 10 minutes per inverter so the dashboard
+        # had model metadata without the user clicking Model Info. This
+        # caused 11 inverter_model events at startup to clutter the
+        # Control Response Log. Removed at user request — Model Info is
+        # now emitted ONLY in response to an explicit H03 ctrl_type=11
+        # (CTRL_INV_MODEL) request from the server/dashboard.
 
         # ── Phase 2: Backup packets (recovery mode only) ────────────────────
         if self.recovery_mode:
