@@ -186,9 +186,20 @@ async def stage1_upload(
 
 
 def _load_ai_settings() -> dict:
-    """Load Claude API settings from config/ai_settings.ini."""
+    """Load Claude API settings from config/ai_settings.ini.
+
+    Searches two locations: PROJECT_ROOT/config/ (inverter_model_maker/) and
+    the parent RTU project root (V2_0_0/config/) since the dashboard saves
+    ai_settings.ini in V2_0_0/config/.
+    """
     import configparser
-    cfg_path = os.path.join(PROJECT_ROOT, 'config', 'ai_settings.ini')
+    # Try MM2 project root first, then parent RTU project root
+    rtu_root = os.path.abspath(os.path.join(PROJECT_ROOT, '..'))
+    candidates = [
+        os.path.join(PROJECT_ROOT, 'config', 'ai_settings.ini'),
+        os.path.join(rtu_root, 'config', 'ai_settings.ini'),
+    ]
+    cfg_path = next((p for p in candidates if os.path.exists(p)), candidates[0])
     cp = configparser.ConfigParser()
     cp.read(cfg_path, encoding='utf-8')
     key = cp.get('claude_api', 'api_key', fallback='')
