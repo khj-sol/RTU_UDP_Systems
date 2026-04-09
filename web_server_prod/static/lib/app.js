@@ -2458,12 +2458,11 @@ function App() {
   }, (() => {
     const selRtuObj = rtus.find(r => String(r.rtu_id) === String(selectedRtu));
     const isRIP = selRtuObj && selRtuObj.rtu_type === 'RIP';
-    const disabledTabs = isRIP ? ['Firmware', 'Config'] : [];
-    return TABS.map(t => /*#__PURE__*/React.createElement("button", {
+    const hiddenTabs = isRIP ? ['Firmware', 'Config'] : [];
+    return TABS.filter(t => !hiddenTabs.includes(t)).map(t => /*#__PURE__*/React.createElement("button", {
       key: t,
-      onClick: () => { if (!disabledTabs.includes(t)) setTab(t); },
-      className: `px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${disabledTabs.includes(t) ? 'border-transparent text-gray-600 cursor-not-allowed' : tab === t ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500'}`,
-      title: disabledTabs.includes(t) ? 'RI Power RTU는 지원하지 않습니다' : ''
+      onClick: () => setTab(t),
+      className: `px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${tab === t ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500'}`
     }, t));
   })())), /*#__PURE__*/React.createElement("main", {
     className: "max-w-7xl mx-auto p-4"
