@@ -1060,7 +1060,8 @@ function ControlTab({
     // Single final refresh after all commands complete
     if (multi) setTimeout(refreshDevices, 1500);
   };
-  const inverters = devices.filter(d => d.device_type === 1);
+  const inverters = devices.filter(d => d.device_type === 1)
+    .sort((a, b) => (a.device_number || 0) - (b.device_number || 0));
   const allSelected = inverters.length > 0 && inverters.every(d => selectedDevs.has(d.device_number));
   const toggleDev = (num) => {
     setSelectedDevs(prev => { const s = new Set(prev); s.has(num) ? s.delete(num) : s.add(num); return s; });
