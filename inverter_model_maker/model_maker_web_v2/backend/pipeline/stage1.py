@@ -3121,11 +3121,22 @@ PDF Document:
 {full_text}"""
 
     try:
-        response = client.messages.create(
+        # Use streaming to avoid timeout for long-running models (Opus etc.)
+        ai_text = ''
+        input_tokens = 0
+        output_tokens = 0
+        with client.messages.stream(
             model=ai_settings['model'],
             max_tokens=32000,
             messages=[{"role": "user", "content": prompt}],
-        )
+        ) as stream:
+            for text in stream.text_stream:
+                ai_text += text
+            # Get final message for usage stats
+            final_msg = stream.get_final_message()
+            if final_msg and final_msg.usage:
+                input_tokens = final_msg.usage.input_tokens
+                output_tokens = final_msg.usage.output_tokens
     except Exception as api_err:
         err_msg = str(api_err)
         if 'credit balance' in err_msg.lower() or 'billing' in err_msg.lower():
@@ -3136,9 +3147,7 @@ PDF Document:
             log(f'[AI] Claude API error: {err_msg[:200]}', 'error')
             raise
 
-    # Extract text from response
-    ai_text = response.content[0].text if response.content else ''
-    log(f'[AI] 응답 수신 완료: {len(ai_text)} chars, tokens={response.usage.input_tokens}+{response.usage.output_tokens}')
+    log(f'[AI] 응답 수신 완료: {len(ai_text)} chars, tokens={input_tokens}+{output_tokens}')
 
     # Parse JSON from response
     try:
