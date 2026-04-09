@@ -3029,12 +3029,14 @@ def run_stage1(
     openpyxl = get_openpyxl()
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
-    # AI mode: extract registers via Claude API first
+    # AI mode: Claude API가 직접 PDF 파싱 (rule-based 건너뜀)
     ai_registers = []
+    _ai_mode_active = False
     if ai_settings and os.path.splitext(input_path)[1].lower() == '.pdf':
         try:
             ai_registers = _run_ai_pdf_extraction(input_path, ai_settings, progress)
-            log(f'[AI] {len(ai_registers)}개 AI 추출 레지스터 (rule-based와 병합 예정)')
+            log(f'[AI] {len(ai_registers)}개 레지스터 추출 완료 — AI 직접 파싱 모드')
+            _ai_mode_active = True
         except Exception as e:
             log(f'[AI] AI 추출 실패: {type(e).__name__}: {e}', 'error')
             log('[AI] rule-based 모드로 폴백합니다', 'warn')
@@ -3054,7 +3056,37 @@ def run_stage1(
     all_tables = []
     pages = []  # Excel 경로에서도 _detect_phase_type 등이 안전하게 동작
 
-    if ext == '.pdf':
+    # AI 모드: rule-based PDF 테이블 파싱 건너뛰고 AI 결과를 직접 사용
+    if _ai_mode_active and ai_registers:
+        log('[AI] Rule-based 파싱 건너뜀 — AI 추출 결과로 직접 진행')
+        # AI 결과를 RegisterRow 형식으로 변환
+        registers = []
+        for ar in ai_registers:
+            try:
+                addr_str = ar.get('address', '')
+                addr = int(addr_str, 16) if isinstance(addr_str, str) else int(addr_str)
+                name = ar.get('name', f'AI_REG_{addr:#06x}')
+                dt = ar.get('data_type', 'U16')
+                scale = ar.get('scale', 1)
+                unit = ar.get('unit', '')
+                fc = int(ar.get('fc', 3))
+                desc = ar.get('description', '')
+                rw = ar.get('rw', 'R')
+                registers.append(RegisterRow(
+                    address=addr, definition=name, data_type=dt,
+                    scale=str(scale), unit=unit, fc=fc, rw=rw,
+                    description=desc, page=0, raw_row=None,
+                ))
+            except (ValueError, TypeError):
+                continue
+        log(f'[AI] {len(registers)}개 레지스터 → Stage 1 처리 진행')
+        # pages는 빈 리스트 — _detect_phase_type 등에서 안전하게 동작
+        # manufacturer 추출을 위해 최소한의 설정
+        manufacturer = basename.split('_')[0].split('-')[0].split(' ')[0]
+        if manufacturer.endswith('PV') or manufacturer.endswith('HYB'):
+            manufacturer = manufacturer[:-2].rstrip('-')
+        # 이후 코드로 jump (register 분류/매핑/Excel 생성)
+    elif ext == '.pdf':
         pages = extract_pdf_text_and_tables(input_path, log=log)
         log(f'  PDF {len(pages)}페이지 추출 완료')
 
@@ -3177,8 +3209,8 @@ def run_stage1(
                     existing_addrs.add(tr.address)
             log(f'  병합 후: {len(registers)}개 레지스터')
 
-    # ── AI-extracted registers merge ───────────────────────────────────
-    if ai_registers:
+    # ── AI-extracted registers merge (non-AI mode fallback only) ────────
+    if ai_registers and not _ai_mode_active:
         existing_addrs = {r.address for r in registers if isinstance(r.address, int)}
         ai_added = 0
         for ar in ai_registers:
@@ -3214,10 +3246,10 @@ def run_stage1(
             '인버터 Modbus Register Map / Protocol 문서를 업로드해주세요.'
         )
 
-    manufacturer = basename.split('_')[0].split(' ')[0]
-    # 파일명에 '-PV'/'-HYB' 같은 타입 접미어가 붙어있으면 제거
-    # 예: "Senergy-PV" → "Senergy", "Ekos-PV" → "Ekos"
-    manufacturer = re.sub(r'-(PV|HYB|HYBRID)$', '', manufacturer, flags=re.IGNORECASE)
+    if not _ai_mode_active:
+        manufacturer = basename.split('_')[0].split(' ')[0]
+        # 파일명에 '-PV'/'-HYB' 같은 타입 접미어가 붙어있으면 제거
+        manufacturer = re.sub(r'-(PV|HYB|HYBRID)$', '', manufacturer, flags=re.IGNORECASE)
     log(f'  제조사 (파일명 기반): {manufacturer}')
 
     DER_FIXED_ADDRS = set()
