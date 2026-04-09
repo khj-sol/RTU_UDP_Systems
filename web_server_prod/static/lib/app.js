@@ -2056,13 +2056,19 @@ function ConfigTab({
     /*#__PURE__*/React.createElement("div", {
       className: "flex gap-3 mb-2 items-center flex-wrap"
     },
-      /*#__PURE__*/React.createElement("span", { className: "text-gray-400 text-sm" }, "RTU IP:"),
-      /*#__PURE__*/React.createElement("input", {
-        className: "bg-gray-700 rounded px-3 py-1.5 text-sm w-40",
+      /*#__PURE__*/React.createElement("span", { className: "text-gray-400 text-sm" }, "RTU:"),
+      /*#__PURE__*/React.createElement("select", {
+        className: "bg-gray-700 rounded px-3 py-1.5 text-sm",
         value: rtuIp,
-        onChange: e => setRtuIp(e.target.value),
-        placeholder: "172.30.1.40"
-      })
+        onChange: e => setRtuIp(e.target.value)
+      },
+        /*#__PURE__*/React.createElement("option", { value: "" }, "-- Push \uB300\uC0C1 RTU --"),
+        /*#__PURE__*/React.createElement("option", { value: "localhost" }, "localhost (\uB85C\uCEEC \uC2DC\uBBAC\uB808\uC774\uD130)"),
+        rtus.filter(r => r.status === 'online').map(r => /*#__PURE__*/React.createElement("option", {
+          key: r.rtu_id,
+          value: (r.ip || '').split(':')[0] || r.ip || ''
+        }, r.rtu_id, " (", (r.ip || '').split(':')[0] || '-', ")"))
+      )
     ),
     /*#__PURE__*/React.createElement("div", {
       className: "flex gap-3 mb-4 items-center flex-wrap"
