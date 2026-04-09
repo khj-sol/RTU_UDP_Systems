@@ -3096,8 +3096,7 @@ PDF Document:
     try:
         response = client.messages.create(
             model=ai_settings['model'],
-            max_tokens=32000,
-            thinking={"type": "enabled", "budget_tokens": 10000},
+            max_tokens=16000,
             messages=[{"role": "user", "content": prompt}],
         )
     except Exception as api_err:
@@ -3106,28 +3105,12 @@ PDF Document:
             log(f'[AI] API credit balance too low - recharge at console.anthropic.com', 'error')
         elif 'authentication' in err_msg.lower() or '401' in err_msg:
             log(f'[AI] API key authentication failed', 'error')
-        elif 'thinking' in err_msg.lower():
-            # Fallback: retry without thinking for models that don't support it
-            log('[AI] Thinking not supported, retrying without...')
-            try:
-                response = client.messages.create(
-                    model=ai_settings['model'],
-                    max_tokens=32000,
-                    messages=[{"role": "user", "content": prompt}],
-                )
-            except Exception as retry_err:
-                log(f'[AI] Claude API error: {str(retry_err)[:200]}', 'error')
-                raise
         else:
             log(f'[AI] Claude API error: {err_msg[:200]}', 'error')
             raise
 
-    # Extract text from response (skip thinking blocks)
-    ai_text = ''
-    for block in (response.content or []):
-        if hasattr(block, 'text'):
-            ai_text = block.text
-            break
+    # Extract text from response
+    ai_text = response.content[0].text if response.content else ''
     log(f'[AI] 응답 수신 완료: {len(ai_text)} chars, tokens={response.usage.input_tokens}+{response.usage.output_tokens}')
 
     # Parse JSON from response
