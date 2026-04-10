@@ -101,7 +101,10 @@
         "No. 14 9 bytes",
         "Debug Data",
         "battery temperaturebattery temperature",
-        "battery voltagebattery voltage"
+        "battery voltagebattery voltage",
+        "INTERNAL_STORAGE_ERROR",
+        "GFCI_ABNORMAL",
+        "File version"
       ]
     },
     "L2_VOLTAGE": {
@@ -143,7 +146,10 @@
         "COMMUNICATE_FAULT",
         "reserveundefined",
         "Empty v_",
-        "Battery internal resistancebattery resistance value"
+        "Battery internal resistancebattery resistance value",
+        "PV_STRING_REVERSE",
+        "VDE 0126-1-1-BU",
+        "CEI0-16"
       ]
     },
     "L3_VOLTAGE": {
@@ -223,7 +229,12 @@
         "The ambient temperature fallsbelow - 25 °C (-13 °F)",
         "Total activepower",
         "Cameroon",
-        "Q-Ucurve"
+        "Q-Ucurve",
+        "AS4777",
+        "C11/C10-MV480",
+        "NRS-097-2-1",
+        "0x2B",
+        "C10/11-MV800"
       ]
     },
     "L3_CURRENT": {
@@ -298,7 +309,10 @@
         "VDE-AR-N4110-MV800",
         "Smart Load Open Delay",
         "Grid1 I_",
-        "Grid2 I_"
+        "Grid2 I_",
+        "PRC 024 Western-_ _MV800",
+        "PRC 024 Western-_ _MV480",
+        "PRC 024 Western-_ _MV600"
       ]
     },
     "FREQUENCY": {
@@ -333,7 +347,9 @@
         "RD1699/661",
         "전체 상태",
         "Grid high voltage",
-        "STRING_13_ABNORMAL_ALARM"
+        "STRING_13_ABNORMAL_ALARM",
+        "REGISTER_NUMBER",
+        "Feature data sequencenumber"
       ]
     },
     "PV_POWER": {
@@ -394,7 +410,14 @@
         "PV1input powerPV1 input power",
         "PV2input powerPV2 input power",
         "PV3input powerPV3 input power",
-        "PV4input powerPV4 input power"
+        "PV4input powerPV4 input power",
+        "SOFTWARE_INCOMPATIBILITY",
+        "Write multiple register address",
+        "G83-England",
+        "RD1699/661-MV480",
+        "DCpower",
+        "G59-England",
+        "RD1699/661-MV800"
       ]
     },
     "CUMULATIVE_ENERGY": {
@@ -431,7 +454,19 @@
         "적산전력량 Total generation Energy",
         "CUMULATIVE_ENERGY_LOW",
         "Accumulatedpowergeneration",
-        "CUMULATIVE_ENERGY_HIGH"
+        "CUMULATIVE_ENERGY_HIGH",
+        "TAI-MEA-MV480",
+        "NRS-097-2-1-MV480",
+        "ANRE-MV480",
+        "PRC 024 ERCOT-MV600_ _",
+        "Abnormal Residual Current",
+        "BDEW-MV480",
+        "BDEW-MV",
+        "PRC 024 ERCOT-MV480_ _",
+        "BDEW-MV800",
+        "NRS-097-2-1-MV800",
+        "PRC 024 ERCOT-MV800_ _",
+        "TAI-MEA-MV800"
       ]
     },
     "DAILY_ENERGY": {
@@ -459,7 +494,8 @@
         "Decimals of Total Energy",
         "Decimal of Total",
         "Low Byte of Total Feed",
-        "적산전력량  소수점"
+        "적산전력량  소수점",
+        "CUMULATIVE_ENERGY"
       ]
     },
     "REACTIVE_POWER": {
@@ -482,7 +518,14 @@
         "L3유효전력",
         "L1역률",
         "L2역률",
-        "L3역률"
+        "L3역률",
+        "READ_REGISTER_ADDRESS",
+        "UTE C 15-712-1(B)",
+        "CEI0-16-MV480",
+        "IEC 61727-MV800-60Hz",
+        "CEI0-21-MV480",
+        "CEI0-21-MV800",
+        "CEI0-16-MV800"
       ]
     },
     "TEMPERATURE": {
@@ -500,7 +543,10 @@
         "Fan Staucked",
         "Module temperature is toohigh.",
         "Clamp capacitance imbalanceevent is detected.",
-        "Temperature1"
+        "Temperature1",
+        "START_BIT",
+        "EN50438 IE_",
+        "Number of points"
       ]
     },
     "DEVICE_MODEL": {
@@ -604,7 +650,9 @@
         "MPPT3 Current",
         "PV3 input current",
         "PV3current",
-        "MPPT_3_CURRENT"
+        "MPPT_3_CURRENT",
+        "MPPT3_CURRENT",
+        "PO12.3"
       ]
     },
     "alarm1": {

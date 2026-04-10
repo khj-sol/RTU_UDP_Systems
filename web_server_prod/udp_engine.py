@@ -45,6 +45,44 @@ _SANITY_RANGES = {
     'power_factor': (-1.1, 1.1),        # -1.1~1.1
 }
 
+_MODEL_NAME_MANUFACTURERS = (
+    ("huawei", "Huawei"),
+    ("sun2000", "Huawei"),
+    ("huaweinew", "Huawei"),
+    ("kstar", "Kstar"),
+    ("sungrow", "Sungrow"),
+    ("sg", "Sungrow"),
+    ("solarize", "Solarize"),
+    ("senergy", "Senergy"),
+    ("growatt", "Growatt"),
+    ("solis", "Solis"),
+    ("sofar", "Sofar"),
+    ("sunways", "Sunways"),
+    ("cps", "CPS"),
+    ("ekos", "Ekos"),
+)
+
+
+def _infer_inverter_manufacturer(model: int | None = None, model_name: str | None = None) -> str | None:
+    """Infer inverter manufacturer from known model ids or the reported model name."""
+    if model in INV_MODEL_NAMES:
+        return INV_MODEL_NAMES[model].split()[0]
+
+    raw_name = str(model_name or "").strip()
+    lowered = raw_name.lower()
+    if lowered:
+        for token, manufacturer in _MODEL_NAME_MANUFACTURERS:
+            if token in lowered:
+                return manufacturer
+
+        first_token = raw_name.replace("_", " ").replace("-", " ").split()
+        if first_token:
+            cleaned = "".join(ch for ch in first_token[0] if ch.isalnum())
+            if cleaned:
+                return cleaned[:1].upper() + cleaned[1:]
+
+    return None
+
 
 def _sanity_check(parsed: dict, rtu_id: int, dev_num: int):
     """Log warning for out-of-range inverter values. Never blocks data."""
@@ -153,6 +191,7 @@ class UDPEngine:
     """UDP engine that receives, parses, and ACKs RTU packets."""
 
     IV_SCAN_TTL = 3600  # 1 hour
+    DEVICE_STALE_MIN_AGE = 20  # seconds
 
     def __init__(self, listen_port: int = DEFAULT_SERVER_PORT,
                  rtu_port: int = DEFAULT_RTU_LOCAL_PORT):
@@ -573,6 +612,7 @@ class UDPEngine:
         parsed = {
             'device_number': dev_num,
             'model': model,
+            'manufacturer': _infer_inverter_manufacturer(model=model),
             'body_type': body_type,
             'pv_voltage': basic[0],
             'pv_current': basic[1],
@@ -816,12 +856,18 @@ class UDPEngine:
             event_type = "inverter_model"
             pos = 0
             parts = []
+            model_name = ""
+            serial_number = ""
             for fname in ['model_name', 'serial_number']:
                 if pos < len(body):
                     size = body[pos]
                     pos += 1
                     if pos + size <= len(body):
                         value = body[pos:pos + size].decode('utf-8', errors='ignore')
+                        if fname == 'model_name':
+                            model_name = value.strip()
+                        elif fname == 'serial_number':
+                            serial_number = value.strip()
                         parts.append(f"{fname}={value}")
                         pos += size
             # Parse capability flags: bit0=iv_scan, bit1=der_avm
@@ -835,7 +881,15 @@ class UDPEngine:
             with self._lock:
                 state = self.rtu_registry.get(rtu_id)
                 if state:
-                    state.dev_caps[dev_num] = {'iv_scan': cap_iv, 'der_avm': cap_der}
+                    existing_caps = state.dev_caps.get(dev_num, {})
+                    state.dev_caps[dev_num] = {
+                        **existing_caps,
+                        'iv_scan': cap_iv,
+                        'der_avm': cap_der,
+                        'model_name': model_name,
+                        'serial_number': serial_number,
+                        'manufacturer': _infer_inverter_manufacturer(model_name=model_name),
+                    }
             detail = f"INV{dev_num}: " + (", ".join(parts) if parts else "empty")
 
         elif body_type == BODY_TYPE_CONTROL_CHECK:
@@ -1153,8 +1207,23 @@ class UDPEngine:
 
     def get_rtu_devices(self, rtu_id: int) -> dict | None:
         """Return devices for a specific RTU with latest data."""
+        now = time.time()
         with self._lock:
             state = self.rtu_registry.get(rtu_id)
+            if state:
+                stale_cutoff = max(
+                    self.DEVICE_STALE_MIN_AGE,
+                    int(state.avg_interval * 2) if state.avg_interval > 0 else 120,
+                )
+                stale_keys = []
+                for device_key, data in state.devices.items():
+                    ts = data.get('timestamp') if isinstance(data, dict) else None
+                    if not ts:
+                        continue
+                    if now - ts > stale_cutoff:
+                        stale_keys.append(device_key)
+                for device_key in stale_keys:
+                    del state.devices[device_key]
         if not state:
             return None
 

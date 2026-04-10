@@ -18,6 +18,7 @@ import os
 import re
 import time
 import logging
+import ipaddress
 from datetime import datetime
 from typing import Optional
 
@@ -73,6 +74,32 @@ _LOCAL_MODE_IPS = {'localhost', '127.0.0.1', 'local', ''}
 
 def _is_local_mode(rtu_ip: str) -> bool:
     return rtu_ip.strip().lower() in _LOCAL_MODE_IPS
+
+
+_HOSTNAME_RE = re.compile(
+    r"^(?=.{1,253}$)(?!-)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)*"
+    r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])$"
+)
+
+
+def _normalize_rtu_host(raw: str) -> str:
+    host = (raw or "").strip()
+    if not host:
+        return ""
+    if host.lower() in _LOCAL_MODE_IPS:
+        return host.lower()
+    if any(ch.isspace() for ch in host):
+        raise HTTPException(status_code=400, detail="RTU IP/host must not contain spaces")
+    if "://" in host or "/" in host or "\\" in host:
+        raise HTTPException(status_code=400, detail="RTU IP/host must be a plain host or IPv4 address")
+    if ":" in host:
+        raise HTTPException(status_code=400, detail="RTU IP/host must not include a port")
+    try:
+        return str(ipaddress.ip_address(host))
+    except ValueError:
+        if host.endswith(".") or ".." in host or not _HOSTNAME_RE.fullmatch(host):
+            raise HTTPException(status_code=400, detail=f"Invalid RTU IP/host: {host}")
+        return host
 
 def _remote_to_local_path(remote_path: str) -> str:
     """Map /home/pi/{config|common}/X → local project filesystem path (security-checked)."""
@@ -668,6 +695,7 @@ RTU_DIRS = ["/home/pi/config", "/home/pi/common"]
 
 def _ssh_connect(ip: str):
     import paramiko
+    ip = _normalize_rtu_host(ip)
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     logger.warning("SSH host key not verified (AutoAddPolicy). Set RTU_SSH_KNOWN_HOSTS for production.")
@@ -754,6 +782,7 @@ class ConfigUpload(BaseModel):
 async def config_upload_to_rtu(req: ConfigUpload):
     """Upload local PC config/common files to RTU via SFTP, or confirm local in simulator mode."""
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    req.rtu_ip = _normalize_rtu_host(req.rtu_ip)
 
     if _is_local_mode(req.rtu_ip):
         # Local mode: PC and RTU share the same filesystem — files are already in place
@@ -833,6 +862,7 @@ class ConfigRestart(BaseModel):
 @router.post("/config/restart")
 async def config_restart_rtu(req: ConfigRestart):
     """Restart RTU service via SSH, or restart local rtu_client process in simulator mode."""
+    req.rtu_ip = _normalize_rtu_host(req.rtu_ip)
     if _is_local_mode(req.rtu_ip):
         try:
             killed = await _local_restart_rtu_process()
@@ -914,6 +944,7 @@ async def config_push_preview():
 async def config_push_to_rtu(req: ConfigRestart):
     """Push operational config + registers files from PC to RTU, then restart service."""
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    req.rtu_ip = _normalize_rtu_host(req.rtu_ip)
     results = []
 
     # Build file pairs (local_path, remote_path, display_name) — shared by both modes

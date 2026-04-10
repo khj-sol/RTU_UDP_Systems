@@ -34,7 +34,7 @@ from modbus_handler import MultiDeviceHandler
 from backup_manager import BackupManager
 from der_avm_slave import DerAvmSlave, DerAvmSlaveSimulation
 from der_avm_registers import DerAvmRegisters, DER_AVM_COMM_TIMEOUT
-from common.Solarize_PV_50kw_registers import InverterMode, ErrorCode1, ErrorCode2, ErrorCode3
+from common.solarize_registers import InverterMode, ErrorCode1, ErrorCode2, ErrorCode3
 
 # ─── UDP Constants ────────────────────────────────────────────────────────────
 UDP_RECV_TIMEOUT    = 10.0    # seconds to wait for ACK (H05 etc)
@@ -97,9 +97,14 @@ class SimpleConfig:
         self.cfg = _configparser.ConfigParser()
 
         # Defaults
+        self.server_mode = 'primary'
+        self.primary_host = 'solarize.ddns.net'
+        self.primary_port = DEFAULT_SERVER_PORT
+        self.secondary_host = 'solar-on.duckdns.org'
+        self.secondary_port = DEFAULT_SERVER_PORT
         self.rtu_id      = 10000001
-        self.server_host = 'solarize.ddns.net'
-        self.server_port = DEFAULT_SERVER_PORT
+        self.server_host = self.primary_host
+        self.server_port = self.primary_port
         self.local_port  = DEFAULT_UDP_PORT
         self.comm_period = 60
 
@@ -118,8 +123,24 @@ class SimpleConfig:
                 self.comm_period = self.cfg.getint('RTU', 'communication_period', fallback=60)
 
             if self.cfg.has_section('SERVER'):
-                self.server_host = self.cfg.get('SERVER', 'primary_host', fallback='solarize.ddns.net')
-                self.server_port = self.cfg.getint('SERVER', 'primary_port', fallback=DEFAULT_SERVER_PORT)
+                self.server_mode = self.cfg.get('SERVER', 'mode', fallback='primary').strip().lower()
+                if self.server_mode not in ('primary', 'secondary', 'dual'):
+                    logging.getLogger('RTU').warning(
+                        f"Invalid SERVER.mode='{self.server_mode}', using 'primary'")
+                    self.server_mode = 'primary'
+
+                self.primary_host = self.cfg.get('SERVER', 'primary_host', fallback='solarize.ddns.net')
+                self.primary_port = self.cfg.getint('SERVER', 'primary_port', fallback=DEFAULT_SERVER_PORT)
+                self.secondary_host = self.cfg.get('SERVER', 'secondary_host', fallback=self.primary_host)
+                self.secondary_port = self.cfg.getint('SERVER', 'secondary_port', fallback=self.primary_port)
+
+                if self.server_mode == 'secondary':
+                    self.server_host = self.secondary_host
+                    self.server_port = self.secondary_port
+                else:
+                    # primary / dual: primary is main ACK target
+                    self.server_host = self.primary_host
+                    self.server_port = self.primary_port
 
             return True
         except Exception as e:
@@ -151,7 +172,11 @@ class SimpleConfig:
     def print_config(self):
         logger = logging.getLogger('RTU')
         logger.info(f"  RTU ID     : {self.rtu_id}")
-        logger.info(f"  Server     : {self.server_host}:{self.server_port}")
+        logger.info(f"  Server Mode: {self.server_mode}")
+        logger.info(f"  Primary    : {self.primary_host}:{self.primary_port}")
+        if self.server_mode in ('secondary', 'dual'):
+            logger.info(f"  Secondary  : {self.secondary_host}:{self.secondary_port}")
+        logger.info(f"  Active     : {self.server_host}:{self.server_port}")
         logger.info(f"  Local Port : {self.local_port}")
         logger.info(f"  Comm Period: {self.comm_period}s")
 
@@ -167,6 +192,11 @@ class RTUClient:
 
         if config:
             self.rtu_id      = config.rtu_id
+            self.server_mode = getattr(config, 'server_mode', 'primary')
+            self.primary_host = getattr(config, 'primary_host', config.server_host)
+            self.primary_port = getattr(config, 'primary_port', config.server_port)
+            self.secondary_host = getattr(config, 'secondary_host', config.server_host)
+            self.secondary_port = getattr(config, 'secondary_port', config.server_port)
             self.server_host = config.server_host
             self.server_port = config.server_port
             self.local_port  = config.local_port
@@ -174,6 +204,11 @@ class RTUClient:
             self.config      = config
         else:
             self.rtu_id      = 10000001
+            self.server_mode = 'primary'
+            self.primary_host = 'localhost'
+            self.primary_port = DEFAULT_SERVER_PORT
+            self.secondary_host = 'localhost'
+            self.secondary_port = DEFAULT_SERVER_PORT
             self.server_host = 'localhost'
             self.server_port = DEFAULT_SERVER_PORT
             self.local_port  = DEFAULT_UDP_PORT
@@ -215,6 +250,8 @@ class RTUClient:
         # ── UDP socket ──────────────────────────────────────────────────────
         self.udp_socket   = None
         self.server_addr  = (self.server_host, self.server_port)
+        self.primary_addr = (self.primary_host, self.primary_port)
+        self.secondary_addr = (self.secondary_host, self.secondary_port)
         self.socket_lock  = threading.Lock()
         self._last_dns_refresh = 0
 
@@ -314,19 +351,48 @@ class RTUClient:
             return False
 
     def _refresh_dns(self):
-        """Resolve server hostname to IP"""
+        """Resolve configured server hostnames to IP."""
         now = time.time()
         if now - self._last_dns_refresh < DNS_REFRESH_INTERVAL:
             return
 
-        try:
-            ip = socket.gethostbyname(self.server_host)
-            self.server_addr = (ip, self.server_port)
-            self._last_dns_refresh = now
-            self.logger.info(f"DNS: {self.server_host} -> {ip}:{self.server_port}")
-        except socket.gaierror as e:
-            self.logger.error(f"DNS resolution failed: {self.server_host} - {e}")
-            self.server_addr = (self.server_host, self.server_port)
+        targets = [('primary', self.primary_host, self.primary_port)]
+        if self.server_mode in ('secondary', 'dual'):
+            targets.append(('secondary', self.secondary_host, self.secondary_port))
+
+        for label, host, port in targets:
+            try:
+                ip = socket.gethostbyname(host)
+                addr = (ip, port)
+                self.logger.info(f"DNS[{label}]: {host} -> {ip}:{port}")
+            except socket.gaierror as e:
+                self.logger.error(f"DNS[{label}] resolution failed: {host} - {e}")
+                addr = (host, port)
+
+            if label == 'primary':
+                self.primary_addr = addr
+            else:
+                self.secondary_addr = addr
+
+        # Main ACK target: primary for dual mode
+        if self.server_mode == 'secondary':
+            self.server_host = self.secondary_host
+            self.server_port = self.secondary_port
+            self.server_addr = self.secondary_addr
+        else:
+            self.server_host = self.primary_host
+            self.server_port = self.primary_port
+            self.server_addr = self.primary_addr
+
+        self._last_dns_refresh = now
+
+    def _target_addrs(self):
+        """Return destination list according to SERVER.mode."""
+        if self.server_mode == 'secondary':
+            return [('secondary', self.secondary_addr)]
+        if self.server_mode == 'dual':
+            return [('primary', self.primary_addr), ('secondary', self.secondary_addr)]
+        return [('primary', self.primary_addr)]
 
     # =========================================================================
     # UDP Send / Receive
@@ -341,25 +407,25 @@ class RTUClient:
         if not self.udp_socket:
             return False
 
-        for attempt in range(1, UDP_MAX_RETRIES + 1):
+        self._refresh_dns()
+
+        for label, addr in self._target_addrs():
             try:
                 self._ack_event.clear()
                 t0 = time.time()
                 with self.socket_lock:
-                    self.udp_socket.sendto(packet, self.server_addr)
+                    self.udp_socket.sendto(packet, addr)
 
                 # Wait for ACK from _receive_loop() thread
                 if self._ack_event.wait(timeout=UDP_RECV_TIMEOUT):
                     elapsed_ms = (time.time() - t0) * 1000
-                    self.logger.info(f"ACK received in {elapsed_ms:.0f}ms")
+                    self.logger.info(f"ACK[{label}] received in {elapsed_ms:.0f}ms")
                     return True
 
-                if attempt < UDP_MAX_RETRIES:
-                    self.logger.debug(
-                        f"ACK timeout (attempt {attempt}/{UDP_MAX_RETRIES})")
+                self.logger.warning(f"ACK timeout from {label} target {addr}")
 
             except OSError as e:
-                self.logger.error(f"UDP send error: {e}")
+                self.logger.error(f"UDP send error to {label} {addr}: {e}")
                 time.sleep(0.5)
 
         return False
@@ -371,15 +437,29 @@ class RTUClient:
             if backup_on_fail:
                 self.backup.save_failed_packet(packet)
             return False
+        self._refresh_dns()
+        sent = 0
         try:
-            with self.socket_lock:
-                self.udp_socket.sendto(packet, self.server_addr)
+            for label, addr in self._target_addrs():
+                try:
+                    with self.socket_lock:
+                        self.udp_socket.sendto(packet, addr)
+                    sent += 1
+                except OSError as e:
+                    self.logger.error(f"UDP send error to {label} {addr}: {e}")
+        except Exception as e:
+            self.logger.error(f"UDP send unexpected error: {e}")
+
+        if sent > 0:
             return True
-        except OSError as e:
-            self.logger.error(f"UDP send error: {e}")
-            if backup_on_fail:
-                self.backup.save_failed_packet(packet)
-            return False
+
+        if backup_on_fail:
+            self.backup.save_failed_packet(packet)
+        return False
+
+    def _server_targets_text(self) -> str:
+        targets = self._target_addrs()
+        return ', '.join(f"{label}={addr[0]}:{addr[1]}" for label, addr in targets)
 
     def _receive_batch_acks(self, sent_packets: list, timeout: float = BATCH_ACK_TIMEOUT):
         """Receive ACKs for batch-sent packets. Unacked packets saved to backup.
@@ -426,8 +506,7 @@ class RTUClient:
                             self.logger.info(f"H02 ACK received (seq={seq}), {len(pending)} remaining")
                         if not self.server_reachable:
                             self.server_reachable = True
-                            self.logger.info(
-                                f"Connected to {self.server_host}:{self.server_port}")
+                            self.logger.info(f"Connected to {self._server_targets_text()}")
                 elif version == VERSION_H03:
                     self._handle_h03(data)
                 elif version == VERSION_H06 and len(data) >= 4:
@@ -446,8 +525,7 @@ class RTUClient:
         # Save unacked packets to backup
         if pending:
             if self.server_reachable:
-                self.logger.error(
-                    f"NETWORK_DOWN: {self.server_host}:{self.server_port} unreachable")
+                self.logger.error(f"NETWORK_DOWN: {self._server_targets_text()} unreachable")
             self.server_reachable = False
             for seq, pkt in pending.items():
                 self.backup.save_failed_packet(pkt)
@@ -458,8 +536,7 @@ class RTUClient:
             self.logger.info(f"Batch ACK: {len(sent_packets)}/{len(sent_packets)} OK")
             if not self.server_reachable:
                 self.server_reachable = True
-                self.logger.info(
-                    f"Connected to {self.server_host}:{self.server_port}")
+                self.logger.info(f"Connected to {self._server_targets_text()}")
                 # Communication restored → send event + 60s wait + recovery mode
                 try:
                     pkt, seq = self.protocol.create_h05_event("Communication Restored")
@@ -506,17 +583,17 @@ class RTUClient:
             self._handle_h07(data)
 
     def _send_to_servers(self, packet: bytes, save_on_fail: bool = True):
-        """Send packet to server (UDP fire-and-retry)"""
+        """Send packet to configured server target(s)."""
         # Refresh DNS periodically
         self._refresh_dns()
 
         if self._send_udp(packet):
             if not self.server_reachable:
-                self.logger.info(f"Connected to {self.server_host}:{self.server_port}")
+                self.logger.info(f"Connected to {self._server_targets_text()}")
                 self.server_reachable = True
         else:
             if self.server_reachable:
-                self.logger.error(f"NETWORK_DOWN: {self.server_host}:{self.server_port} unreachable")
+                self.logger.error(f"NETWORK_DOWN: {self._server_targets_text()} unreachable")
             self.server_reachable = False
             if save_on_fail:
                 self.backup.save_failed_packet(packet)
@@ -692,7 +769,7 @@ class RTUClient:
 
         Runs in separate thread to avoid blocking _receive_loop.
         """
-        from common.Solarize_PV_50kw_registers import IVScanStatus
+        from common.solarize_registers import IVScanStatus
 
         string_count = inv_cfg.get('string_count', 8)
         self.logger.info(f"IV Scan started for INV{dev_num} ({string_count} strings)")
@@ -905,7 +982,7 @@ class RTUClient:
                             ignored.append(f)
                     return ignored
 
-                for folder in ['rtu_program', 'common']:
+                for folder in ['rtu_program', 'common', 'config']:
                     src = os.path.join(home_dir, folder)
                     if os.path.exists(src):
                         dst = os.path.join(backup_dir, f'{folder}_{timestamp}')
@@ -928,18 +1005,10 @@ class RTUClient:
                     src = os.path.join(extract_dir, folder)
                     if os.path.exists(src):
                         dst = os.path.join(home_dir, folder)
-                        if folder == 'config' and os.path.exists(dst):
-                            # Config: merge (copy files, don't delete existing)
-                            for item in os.listdir(src):
-                                s = os.path.join(src, item)
-                                d = os.path.join(dst, item)
-                                if os.path.isfile(s):
-                                    shutil.copy2(s, d)
-                        else:
-                            # Code: replace entirely
-                            if os.path.exists(dst):
-                                shutil.rmtree(dst)
-                            shutil.copytree(src, dst)
+                        # Replace entirely so uploaded config is applied exactly.
+                        if os.path.exists(dst):
+                            shutil.rmtree(dst)
+                        shutil.copytree(src, dst)
                         self.logger.info(f"Updated: {folder}/")
                 self.logger.info("Firmware update applied successfully")
             except Exception as e:
@@ -1066,16 +1135,14 @@ class RTUClient:
         """Start RTU UDP client"""
         self.logger.info(f"RTU UDP Client V{self.VERSION} starting...")
         self.logger.info(f"  RTU ID : {self.rtu_id}")
-        self.logger.info(f"  Server : {self.server_host}:{self.server_port}")
+        self.logger.info(f"  Server Mode : {self.server_mode}")
+        self.logger.info(f"  Server      : {self._server_targets_text()}")
         self.logger.info(f"  Period : {self.comm_period}s")
 
         if not self._create_udp_socket():
             return False
 
         self.running = True
-
-        # 새 세션 시작 — 구 rtu_id 잔여 백업 데이터 제거
-        self.backup.clear_all()
 
         # Send first connection event (fire-and-forget, no backup)
         pkt, seq = self.protocol.create_h05_event(EVENT_FIRST_CONNECTION)

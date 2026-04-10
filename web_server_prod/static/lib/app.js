@@ -25,6 +25,22 @@ const post = (url, body) => fetcher(url, {
   body: JSON.stringify(body)
 });
 const fmt = (v, d = 1) => v != null ? Number(v).toFixed(d) : '--';
+const sanitizeRtuHost = value => String(value || '').trim();
+const isValidRtuHost = value => {
+  const host = sanitizeRtuHost(value);
+  if (!host) return false;
+  const lowered = host.toLowerCase();
+  if (['localhost', '127.0.0.1', 'local'].includes(lowered)) return true;
+  if (/\s|:|\/|\\/.test(host)) return false;
+  const ipv4Match = host.match(/^(\d{1,3})(?:\.(\d{1,3})){3}$/);
+  if (ipv4Match) {
+    return host.split('.').every(part => {
+      const n = Number(part);
+      return Number.isInteger(n) && n >= 0 && n <= 255;
+    });
+  }
+  return /^(?=.{1,253}$)(?!-)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)*[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])$/.test(host);
+};
 const fmtTime = ts => {
   if (!ts) return '--';
   const d = new Date(typeof ts === 'number' ? ts * 1000 : ts);
@@ -43,6 +59,40 @@ const MODEL_COLORS = {
   3: 'bg-purple-500',
   4: 'bg-teal-600',
 };
+const MODEL_NAME_MANUFACTURERS = [{
+  match: /huawei|sun2000|huaweinew/i,
+  name: 'Huawei'
+}, {
+  match: /kstar/i,
+  name: 'Kstar'
+}, {
+  match: /sungrow|\bsg\d+/i,
+  name: 'Sungrow'
+}, {
+  match: /solarize/i,
+  name: 'Solarize'
+}, {
+  match: /senergy/i,
+  name: 'Senergy'
+}, {
+  match: /growatt/i,
+  name: 'Growatt'
+}, {
+  match: /solis/i,
+  name: 'Solis'
+}, {
+  match: /sofar/i,
+  name: 'Sofar'
+}, {
+  match: /sunways/i,
+  name: 'Sunways'
+}, {
+  match: /cps/i,
+  name: 'CPS'
+}, {
+  match: /ekos/i,
+  name: 'Ekos'
+}];
 const INVERTER_STATUS = {
   0x00: 'Initial',
   0x01: 'Standby',
@@ -63,6 +113,18 @@ const EVT_COLORS = {
   H03_SENT: 'text-blue-400',
   H04_RECV: 'text-purple-400',
   H05_RECV: 'text-orange-400'
+};
+const getInverterManufacturer = device => {
+  const explicit = String(device?.manufacturer || '').trim();
+  if (explicit) return explicit;
+  const modelName = String(device?.model_name || '').trim();
+  if (modelName) {
+    const matched = MODEL_NAME_MANUFACTURERS.find(entry => entry.match.test(modelName));
+    if (matched) return matched.name;
+    const firstToken = modelName.replace(/[_-]+/g, ' ').trim().split(/\s+/)[0];
+    if (firstToken) return firstToken;
+  }
+  return MODEL_NAMES[device?.model] || 'Unknown';
 };
 
 // ---- Badge ----
@@ -259,6 +321,16 @@ function OverviewTab({
   rtus,
   onSelectRtu
 }) {
+  const sshIpMap = (() => {
+    try {
+      return JSON.parse(localStorage.getItem('rtu_ssh_ip_map_v1') || '{}') || {};
+    } catch {
+      return {};
+    }
+  })();
+  const getMgmtIp = r => (sshIpMap[String(r?.rtu_id)] || '').trim();
+  const getDisplayIp = r => getMgmtIp(r) || (r?.ip || '--');
+  const getDisplayPort = r => getMgmtIp(r) ? '' : (r?.port || '--');
   const activeRtus = rtus.filter(r => !r.hidden);
   const online = activeRtus.filter(r => r.status === 'online').length;
   const totalSolar = activeRtus.reduce((s, r) => s + (r.total_solar_power || 0), 0);
@@ -292,7 +364,8 @@ function OverviewTab({
       onClick: () => setInfoRtu(null)
     }, "\u2715")), /*#__PURE__*/React.createElement("div", {className: "space-y-2 text-sm"},
       [['Status', infoRtu.status === 'online' ? 'Online' : 'Offline'],
-       ['IP', `${infoRtu.ip || '--'}:${infoRtu.port || '--'}`],
+       ['IP', getDisplayIp(infoRtu)],
+       ['UDP Src', `${infoRtu.ip || '--'}:${infoRtu.port || '--'}`],
        ['Model', infoRtu.rtu_info?.model || '--'],
        ['Serial', infoRtu.rtu_info?.serial || '--'],
        ['Phone', infoRtu.rtu_info?.phone || '--'],
@@ -364,7 +437,7 @@ function OverviewTab({
   }, r.rtu_type)), /*#__PURE__*/React.createElement("td", {
     className: "cursor-pointer hover:text-blue-400",
     onClick: () => onSelectRtu(r.rtu_id)
-  }, r.ip || '--', ":", r.port || '--'), /*#__PURE__*/React.createElement("td", {
+  }, getDisplayIp(r), getDisplayPort(r) ? ":" : "", getDisplayPort(r)), /*#__PURE__*/React.createElement("td", {
     className: "text-center text-gray-400"
   }, r.avg_interval > 0 ? Math.round(r.avg_interval / 60) + '\uBD84' : '-'), /*#__PURE__*/React.createElement("td", null, fmtTime(r.last_seen)), /*#__PURE__*/React.createElement("td", null, r.device_count || 0), /*#__PURE__*/React.createElement("td", null, fmt((r.total_solar_power || 0) / 1000, 2), " kW"), /*#__PURE__*/React.createElement("td", {
     className: "text-center"
@@ -389,14 +462,16 @@ function InverterCard({
 }) {
   const d = dev.data || dev || {};
   const m = d.model || dev.model || 1;
+  const manufacturer = getInverterManufacturer(d);
+  const isHuawei = m === 2 || String(d.protocol || dev.protocol || '').toLowerCase() === 'huawei' || manufacturer === 'Huawei';
   // Monitor 값이 있으면 AC 데이터를 Monitor로 오버라이드 + PV 비례 조정
   const monRatio = d.mon && d.ac_power > 0 ? (d.mon.active_power_kw * 1000) / d.ac_power : 1;
   const acI_r = d.mon ? fmt(d.mon.current_r, 1) : fmt((d.r_current || 0) / 10, 1);
   const acI_s = d.mon ? fmt(d.mon.current_s, 1) : fmt((d.s_current || 0) / 10, 1);
   const acI_t = d.mon ? fmt(d.mon.current_t, 1) : fmt((d.t_current || 0) / 10, 1);
-  const acV_r = d.mon ? fmt(d.mon.voltage_rs, 1) : fmt(d.r_voltage);
-  const acV_s = d.mon ? fmt(d.mon.voltage_st, 1) : fmt(d.s_voltage);
-  const acV_t = d.mon ? fmt(d.mon.voltage_tr, 1) : fmt(d.t_voltage);
+  const acV_r = d.mon ? fmt(d.mon.voltage_rs, 1) : fmt((d.r_voltage || 0) / (isHuawei ? 10 : 1), 1);
+  const acV_s = d.mon ? fmt(d.mon.voltage_st, 1) : fmt((d.s_voltage || 0) / (isHuawei ? 10 : 1), 1);
+  const acV_t = d.mon ? fmt(d.mon.voltage_tr, 1) : fmt((d.t_voltage || 0) / (isHuawei ? 10 : 1), 1);
   const acPower = d.mon ? fmt(d.mon.active_power_kw, 2) : fmt((d.ac_power || 0) / 1000, 2);
   const acPF = d.mon ? fmt(d.mon.power_factor, 3) : fmt(d.power_factor, 3);
   const acFreq = d.mon ? fmt(d.mon.frequency, 1) : fmt(d.frequency);
@@ -409,7 +484,7 @@ function InverterCard({
   }, "Inverter #", dev.device_number), /*#__PURE__*/React.createElement("div", {
     className: "flex gap-1"
   }, /*#__PURE__*/React.createElement(Badge, {
-    text: MODEL_NAMES[m] || 'Unknown',
+    text: manufacturer,
     color: MODEL_COLORS[m] || 'bg-gray-600'
   }), d.body_type === -4 ? /*#__PURE__*/React.createElement(Badge, {
     text: '야간대기',
@@ -1810,20 +1885,39 @@ function ConfigTab({
   const [pushFiles, setPushFiles] = useState([]);
   const [pushLoading, setPushLoading] = useState(false);
   const [pushResult, setPushResult] = useState(null);
+  const [groupedFromApi, setGroupedFromApi] = useState(null);
   const [localMode, setLocalMode] = useState(() => localStorage.getItem('rtu_config_local_mode') === 'true');
-  const effectiveIp = localMode ? 'localhost' : rtuIp;
+  const normalizedRtuIp = sanitizeRtuHost(rtuIp);
+  const effectiveIp = localMode ? 'localhost' : normalizedRtuIp;
 
   // Load saved RTU SSH IP from localStorage (NAT 환경에서 UDP source IP와 다를 수 있음)
   useEffect(() => {
-    const saved = localStorage.getItem('rtu_ssh_ip');
-    if (saved) setRtuIp(saved); else if (selectedRtu) {
+    let ipMap = {};
+    try {
+      ipMap = JSON.parse(localStorage.getItem('rtu_ssh_ip_map_v1') || '{}') || {};
+    } catch {}
+    const selectedSaved = sanitizeRtuHost(selectedRtu ? (ipMap[String(selectedRtu)] || '') : '');
+    const globalSaved = sanitizeRtuHost(localStorage.getItem('rtu_ssh_ip'));
+    const saved = isValidRtuHost(selectedSaved) ? selectedSaved : isValidRtuHost(globalSaved) ? globalSaved : '';
+    if (saved) {
+      setRtuIp(saved);
+    } else if (selectedRtu) {
       const rtu = rtus.find(r => String(r.rtu_id) === String(selectedRtu));
-      if (rtu) setRtuIp(rtu.ip?.split(':')[0] || rtu.ip || '');
+      if (rtu) setRtuIp(sanitizeRtuHost(rtu.ip?.split(':')[0] || rtu.ip || ''));
     }
   }, [selectedRtu, rtus]);
   useEffect(() => {
-    if (rtuIp) localStorage.setItem('rtu_ssh_ip', rtuIp);
-  }, [rtuIp]);
+    if (!normalizedRtuIp) return;
+    if (!isValidRtuHost(normalizedRtuIp)) return;
+    localStorage.setItem('rtu_ssh_ip', normalizedRtuIp);
+    if (!selectedRtu) return;
+    let ipMap = {};
+    try {
+      ipMap = JSON.parse(localStorage.getItem('rtu_ssh_ip_map_v1') || '{}') || {};
+    } catch {}
+    ipMap[String(selectedRtu)] = normalizedRtuIp;
+    localStorage.setItem('rtu_ssh_ip_map_v1', JSON.stringify(ipMap));
+  }, [normalizedRtuIp, selectedRtu]);
   useEffect(() => {
     localStorage.setItem('rtu_config_local_mode', String(localMode));
   }, [localMode]);
@@ -1838,11 +1932,21 @@ function ConfigTab({
     setStatus('Loading files...');
     try {
       const d = await fetcher('/config/files?rtu_ip=localhost');
-      setFiles(d.files || []);
+      const rawFiles = Array.isArray(d.files) ? d.files : [];
+      const normalized = rawFiles.map(f => {
+        if (typeof f === 'string') return f;
+        if (f && typeof f === 'object') {
+          return f.path || f.remote || f.local || f.filename || '';
+        }
+        return '';
+      }).filter(Boolean);
+      setFiles(normalized);
+      setGroupedFromApi(d.grouped && typeof d.grouped === 'object' ? d.grouped : null);
       setStatusErr(false);
-      setStatus(`${(d.files || []).length}개 파일 로드됨`);
+      setStatus(`${normalized.length}개 파일 로드됨`);
     } catch (e) {
       setFiles([]);
+      setGroupedFromApi(null);
       setStatusErr(true);
       setStatus('Error: ' + e.message);
     }
@@ -1897,6 +2001,11 @@ function ConfigTab({
   };
   const doPushToRtu = async () => {
     if (!effectiveIp) return;
+    if (!localMode && !isValidRtuHost(effectiveIp)) {
+      setStatusErr(true);
+      setStatus('Error: RTU IP/host must be a plain IPv4 address or hostname without spaces or port');
+      return;
+    }
     setPushLoading(true);
     setPushResult(null);
     try {
@@ -1911,14 +2020,38 @@ function ConfigTab({
     setPushLoading(false);
   };
 
-  // Group files by directory
-  const grouped = {};
-  files.forEach(f => {
-    const parts = f.split('/');
-    const dir = parts.slice(0, -2).length ? parts[parts.length - 2] : '';
-    if (!grouped[dir]) grouped[dir] = [];
-    grouped[dir].push(f);
-  });
+  // Group files by directory (supports both "/home/pi/config/x.ini" and "config/x.ini")
+  const grouped = {
+    config: [],
+    common: []
+  };
+  // Prefer backend grouping when available to avoid duplicate rendering.
+  if (groupedFromApi && Object.keys(groupedFromApi).length > 0) {
+    for (const [k, v] of Object.entries(groupedFromApi)) {
+      if (!Array.isArray(v)) continue;
+      const key = String(k || '').trim();
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key] = Array.from(new Set(v.map(x => String(x)).filter(Boolean)));
+    }
+  } else {
+    files.forEach(f => {
+      if (typeof f !== 'string') return;
+      const norm = f.replace(/\\/g, '/');
+      let dir = '';
+      const m = norm.match(/(?:^|\/)(config|common)(?:\/|$)/);
+      if (m) {
+        dir = m[1];
+      } else {
+        const parts = norm.split('/').filter(Boolean);
+        if (parts.length >= 2) dir = parts[parts.length - 2];
+      }
+      if (!grouped[dir]) grouped[dir] = [];
+      grouped[dir].push(norm);
+    });
+    for (const k of Object.keys(grouped)) {
+      grouped[k] = Array.from(new Set(grouped[k]));
+    }
+  }
 
   return /*#__PURE__*/React.createElement("div", null,
     /*#__PURE__*/React.createElement("div", {
@@ -1928,7 +2061,7 @@ function ConfigTab({
       /*#__PURE__*/React.createElement("input", {
         className: localMode ? "bg-gray-700 rounded px-3 py-1.5 text-sm w-40 opacity-40 cursor-not-allowed" : "bg-gray-700 rounded px-3 py-1.5 text-sm w-40",
         value: localMode ? 'localhost' : rtuIp,
-        onChange: e => { if (!localMode) setRtuIp(e.target.value); },
+        onChange: e => { if (!localMode) setRtuIp(sanitizeRtuHost(e.target.value)); },
         placeholder: "172.30.1.40",
         disabled: localMode
       }),
@@ -1971,7 +2104,7 @@ function ConfigTab({
         /*#__PURE__*/React.createElement("div", { className: "flex gap-2" },
           !pushResult && /*#__PURE__*/React.createElement("button", {
             onClick: doPushToRtu,
-            disabled: pushLoading || (!localMode && !rtuIp) || pushFiles.length === 0,
+            disabled: pushLoading || (!localMode && !isValidRtuHost(effectiveIp)) || pushFiles.length === 0,
             className: "bg-teal-600 hover:bg-teal-500 px-3 py-1 rounded text-xs disabled:opacity-50"
           }, pushLoading ? "\uc804\uc1a1 \uc911..." : "\uc804\uc1a1 & \uc7ac\uc2dc\uc791"),
           /*#__PURE__*/React.createElement("button", {
@@ -2019,7 +2152,7 @@ function ConfigTab({
       /*#__PURE__*/React.createElement("div", { className: "col-span-1" },
         /*#__PURE__*/React.createElement(Card, null,
           /*#__PURE__*/React.createElement("div", { className: "text-sm font-bold mb-2" }, "Files"),
-          Object.entries(grouped).map(([dir, flist]) => /*#__PURE__*/React.createElement("div", {
+          Object.entries(grouped).filter(([, flist]) => flist.length > 0).map(([dir, flist]) => /*#__PURE__*/React.createElement("div", {
             key: dir,
             className: "mb-2"
           },

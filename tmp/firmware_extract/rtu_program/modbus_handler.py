@@ -130,25 +130,25 @@ sys.path.append(libdir)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import importlib as _importlib
-from common.Solarize_PV_50kw_registers import RegisterMap, InverterMode, SCALE, registers_to_u32
+from common.solarize_registers import RegisterMap, InverterMode, SCALE, registers_to_u32
 
-# --- Solarize_PV_50kw_registers 모듈 참조 (fallback 용) ---
-import common.Solarize_PV_50kw_registers as _default_reg_module
-from common.Kstar_PV_60kw_registers import (
-    RegisterMap as KstarRegisters, KstarSystemStatus, KstarStatusConverter, SCALE as KSTAR_SCALE,
+# --- solarize_registers 모듈 참조 (fallback 용) ---
+import common.solarize_registers as _default_reg_module
+from common.kstar_registers import (
+    KstarRegisters, KstarSystemStatus, KstarStatusConverter, SCALE as KSTAR_SCALE,
     calc_pv_total_power, calc_ac_total_power, get_mppt_data,
     get_string_currents, get_cumulative_energy_wh,
 )
-from common.Huawei_PV_50kw_registers import (
-    RegisterMap as HuaweiRegisters, HuaweiStatusConverter, SCALE as HUAWEI_SCALE,
+from common.huawei_registers import (
+    HuaweiRegisters, HuaweiStatusConverter, SCALE as HUAWEI_SCALE,
     get_pv_string_data, get_mppt_from_strings,
     get_string_currents as huawei_get_string_currents,
     get_cumulative_energy_wh as huawei_get_cumulative_energy_wh,
     registers_to_s32 as huawei_registers_to_s32,
     s16 as huawei_s16,
 )
-from common.REF_relay_registers import KDU300RegisterMap, registers_to_float, H01_RELAY_FIELD_MAP
-from common.REF_weather_registers import (
+from common.relay_registers import KDU300RegisterMap, registers_to_float, H01_RELAY_FIELD_MAP
+from common.weather_registers import (
     SEM5046RegisterMap,
     raw_to_air_temp, raw_to_humidity, raw_to_pressure,
     raw_to_wind_speed, raw_to_wind_direction, raw_to_module_temp,
@@ -200,47 +200,22 @@ except ImportError:
 def load_register_module(protocol_name: str):
     """protocol 이름으로 common/{protocol}_registers.py 동적 import.
 
-    1차: common.{protocol_name}_registers 정확히 시도
-    2차: common/ 디렉토리에서 {manufacturer}_*_registers.py glob fallback
-         (예: 'solarize' → 'Solarize_PV_50kw_registers.py')
-
     Args:
-        protocol_name: config의 protocol 값 (예: 'solarize', 'Solarize_PV_50kw')
+        protocol_name: config의 protocol 값 (예: 'solarize', 'verterking')
 
     Returns:
         Loaded register module (has RegisterMap, SCALE, etc.)
     """
-    log = logging.getLogger(__name__)
-
-    # 1차: 정확한 이름
     module_name = f"common.{protocol_name}_registers"
     try:
         mod = _importlib.import_module(module_name)
-        log.info(f"Loaded register module: {module_name}")
+        logging.getLogger(__name__).info(
+            f"Loaded register module: {module_name}")
         return mod
     except ImportError:
-        pass
-
-    # 2차: 대소문자 무관 제조사 prefix glob fallback
-    import glob as _glob, os as _os
-    common_dir = _os.path.join(_os.path.dirname(__file__), '..', 'common')
-    prefix = protocol_name.split('_')[0].lower()  # 'solarize', 'ekos', ...
-    candidates = sorted(
-        _glob.glob(_os.path.join(common_dir, f'*_registers.py'))
-    )
-    for fpath in candidates:
-        fname = _os.path.basename(fpath)
-        if fname.lower().startswith(prefix) and not fname.startswith('REF_'):
-            mod_name = f"common.{fname[:-3]}"  # strip .py
-            try:
-                mod = _importlib.import_module(mod_name)
-                log.info(f"Loaded register module (fallback): {mod_name} for protocol '{protocol_name}'")
-                return mod
-            except ImportError:
-                continue
-
-    log.warning(f"Register module for '{protocol_name}' not found, fallback to solarize")
-    return _default_reg_module
+        logging.getLogger(__name__).warning(
+            f"Register module '{module_name}' not found, fallback to solarize")
+        return _default_reg_module
 
 
 def _normalize_scale(raw_scale: dict) -> dict:
@@ -292,6 +267,9 @@ def _init_reg_attrs(handler, reg_module):
     handler.scale = _normalize_scale(getattr(mod, 'SCALE', SCALE))
     handler.InvMode = getattr(mod, 'InverterMode', InverterMode)
     handler.reg_to_u32 = getattr(mod, 'registers_to_u32', registers_to_u32)
+    handler.reg_to_s32 = getattr(mod, 'registers_to_s32', None)
+    handler.reg_to_u32_be = getattr(mod, 'registers_to_u32_be', None)
+    handler.reg_to_s32_be = getattr(mod, 'registers_to_s32_be', None)
     handler.reg_to_float32 = getattr(mod, 'registers_to_float32', None)
     handler.reg_data_types = getattr(mod, 'DATA_TYPES', None)
     # Find StatusConverter: scan module for any class ending with 'StatusConverter'.
@@ -304,23 +282,17 @@ def _init_reg_attrs(handler, reg_module):
             if handler.status_converter is not None:
                 break
 
-    # DATA_PARSER / READ_BLOCKS — Stage 3 생성 파일에 포함된 경우 바인딩
-    handler.data_parser = getattr(mod, 'DATA_PARSER', None)
-    handler.read_blocks = getattr(mod, 'READ_BLOCKS', None)
-
     # Detect non-Solarize register layout: if AC_POWER address differs from
     # the hardcoded Solarize default (0x1037), use dynamic register reading.
     rm = handler.RegMap
     solarize_ac_power = 0x1037
     handler.use_dynamic_read = (
-        not handler.use_block_read
-        and handler.reg_data_types is not None
+        handler.reg_data_types is not None
         and hasattr(rm, 'AC_POWER')
         and rm.AC_POWER != solarize_ac_power
     )
     _log = logging.getLogger('modbus_handler')
     _log.info(f"_init_reg_attrs: slave={getattr(handler, 'slave_id', '?')} "
-              f"block={handler.use_block_read} "
               f"data_types={handler.reg_data_types is not None} "
               f"AC_POWER={hex(rm.AC_POWER) if hasattr(rm, 'AC_POWER') else 'N/A'} "
               f"dynamic={handler.use_dynamic_read}")
@@ -474,68 +446,8 @@ class ModbusHandlerHAT:
         return {'tests': [], 'recommendations': ['Master not initialized']}
     
     def _read_reg(self, addr, count=1):
-        """Read holding registers (FC03), returns list of U16 values or None."""
+        """Read holding registers, returns list of U16 values or None."""
         return self.master.read_holding_registers(addr, count, self.slave_id)
-
-    def _read_input_reg(self, addr, count=1):
-        """Read input registers (FC04), returns list of U16 values or None."""
-        return self.master.read_input_registers(addr, count, self.slave_id)
-
-    def _read_block(self, start, count, fc=3):
-        """Read a contiguous register block using the specified FC code.
-
-        Returns list of U16 values, or None on failure.
-        """
-        if fc == 4:
-            return self._read_input_reg(start, count)
-        return self._read_reg(start, count)
-
-    def _build_reg_cache(self, read_blocks):
-        """Read all READ_BLOCKS and return {addr: value} cache.
-
-        Only caches registers that were successfully read.
-        """
-        cache = {}
-        for blk in read_blocks:
-            start = blk['start']
-            count = blk['count']
-            fc = blk.get('fc', 3)
-            result = self._read_block(start, count, fc)
-            if result:
-                for i, v in enumerate(result):
-                    cache[start + i] = v
-        return cache
-
-    def _get_typed_from_cache(self, field_name, addr, cache):
-        """Extract a typed value from the register cache.
-
-        Returns converted Python value (int or float), or None if not cached.
-        Handles FLOAT32/U32/S32/S16/U16 via DATA_TYPES.
-        """
-        dtype = (self.reg_data_types or {}).get(field_name, 'u16').lower()
-        if dtype == 'float32':
-            lo = cache.get(addr)
-            hi = cache.get(addr + 1)
-            if lo is not None and hi is not None and self.reg_to_float32:
-                return self.reg_to_float32(lo, hi)
-            return None
-        elif dtype in ('u32', 's32'):
-            lo = cache.get(addr)
-            hi = cache.get(addr + 1)
-            if lo is not None and hi is not None:
-                if dtype == 'u32':
-                    return self.reg_to_u32(lo, hi)
-                else:
-                    val = self.reg_to_u32(lo, hi)
-                    return val - 0x100000000 if val >= 0x80000000 else val
-            return None
-        elif dtype == 's16':
-            v = cache.get(addr)
-            if v is not None:
-                return v - 65536 if v > 32767 else v
-            return None
-        else:  # u16
-            return cache.get(addr)
 
     def _read_typed_value(self, field_name, addr):
         """Read a register value using the correct data type from DATA_TYPES.
@@ -556,8 +468,7 @@ class ModbusHandlerHAT:
                 if dtype == 'u32':
                     return self.reg_to_u32(result[0], result[1])
                 else:
-                    from common.Solarize_PV_50kw_registers import registers_to_s32 as _s32
-                    return _s32(result[0], result[1])
+                    return self.reg_to_s32(result[0], result[1])
             return None
         elif dtype == 's16':
             result = self._read_reg(addr, 1)
@@ -575,155 +486,145 @@ class ModbusHandlerHAT:
         """Generic register-map-driven inverter data reading.
 
         Used for non-Solarize protocols (EKOS, Sungrow, etc.) where register
-        addresses differ from the hardcoded Solarize layout.
-
-        Strategy:
-          1. If reg_module has READ_BLOCKS → batch-read all monitoring blocks once,
-             build {addr: value} cache, then parse every field from cache.
-          2. Otherwise fall back to per-field reads (legacy behaviour).
-
-        All RegisterMap attribute accesses use getattr(..., None) to prevent
-        AttributeError from crashing the whole read cycle.
+        addresses and data types differ from the hardcoded Solarize layout.
+        Reads each field from its RegisterMap address using the correct
+        data type conversion (Float32, U32, U16, S16).
 
         Returns:
             dict compatible with H01 inverter body, or None on failure.
         """
-        self.logger.debug(f"[Dynamic Read] slave={self.slave_id}")
+        self.logger.info(f"[Dynamic Read] slave={self.slave_id} module={getattr(self, 'reg_module', None)}")
         if not self.connected or not self.master:
             return None
 
         try:
+            data = {}
             rm = self.RegMap
             scale = self.scale
-            dtypes = self.reg_data_types or {}
 
-            # ── helper: read one field by address ──────────────────────────
-            def _read_field(field, addr, cache):
-                """Return typed value from cache (batch) or via individual read."""
-                if cache is not None:
-                    return self._get_typed_from_cache(field, addr, cache)
-                return self._read_typed_value(field, addr)
-
-            # ── batch read via READ_BLOCKS if available ─────────────────────
-            read_blocks = getattr(self.reg_module, 'READ_BLOCKS', None)
-            cache = self._build_reg_cache(read_blocks) if read_blocks else None
-            if cache is not None:
-                self.logger.debug(f"[Dynamic] Batch cache: {len(cache)} regs from "
-                                  f"{len(read_blocks)} blocks")
-
-            data = {}
-
-            # ── AC Phase Voltages → integer V ──────────────────────────────
-            for ph, field in [('r', 'R_PHASE_VOLTAGE'), ('s', 'S_PHASE_VOLTAGE'),
-                               ('t', 'T_PHASE_VOLTAGE')]:
-                addr = getattr(rm, field, None)
-                val = _read_field(field, addr, cache) if addr is not None else None
+            # --- AC Phase Voltages ---
+            # Read and convert to V (integer) for H01 body
+            for phase, field in [('r', 'R_PHASE_VOLTAGE'), ('s', 'S_PHASE_VOLTAGE'), ('t', 'T_PHASE_VOLTAGE')]:
+                val = self._read_typed_value(field, getattr(rm, field))
                 if val is not None:
-                    dtype = dtypes.get(field, 'u16').lower()
-                    data[f'{ph}_voltage'] = (int(val) if dtype == 'float32'
-                                             else int(val * scale.get('voltage', 0.1)))
+                    # Float32 registers already in V; U16 registers in 0.1V
+                    dtype = (self.reg_data_types or {}).get(field, 'u16')
+                    if dtype == 'float32':
+                        data[f'{phase}_voltage'] = int(val)  # V
+                    else:
+                        data[f'{phase}_voltage'] = int(val * scale.get('voltage', 0.1))
                 else:
-                    data[f'{ph}_voltage'] = 0
+                    data[f'{phase}_voltage'] = 0
 
-            # ── AC Phase Currents → integer 0.1A ───────────────────────────
-            for ph, field in [('r', 'R_PHASE_CURRENT'), ('s', 'S_PHASE_CURRENT'),
-                               ('t', 'T_PHASE_CURRENT')]:
-                addr = getattr(rm, field, None)
-                val = _read_field(field, addr, cache) if addr is not None else None
+            # --- AC Phase Currents ---
+            # Convert to 0.1A for H01 body
+            for phase, field in [('r', 'R_PHASE_CURRENT'), ('s', 'S_PHASE_CURRENT'), ('t', 'T_PHASE_CURRENT')]:
+                val = self._read_typed_value(field, getattr(rm, field))
                 if val is not None:
-                    dtype = dtypes.get(field, 'u16').lower()
-                    data[f'{ph}_current'] = (int(val * 10) if dtype == 'float32'
-                                             else int(val * scale.get('current', 0.01) * 10))
+                    dtype = (self.reg_data_types or {}).get(field, 'u16')
+                    if dtype == 'float32':
+                        data[f'{phase}_current'] = int(val * 10)  # A -> 0.1A
+                    else:
+                        data[f'{phase}_current'] = int(val * scale.get('current', 0.01) * 10)
                 else:
-                    data[f'{ph}_current'] = 0
+                    data[f'{phase}_current'] = 0
 
-            # ── Frequency → integer 0.1Hz ───────────────────────────────────
-            addr = getattr(rm, 'FREQUENCY', None)
-            val = _read_field('FREQUENCY', addr, cache) if addr is not None else None
+            # --- Frequency ---
+            val = self._read_typed_value('FREQUENCY', rm.FREQUENCY)
             if val is not None:
-                dtype = dtypes.get('FREQUENCY', 'u16').lower()
-                data['frequency'] = (int(val * 10) if dtype == 'float32'
-                                     else int(val * scale.get('frequency', 0.01) * 10))
+                dtype = (self.reg_data_types or {}).get('FREQUENCY', 'u16')
+                if dtype == 'float32':
+                    data['frequency'] = int(val * 10)  # Hz -> 0.1Hz
+                else:
+                    data['frequency'] = int(val * scale.get('frequency', 0.01) * 10)
             else:
                 data['frequency'] = 600
 
-            # ── MPPT Data ───────────────────────────────────────────────────
+            # --- MPPT Data ---
             mppt_data = []
-            for i in range(1, 17):
+            for i in range(1, 5):
                 v_field = f'MPPT{i}_VOLTAGE'
                 c_field = f'MPPT{i}_CURRENT'
-                v_addr = getattr(rm, v_field, None)
-                if v_addr is None:
+                if not hasattr(rm, v_field):
                     break
-                c_addr = getattr(rm, c_field, None)
-                v_val = _read_field(v_field, v_addr, cache)
-                c_val = _read_field(c_field, c_addr, cache) if c_addr is not None else None
-                v_dtype = dtypes.get(v_field, 'u16').lower()
-                c_dtype = dtypes.get(c_field, 'u16').lower()
-                mppt_v = (int((v_val or 0) * 10) if v_dtype == 'float32'
-                          else int(v_val) if v_val else 0)
-                mppt_c = (int((c_val or 0) * 100) if c_dtype == 'float32'
-                          else int(c_val) if c_val else 0)
+                v_val = self._read_typed_value(v_field, getattr(rm, v_field))
+                c_val = self._read_typed_value(c_field, getattr(rm, c_field))
+                v_dtype = (self.reg_data_types or {}).get(v_field, 'u16')
+                c_dtype = (self.reg_data_types or {}).get(c_field, 'u16')
+                # Convert to raw 0.1V / 0.01A for MPPT compatibility
+                if v_dtype == 'float32':
+                    mppt_v = int((v_val or 0) * 10)   # V -> 0.1V raw
+                else:
+                    mppt_v = int(v_val) if v_val else 0  # already 0.1V raw
+                if c_dtype == 'float32':
+                    mppt_c = int((c_val or 0) * 100)   # A -> 0.01A raw
+                else:
+                    mppt_c = int(c_val) if c_val else 0  # already 0.01A raw
                 mppt_data.append({'voltage': mppt_v, 'current': mppt_c})
             data['mppt'] = mppt_data
 
+            # PV voltage/current from MPPT
             if mppt_data:
-                connected = [m for m in mppt_data if m['voltage'] >= 1000]  # ≥100V
-                data['pv_voltage'] = (int(sum(m['voltage'] for m in connected)
-                                         / len(connected) / 10) if connected else 0)
+                connected = [m for m in mppt_data if m['voltage'] >= 1000]  # >= 100V in 0.1V
+                data['pv_voltage'] = int(sum(m['voltage'] for m in connected) / len(connected) / 10) if connected else 0
                 data['pv_current'] = int(sum(m['current'] for m in mppt_data) / 10)
             else:
                 data['pv_voltage'] = 0
                 data['pv_current'] = 0
 
-            # ── String Currents ─────────────────────────────────────────────
+            # --- String Currents ---
             strings = []
-            for i in range(1, 33):
+            for i in range(1, 9):
                 s_field = f'STRING{i}_CURRENT'
-                s_addr = getattr(rm, s_field, None)
-                if s_addr is None:
+                if not hasattr(rm, s_field):
                     break
-                s_val = _read_field(s_field, s_addr, cache)
-                s_dtype = dtypes.get(s_field, 'u16').lower()
-                strings.append(int((s_val or 0) * 100) if s_dtype == 'float32'
-                               else int(s_val) if s_val else 0)
+                s_val = self._read_typed_value(s_field, getattr(rm, s_field))
+                s_dtype = (self.reg_data_types or {}).get(s_field, 'u16')
+                if s_dtype == 'float32':
+                    strings.append(int((s_val or 0) * 100))  # A -> 0.01A raw
+                else:
+                    strings.append(int(s_val) if s_val else 0)
             data['strings'] = strings
 
-            # ── PV Power → integer W ────────────────────────────────────────
-            pv_addr = getattr(rm, 'PV_POWER', None)
-            val = _read_field('PV_POWER', pv_addr, cache) if pv_addr is not None else None
+            # --- PV Power ---
+            val = self._read_typed_value('PV_POWER', rm.PV_POWER)
             if val is not None:
-                dtype = dtypes.get('PV_POWER', 'u32').lower()
-                data['pv_power'] = (int(val) if dtype == 'float32'
-                                    else int(val * scale.get('power', 1.0)))
+                dtype = (self.reg_data_types or {}).get('PV_POWER', 'u32')
+                if dtype == 'float32':
+                    data['pv_power'] = int(val)  # Already in W
+                else:
+                    data['pv_power'] = int(val * scale.get('power', 1.0))
             else:
                 data['pv_power'] = 0
 
-            # ── AC Power → integer W ────────────────────────────────────────
-            ac_addr = getattr(rm, 'AC_POWER', None)
-            val = _read_field('AC_POWER', ac_addr, cache) if ac_addr is not None else None
+            # --- AC Power ---
+            val = self._read_typed_value('AC_POWER', rm.AC_POWER)
             if val is not None:
-                dtype = dtypes.get('AC_POWER', 'u32').lower()
-                data['ac_power'] = (int(val) if dtype == 'float32'
-                                    else int(val * scale.get('power', 1.0)))
+                dtype = (self.reg_data_types or {}).get('AC_POWER', 'u32')
+                if dtype == 'float32':
+                    data['ac_power'] = int(val)  # Already in W
+                else:
+                    data['ac_power'] = int(val * scale.get('power', 1.0))
             else:
                 data['ac_power'] = 0
 
-            # ── Power Factor → integer 0.001 ────────────────────────────────
-            pf_addr = getattr(rm, 'POWER_FACTOR', None)
-            val = _read_field('POWER_FACTOR', pf_addr, cache) if pf_addr is not None else None
+            # --- Power Factor ---
+            val = self._read_typed_value('POWER_FACTOR', rm.POWER_FACTOR)
             if val is not None:
-                dtype = dtypes.get('POWER_FACTOR', 's16').lower()
-                data['power_factor'] = (int(val * 1000) if dtype == 'float32'
-                                        else int(val))
+                dtype = (self.reg_data_types or {}).get('POWER_FACTOR', 's16')
+                if dtype == 'float32':
+                    # Float value (e.g. 0.98) -> 0.001 scale integer (980)
+                    data['power_factor'] = int(val * 1000)
+                else:
+                    data['power_factor'] = int(val)  # Already in 0.001 scale
             else:
                 data['power_factor'] = 1000
 
-            # ── Inverter Mode / Status ──────────────────────────────────────
-            mode_addr = getattr(rm, 'INVERTER_MODE', None)
-            val = _read_field('INVERTER_MODE', mode_addr, cache) if mode_addr is not None else None
+            # --- Inverter Mode / Status ---
+            val = self._read_typed_value('INVERTER_MODE', rm.INVERTER_MODE)
             if val is not None:
                 raw_mode = int(val)
+                # Use StatusConverter if available (EKOS, Sungrow have raw->Solarize mapping)
                 if self.status_converter and hasattr(self.status_converter, 'to_inverter_mode'):
                     mode = self.status_converter.to_inverter_mode(raw_mode)
                 else:
@@ -742,26 +643,25 @@ class ModbusHandlerHAT:
                 data['mode'] = self.InvMode.ON_GRID
                 data['status'] = INV_STATUS_ON_GRID
 
-            # ── Error Codes ─────────────────────────────────────────────────
-            for ec_i, ec_key in [(1, 'alarm1'), (2, 'alarm2'), (3, 'alarm3')]:
-                ec_field = f'ERROR_CODE{ec_i}'
-                ec_addr = getattr(rm, ec_field, None)
-                if ec_addr is not None:
-                    v = _read_field(ec_field, ec_addr, cache)
-                    data[ec_key] = int(v) if v is not None else 0
-                else:
-                    data[ec_key] = 0
+            # --- Error Codes ---
+            val1 = self._read_typed_value('ERROR_CODE1', rm.ERROR_CODE1) if hasattr(rm, 'ERROR_CODE1') else 0
+            val2 = self._read_typed_value('ERROR_CODE2', rm.ERROR_CODE2) if hasattr(rm, 'ERROR_CODE2') else 0
+            data['alarm1'] = int(val1) if val1 else 0
+            data['alarm2'] = int(val2) if val2 else 0
+            data['alarm3'] = 0
 
-            # ── Cumulative Energy → integer Wh ──────────────────────────────
-            te_addr = getattr(rm, 'TOTAL_ENERGY', None)
-            val = _read_field('TOTAL_ENERGY', te_addr, cache) if te_addr is not None else None
+            # --- Cumulative Energy ---
+            val = self._read_typed_value('TOTAL_ENERGY', rm.TOTAL_ENERGY)
             if val is not None:
-                dtype = dtypes.get('TOTAL_ENERGY', 'u32').lower()
+                dtype = (self.reg_data_types or {}).get('TOTAL_ENERGY', 'u32')
                 if dtype == 'float32':
-                    data['cumulative_energy'] = int(val)      # already Wh
-                else:
-                    # U32 assumed kWh × 1000 (Solarize/Sungrow convention)
+                    # Float value in Wh
+                    data['cumulative_energy'] = int(val)
+                elif dtype == 'u32':
+                    # Solarize: kWh -> Wh (*1000), Sungrow: 0.1kWh -> Wh (*100)
                     data['cumulative_energy'] = int(val * 1000)
+                else:
+                    data['cumulative_energy'] = int(val)
             else:
                 data['cumulative_energy'] = 0
 
@@ -775,192 +675,9 @@ class ModbusHandlerHAT:
             self.logger.error(traceback.format_exc())
             return None
 
-    def _format_h01_from_raw(self, physical: dict) -> dict:
-        """물리값 dict(SI 단위)를 H01 패킷 형식 dict로 변환.
-
-        physical 값은 DATA_PARSER scale 적용 후의 물리 SI 단위:
-          전압 V, 전류 A, 전력 W, 주파수 Hz, 에너지 kWh
-
-        반환 dict는 read_inverter_data() 의 표준 출력 형식과 동일.
-        """
-        data = {}
-
-        # AC Phase 전압 (V → V integer)
-        for key, field in [('r_voltage', 'R_PHASE_VOLTAGE'),
-                           ('s_voltage', 'S_PHASE_VOLTAGE'),
-                           ('t_voltage', 'T_PHASE_VOLTAGE')]:
-            val = physical.get(field)
-            data[key] = int(val) if val is not None else 0
-
-        # AC Phase 전류 (A → 0.1A integer)
-        for key, field in [('r_current', 'R_PHASE_CURRENT'),
-                           ('s_current', 'S_PHASE_CURRENT'),
-                           ('t_current', 'T_PHASE_CURRENT')]:
-            val = physical.get(field)
-            data[key] = int(val * 10) if val is not None else 0
-
-        # 주파수 (Hz → 0.1Hz integer)
-        val = physical.get('FREQUENCY')
-        data['frequency'] = int(val * 10) if val is not None else 600
-
-        # AC 전력 (W integer)
-        val = physical.get('AC_POWER')
-        data['ac_power'] = int(val) if val is not None else 0
-
-        # PV 전력 (W integer)
-        val = physical.get('PV_POWER')
-        data['pv_power'] = int(val) if val is not None else 0
-
-        # 역률 (-1.0~1.0 → -1000~1000 integer)
-        val = physical.get('POWER_FACTOR')
-        if val is not None:
-            pf = int(val * 1000)
-            data['power_factor'] = max(-1000, min(1000, pf))
-        else:
-            data['power_factor'] = 1000
-
-        # 누적 발전량 (kWh → Wh integer)
-        val = physical.get('TOTAL_ENERGY')
-        data['cumulative_energy'] = int(val * 1000) if val is not None else 0
-
-        # MPPT 데이터 (raw register 형식: voltage=0.1V, current=0.01A)
-        mppt_data = []
-        for i in range(1, 9):
-            v = physical.get(f'MPPT{i}_VOLTAGE')
-            c = physical.get(f'MPPT{i}_CURRENT')
-            if v is None and c is None:
-                break
-            mppt_data.append({
-                'voltage': int(v * 10) if v is not None else 0,   # V → 0.1V raw
-                'current': int(c * 100) if c is not None else 0,  # A → 0.01A raw
-            })
-        data['mppt'] = mppt_data
-
-        # PV 전압/전류 (MPPT 데이터에서 계산)
-        if mppt_data:
-            connected = [m for m in mppt_data if m['voltage'] >= 1000]  # >= 100V (0.1V)
-            data['pv_voltage'] = (int(sum(m['voltage'] for m in connected) /
-                                      len(connected) / 10) if connected else 0)
-            data['pv_current'] = int(sum(m['current'] for m in mppt_data) / 10)
-        else:
-            pv_v = physical.get('PV_VOLTAGE')
-            pv_c = physical.get('PV_CURRENT')
-            data['pv_voltage'] = int(pv_v) if pv_v is not None else 0
-            data['pv_current'] = int(pv_c * 10) if pv_c is not None else 0
-
-        # String 전류 (A → 0.01A raw)
-        strings = []
-        for i in range(1, 17):
-            val = physical.get(f'STRING{i}_CURRENT')
-            if val is None:
-                break
-            strings.append(int(val * 100))  # A → 0.01A
-        data['strings'] = strings
-
-        # 인버터 모드/상태
-        mode_val = physical.get('INVERTER_MODE')
-        if mode_val is not None:
-            raw_mode = int(mode_val)
-            if self.status_converter and hasattr(self.status_converter, 'to_inverter_mode'):
-                mode = self.status_converter.to_inverter_mode(raw_mode)
-            else:
-                mode = raw_mode
-            data['mode'] = mode
-            if mode == self.InvMode.ON_GRID:
-                data['status'] = INV_STATUS_ON_GRID
-            elif mode in (self.InvMode.STANDBY, self.InvMode.INITIAL,
-                          self.InvMode.SHUTDOWN):
-                data['status'] = INV_STATUS_STANDBY
-            elif mode == self.InvMode.FAULT:
-                data['status'] = INV_STATUS_FAULT
-            else:
-                data['status'] = INV_STATUS_STANDBY
-        else:
-            data['mode'] = self.InvMode.ON_GRID
-            data['status'] = INV_STATUS_ON_GRID
-
-        # 알람 코드
-        data['alarm1'] = int(physical.get('ERROR_CODE1', 0) or 0)
-        data['alarm2'] = int(physical.get('ERROR_CODE2', 0) or 0)
-        data['alarm3'] = 0
-
-        return data
-
-    def _read_inverter_data_blocks(self):
-        """READ_BLOCKS/DATA_PARSER 기반 블록 단위 인버터 데이터 읽기.
-
-        연속된 레지스터를 한 번에 읽어 효율적으로 데이터 수집.
-        FLOAT32, U32, S32, U16, S16 모두 지원.
-        반환 dict 형식은 read_inverter_data() 표준과 동일.
-        """
-        import struct as _struct
-
-        if not self.connected or not self.master:
-            return None
-
-        try:
-            fc = getattr(self, 'fc_code', 3)
-            read_blocks = getattr(self, 'read_blocks', []) or []
-            data_parser = getattr(self, 'data_parser', {}) or {}
-
-            # 블록 단위 읽기
-            block_data: dict = {}
-            for i, (start_addr, count) in enumerate(read_blocks):
-                if fc == 4:
-                    result = self.master.read_input_registers(
-                        start_addr, count, self.slave_id)
-                else:
-                    result = self.master.read_holding_registers(
-                        start_addr, count, self.slave_id)
-                block_data[i] = list(result) if result else [0] * count
-
-            # DATA_PARSER로 물리값 변환
-            physical: dict = {}
-            for field, (blk_idx, offset, dtype, scale) in data_parser.items():
-                block = block_data.get(blk_idx, [])
-                if not block or offset >= len(block):
-                    continue
-                try:
-                    dtype_up = dtype.upper()
-                    if dtype_up == 'FLOAT32':
-                        if offset + 1 >= len(block):
-                            continue
-                        lo, hi = block[offset], block[offset + 1]
-                        packed = _struct.pack('>HH', lo, hi)
-                        val = _struct.unpack('>f', packed)[0]
-                        if val != val or abs(val) > 1e12:  # NaN/Inf 제거
-                            continue
-                    elif dtype_up in ('U32', 'S32'):
-                        if offset + 1 >= len(block):
-                            continue
-                        val = self.reg_to_u32(block[offset], block[offset + 1])
-                        if dtype_up == 'S32' and val >= 0x80000000:
-                            val -= 0x100000000
-                    elif dtype_up == 'S16':
-                        val = block[offset]
-                        if val >= 0x8000:
-                            val -= 0x10000
-                    else:  # U16 default
-                        val = block[offset]
-                    physical[field] = val * scale if scale != 1.0 else val
-                except Exception:
-                    continue
-
-            self._check_stats_log()
-            return self._format_h01_from_raw(physical)
-
-        except Exception as e:
-            self.logger.error(f"Block read error slave={self.slave_id}: {e}")
-            return None
-
     def read_inverter_data(self):
         """Read inverter data via Modbus"""
-        # 1순위: READ_BLOCKS/DATA_PARSER 블록 읽기
-        if getattr(self, 'use_block_read', False):
-            self.logger.info(f"[INV slave={self.slave_id}] Block read active")
-            return self._read_inverter_data_blocks()
-
-        # 2순위: DATA_TYPES 기반 동적 읽기 (비-Solarize)
+        # Use dynamic register reading for non-Solarize protocols
         dyn = getattr(self, 'use_dynamic_read', False)
         if dyn:
             self.logger.info(f"[INV slave={self.slave_id}] Dynamic read active")
@@ -1037,19 +754,26 @@ class ModbusHandlerHAT:
             else:
                 data['strings'] = []
             
+            # Senergy/Solarize power words are sent high-word first on these registers.
+            # Using low-word-first combine inflates normal values by ~65536x.
+            to_u32_be = self.reg_to_u32_be or (lambda high, low: (high << 16) | low)
+            to_s32_be = self.reg_to_s32_be or (
+                lambda high, low: ((high << 16) | low) - 0x100000000
+                if ((high << 16) | low) >= 0x80000000
+                else ((high << 16) | low)
+            )
+
             # Read PV Power (0x1048-0x1049)
-            result_low = self.master.read_holding_registers(0x1048, 1, self.slave_id)
-            result_high = self.master.read_holding_registers(0x1049, 1, self.slave_id)
-            if result_low and result_high:
-                data['pv_power'] = int(self.reg_to_u32(result_low[0], result_high[0]) * self.scale['power'])
+            result = self.master.read_holding_registers(0x1048, 2, self.slave_id)
+            if result and len(result) >= 2:
+                data['pv_power'] = int(to_u32_be(result[0], result[1]) * self.scale['power'])
             else:
                 data['pv_power'] = 0
 
             # Read Grid Power (0x1037-0x1038)
-            result_low = self.master.read_holding_registers(0x1037, 1, self.slave_id)
-            result_high = self.master.read_holding_registers(0x1038, 1, self.slave_id)
-            if result_low and result_high:
-                data['ac_power'] = int(self.reg_to_u32(result_low[0], result_high[0]) * self.scale['power'])
+            result = self.master.read_holding_registers(0x1037, 2, self.slave_id)
+            if result and len(result) >= 2:
+                data['ac_power'] = int(abs(to_s32_be(result[0], result[1])) * self.scale['power'])
             else:
                 data['ac_power'] = 0
             
@@ -1089,7 +813,9 @@ class ModbusHandlerHAT:
             result_low = self.master.read_holding_registers(0x1021, 1, self.slave_id)
             result_high = self.master.read_holding_registers(0x1022, 1, self.slave_id)
             if result_low and result_high:
-                data['cumulative_energy'] = self.reg_to_u32(result_low[0], result_high[0]) * 1000
+                # Senergy/Solarize document uses high-word at 0x1021, low-word at 0x1022.
+                energy_raw = to_u32_be(result_low[0], result_high[0])
+                data['cumulative_energy'] = energy_raw * 1000
             else:
                 data['cumulative_energy'] = 0
             
@@ -1243,7 +969,7 @@ class ModbusHandlerHAT:
         try:
             _get_iv = getattr(self.reg_module, 'get_iv_string_mapping', None)
             if _get_iv is None:
-                from common.Solarize_PV_50kw_registers import get_iv_string_mapping as _get_iv
+                from common.solarize_registers import get_iv_string_mapping as _get_iv
 
             # Get register mapping for this string
             mappings = _get_iv()
@@ -1327,47 +1053,40 @@ class ModbusHandlerHAT:
                 self.logger.error(f"Failed to read DEA block: result={result}, len={len(result) if result else 0}")
                 return None
             
-            # Parse the block
-            # Helper to combine two 16-bit registers into signed 32-bit
-            def to_s32(low, high):
-                raw = (high << 16) | low
-                if raw > 0x7FFFFFFF:
-                    raw = raw - 0x100000000
-                return raw
-            
+            # Real devices observed here send DEA monitor words as high-word first,
+            # even though some generated maps/document notes label them *_LOW/*_HIGH.
+            # Using low-word-first parsing inflates normal values by 65536x.
+            to_s32 = self.reg_to_s32_be or self.reg_to_s32 or registers_to_u32
+            to_u32 = self.reg_to_u32_be or self.reg_to_u32 or registers_to_u32
+
+            def s32_at(offset: int) -> int:
+                return to_s32(result[offset], result[offset + 1])
+
+            def u32_at(offset: int) -> int:
+                return to_u32(result[offset], result[offset + 1])
+
             data = {}
-            
-            # Phase Currents (scale 0.1A)
-            # Offset: 0=L1_LOW, 1=L1_HIGH, 2=L2_LOW, 3=L2_HIGH, 4=L3_LOW, 5=L3_HIGH
-            data['current_r'] = to_s32(result[0], result[1]) / 10.0
-            data['current_s'] = to_s32(result[2], result[3]) / 10.0
-            data['current_t'] = to_s32(result[4], result[5]) / 10.0
-            
-            # Phase Voltages (scale 0.1V)
-            # Offset: 6=V1_LOW, 7=V1_HIGH, 8=V2_LOW, 9=V2_HIGH, 10=V3_LOW, 11=V3_HIGH
-            data['voltage_rs'] = to_s32(result[6], result[7]) / 10.0
-            data['voltage_st'] = to_s32(result[8], result[9]) / 10.0
-            data['voltage_tr'] = to_s32(result[10], result[11]) / 10.0
-            
-            # Active Power (scale 0.1kW)
-            # Offset: 12=P_LOW, 13=P_HIGH
-            data['active_power_kw'] = to_s32(result[12], result[13]) / 10.0
-            
-            # Reactive Power (scale 1 Var)
-            # Offset: 14=Q_LOW, 15=Q_HIGH
-            data['reactive_power_var'] = to_s32(result[14], result[15])
-            
-            # Power Factor (scale 0.001)
-            # Offset: 16=PF_LOW, 17=PF_HIGH
-            data['power_factor'] = to_s32(result[16], result[17]) / 1000.0
-            
-            # Frequency (scale 0.1Hz)
-            # Offset: 18=F_LOW, 19=F_HIGH
-            data['frequency'] = to_s32(result[18], result[19]) / 10.0
-            
-            # Status Flags
-            # Offset: 20=STS_LOW, 21=STS_HIGH
-            data['status_flags'] = to_s32(result[20], result[21])
+
+            # Phase Currents (S32, scale 0.1A)
+            data['current_r'] = s32_at(0) / 10.0
+            data['current_s'] = s32_at(2) / 10.0
+            data['current_t'] = s32_at(4) / 10.0
+
+            # Phase Voltages (S32, scale 0.1V)
+            data['voltage_rs'] = s32_at(6) / 10.0
+            data['voltage_st'] = s32_at(8) / 10.0
+            data['voltage_tr'] = s32_at(10) / 10.0
+
+            # Total active/reactive power
+            data['active_power_kw'] = s32_at(12) / 10.0   # 0.1kW
+            data['reactive_power_var'] = s32_at(14)       # 1 Var
+
+            # Power factor / frequency
+            data['power_factor'] = s32_at(16) / 1000.0    # 0.001
+            data['frequency'] = s32_at(18) / 10.0         # 0.1Hz
+
+            # Status flags (U32 bitfield)
+            data['status_flags'] = u32_at(20)
             
             self.logger.debug(f"DEA read OK: P={data['active_power_kw']:.1f}kW, I={data['current_r']:.1f}A")
             return data
@@ -2356,44 +2075,7 @@ class HuaweiModbusHandler(ModbusHandlerHAT):
                 HuaweiRegisters.RUNNING_STATUS, 6, self.slave_id
             )
             if regs_f:
-                raw_status = regs_f[0]
-                data['status'] = HuaweiStatusConverter.to_h01(raw_status)
-                if data['status'] == INV_STATUS_STANDBY:
-                    active_power_w = max(data.get('ac_power', 0), data.get('pv_power', 0))
-                    if active_power_w >= 100:
-                        device_status_addr = getattr(HuaweiRegisters, 'DEVICE_STATUS', 0x7D59)
-                        on_off_addr = getattr(HuaweiRegisters, 'INVERTER_ON_OFF', 0x0834)
-                        active_power_pct_addr = getattr(HuaweiRegisters, 'DER_ACTIVE_POWER_PCT', 0x07D3)
-
-                        device_status_regs = self.master.read_holding_registers(
-                            device_status_addr, 1, self.slave_id
-                        )
-                        on_off_regs = self.master.read_holding_registers(
-                            on_off_addr, 1, self.slave_id
-                        )
-                        active_power_pct_regs = self.master.read_holding_registers(
-                            active_power_pct_addr, 1, self.slave_id
-                        )
-
-                        raw_device_status = device_status_regs[0] if device_status_regs else None
-                        on_off = on_off_regs[0] if on_off_regs else None
-                        active_power_pct = active_power_pct_regs[0] if active_power_pct_regs else None
-
-                        self.logger.warning(
-                            "Huawei standby mismatch: "
-                            f"run_status=0x{raw_status:04X}, "
-                            f"device_status={f'0x{raw_device_status:04X}' if raw_device_status is not None else 'N/A'}, "
-                            f"on_off={on_off if on_off is not None else 'N/A'}, "
-                            f"active_power_pct={active_power_pct if active_power_pct is not None else 'N/A'}, "
-                            f"pv_power={data.get('pv_power', 0)}W, "
-                            f"ac_power={data.get('ac_power', 0)}W"
-                        )
-                    if active_power_w >= 100:
-                        self.logger.debug(
-                            f"Huawei status override: raw=0x{raw_status:04X}, "
-                            f"active_power={active_power_w}W -> On-Grid"
-                        )
-                        data['status'] = INV_STATUS_ON_GRID
+                data['status'] = HuaweiStatusConverter.to_h01(regs_f[0])
                 data['alarm1'] = regs_f[2]   # Fault Code 1 High word
                 data['alarm2'] = regs_f[4]   # Fault Code 2 High word
                 data['alarm3'] = 0
@@ -2539,15 +2221,8 @@ class ModbusHandlerSerial:
         self.connected = False
     
     def _read_reg(self, addr, count=1):
-        """Read holding registers (FC03) via pymodbus, returns list of U16 values or None."""
+        """Read holding registers via pymodbus, returns list of U16 values or None."""
         result = self.client.read_holding_registers(addr, count, slave=self.slave_id)
-        if result.isError():
-            return None
-        return result.registers
-
-    def _read_input_reg(self, addr, count=1):
-        """Read input registers (FC04) via pymodbus, returns list of U16 values or None."""
-        result = self.client.read_input_registers(addr, count, slave=self.slave_id)
         if result.isError():
             return None
         return result.registers
@@ -2570,8 +2245,7 @@ class ModbusHandlerSerial:
                 if dtype == 'u32':
                     return self.reg_to_u32(result[0], result[1])
                 else:
-                    from common.Solarize_PV_50kw_registers import registers_to_s32 as _s32
-                    return _s32(result[0], result[1])
+                    return self.reg_to_s32(result[0], result[1])
             return None
         elif dtype == 's16':
             result = self._read_reg(addr, 1)
@@ -2591,20 +2265,9 @@ class ModbusHandlerSerial:
         # Reuse HAT's dynamic reader -- it calls self._read_reg / self._read_typed_value
         return ModbusHandlerHAT._read_inverter_data_dynamic(self)
 
-    def _read_inverter_data_blocks(self):
-        """READ_BLOCKS/DATA_PARSER 기반 블록 읽기 (Serial 버전 — HAT 로직 위임)."""
-        return ModbusHandlerHAT._read_inverter_data_blocks(self)
-
-    def _format_h01_from_raw(self, physical):
-        """물리값 → H01 형식 변환 (Serial 버전 — HAT 로직 위임)."""
-        return ModbusHandlerHAT._format_h01_from_raw(self, physical)
-
     def read_inverter_data(self):
         """Read inverter data via pymodbus (same logic as HAT version)"""
-        # 1순위: Block read
-        if getattr(self, 'use_block_read', False):
-            return self._read_inverter_data_blocks()
-        # 2순위: Dynamic read
+        # Use dynamic register reading for non-Solarize protocols
         if getattr(self, 'use_dynamic_read', False):
             return self._read_inverter_data_dynamic()
 
@@ -2683,11 +2346,20 @@ class ModbusHandlerSerial:
             else:
                 data['strings'] = []
             
+            # Senergy/Solarize power words are sent high-word first on these registers.
+            # Using low-word-first combine inflates normal values by ~65536x.
+            to_u32_be = self.reg_to_u32_be or (lambda high, low: (high << 16) | low)
+            to_s32_be = self.reg_to_s32_be or (
+                lambda high, low: ((high << 16) | low) - 0x100000000
+                if ((high << 16) | low) >= 0x80000000
+                else ((high << 16) | low)
+            )
+
             # Read PV Power (0x1048-0x1049)
             result = self.client.read_holding_registers(0x1048, 2, slave=self.slave_id)
             if not result.isError():
                 regs = result.registers
-                data['pv_power'] = int(self.reg_to_u32(regs[0], regs[1]) * self.scale['power'])
+                data['pv_power'] = int(to_u32_be(regs[0], regs[1]) * self.scale['power'])
             else:
                 data['pv_power'] = 0
 
@@ -2695,7 +2367,7 @@ class ModbusHandlerSerial:
             result = self.client.read_holding_registers(0x1037, 2, slave=self.slave_id)
             if not result.isError():
                 regs = result.registers
-                data['ac_power'] = int(self.reg_to_u32(regs[0], regs[1]) * self.scale['power'])
+                data['ac_power'] = int(abs(to_s32_be(regs[0], regs[1])) * self.scale['power'])
             else:
                 data['ac_power'] = 0
             
@@ -2724,6 +2396,46 @@ class ModbusHandlerSerial:
                     data['status'] = INV_STATUS_FAULT
                 else:
                     data['status'] = INV_STATUS_STANDBY
+                if data['status'] == INV_STATUS_STANDBY:
+                    active_power_w = max(data.get('ac_power', 0), data.get('pv_power', 0))
+                    if active_power_w >= 100:
+                        device_status_addr = getattr(self.RegMap, 'DEVICE_STATUS', None)
+                        on_off_addr = getattr(self.RegMap, 'INVERTER_ON_OFF', 0x0834)
+                        active_power_pct_addr = getattr(
+                            self.RegMap, 'DER_ACTIVE_POWER_PCT',
+                            getattr(self.RegMap, 'ACTIVE_POWER_PCT', 0x07D3)
+                        )
+
+                        raw_device_status = None
+                        if device_status_addr is not None:
+                            ds = self.client.read_holding_registers(device_status_addr, 1, slave=self.slave_id)
+                            if not ds.isError():
+                                raw_device_status = ds.registers[0]
+
+                        on_off = None
+                        oo = self.client.read_holding_registers(on_off_addr, 1, slave=self.slave_id)
+                        if not oo.isError():
+                            on_off = oo.registers[0]
+
+                        active_power_pct = None
+                        ap = self.client.read_holding_registers(active_power_pct_addr, 1, slave=self.slave_id)
+                        if not ap.isError():
+                            active_power_pct = ap.registers[0]
+
+                        self.logger.warning(
+                            "Huawei standby mismatch: "
+                            f"run_status=0x{mode:04X}, "
+                            f"device_status={f'0x{raw_device_status:04X}' if raw_device_status is not None else 'N/A'}, "
+                            f"on_off={on_off if on_off is not None else 'N/A'}, "
+                            f"active_power_pct={active_power_pct if active_power_pct is not None else 'N/A'}, "
+                            f"pv_power={data.get('pv_power', 0)}W, "
+                            f"ac_power={data.get('ac_power', 0)}W"
+                        )
+                        self.logger.debug(
+                            f"Huawei status override: raw=0x{mode:04X}, "
+                            f"active_power={active_power_w}W -> On-Grid"
+                        )
+                        data['status'] = INV_STATUS_ON_GRID
                 data['alarm1'] = regs[2] if len(regs) > 2 else 0
                 data['alarm2'] = regs[3] if len(regs) > 3 else 0
                 data['alarm3'] = regs[4] if len(regs) > 4 else 0
@@ -2736,7 +2448,7 @@ class ModbusHandlerSerial:
             result = self.client.read_holding_registers(0x1021, 2, slave=self.slave_id)
             if not result.isError():
                 regs = result.registers
-                data['cumulative_energy'] = self.reg_to_u32(regs[0], regs[1]) * 1000
+                data['cumulative_energy'] = to_u32_be(regs[0], regs[1]) * 1000
             else:
                 data['cumulative_energy'] = 0
             
@@ -3894,9 +3606,8 @@ class MultiDeviceHandler:
         
         # Per-device simulation mode takes priority
         use_simulation = simulation or self.simulation_mode
-        _proto_lower = protocol.lower()
-        is_kstar  = 'kstar' in _proto_lower
-        is_huawei = 'huawei' in _proto_lower
+        is_kstar  = ('kstar' in protocol)
+        is_huawei = ('huawei' in protocol)
 
         # Solarize 계열 (kstar/huawei 제외): 동적 레지스터 로딩
         reg_mod = None
