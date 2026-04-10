@@ -185,11 +185,35 @@ async def stage1_upload(
     return {'saved': dest, 'filename': file.filename}
 
 
+def _load_ai_settings() -> dict:
+    """Load Claude API settings from config/ai_settings.ini.
+
+    Searches two locations: PROJECT_ROOT/config/ (inverter_model_maker/) and
+    the parent RTU project root (V2_0_0/config/) since the dashboard saves
+    ai_settings.ini in V2_0_0/config/.
+    """
+    import configparser
+    # Try MM2 project root first, then parent RTU project root
+    rtu_root = os.path.abspath(os.path.join(PROJECT_ROOT, '..'))
+    candidates = [
+        os.path.join(PROJECT_ROOT, 'config', 'ai_settings.ini'),
+        os.path.join(rtu_root, 'config', 'ai_settings.ini'),
+    ]
+    cfg_path = next((p for p in candidates if os.path.exists(p)), candidates[0])
+    cp = configparser.ConfigParser()
+    cp.read(cfg_path, encoding='utf-8')
+    key = cp.get('claude_api', 'api_key', fallback='')
+    model = cp.get('claude_api', 'model', fallback='claude-sonnet-4-6')
+    if key and key != 'YOUR_ANTHROPIC_API_KEY_HERE':
+        return {'api_key': key, 'model': model}
+    return {}
+
+
 @router.post('/stage1/run')
 async def stage1_run(body: dict):
     """
     Stage 1 실행
-    body: {session_id, filename, device_type}
+    body: {session_id, filename, device_type, use_ai?}
     """
     sid = body.get('session_id')
     s = SessionStore.get(sid)
@@ -197,11 +221,18 @@ async def stage1_run(body: dict):
         raise HTTPException(404, 'session not found')
 
     device_type = body.get('device_type', 'inverter')
+    use_ai = body.get('use_ai', False)
     uploaded = s.get('uploaded_file')
     if not uploaded or not os.path.exists(uploaded):
         raise HTTPException(400, 'no file uploaded')
 
     work_dir = SessionStore.get_work_dir(sid)
+
+    # Load AI settings if AI mode requested
+    ai_settings = _load_ai_settings() if use_ai else {}
+    if use_ai and not ai_settings:
+        raise HTTPException(400, 'AI mode requested but no API key configured. '
+                            'Set your Claude API key in the dashboard Model Maker tab.')
 
     # 이전 태스크 취소 후 새 태스크 실행
     SessionStore.cancel_running_task(sid)
@@ -231,7 +262,8 @@ async def stage1_run(body: dict):
 
             progress = _make_progress_callback(sid, 's1', asyncio.get_running_loop())
             result = await _run_in_thread(
-                run_stage1, uploaded, work_dir, device_type, progress)
+                run_stage1, uploaded, work_dir, device_type, progress,
+                ai_settings if use_ai else None)
 
             # 태스크 취소로 인해 세션이 리셋된 경우 이벤트 전송 생략
             if SessionStore.get(sid) is None:
@@ -271,6 +303,9 @@ async def stage1_run(body: dict):
                 'iv_data_points': result['meta'].get('iv_data_points', 0),
                 'info_match': result.get('info_match', {'model': False, 'sn': False}),
                 'suggestions': result.get('suggestions', {}),
+                'max_mppt': result['meta'].get('max_mppt', 0),
+                'max_string': result['meta'].get('max_string', 0),
+                'phase_type': result['meta'].get('phase_type', 'unknown'),
             })
         except asyncio.CancelledError:
             pass  # 새 파일 업로드로 인해 취소됨 — 정상
@@ -369,6 +404,9 @@ async def apply_suggestion(body: dict):
                 'iv_data_points': result['meta'].get('iv_data_points', 0),
                 'info_match': result.get('info_match', {'model': False, 'sn': False}),
                 'suggestions': result.get('suggestions', {}),
+                'max_mppt': result['meta'].get('max_mppt', 0),
+                'max_string': result['meta'].get('max_string', 0),
+                'phase_type': result['meta'].get('phase_type', 'unknown'),
             })
         except NotRegisterMapError as e:
             await ws_manager.send_json(sid, {
@@ -421,7 +459,8 @@ async def stage2_upload(
 @router.post('/stage2/run')
 async def stage2_run(body: dict):
     """
-    body: {session_id, mppt, strings_per_mppt, capacity}
+    body: {session_id, mppt, total_strings, capacity, iv_data_points}
+    backward-compat: strings_per_mppt = total_strings // mppt 형식도 허용
     """
     sid = body.get('session_id')
     s = SessionStore.get(sid)
@@ -433,7 +472,13 @@ async def stage2_run(body: dict):
         raise HTTPException(400, 'Stage 1 not completed')
 
     mppt = int(body.get('mppt', 4))
-    strings_per_mppt = int(body.get('strings_per_mppt', 2))
+    # 신규: total_strings (사용자가 직접 총 스트링 수 입력 — Growatt 등 비대칭 지원)
+    # 구버전 호환: strings_per_mppt가 들어오면 mppt × spm 으로 계산
+    if 'total_strings' in body:
+        total_strings = int(body.get('total_strings', 0))
+    else:
+        spm = int(body.get('strings_per_mppt', 2))
+        total_strings = mppt * spm
     capacity = body.get('capacity', '')
     iv_data_points = int(body.get('iv_data_points', 64))
     work_dir = SessionStore.get_work_dir(sid)
@@ -445,7 +490,7 @@ async def stage2_run(body: dict):
             progress = _make_progress_callback(sid, 's2', asyncio.get_running_loop())
             result = await _run_in_thread(
                 run_stage2, stage1_excel, work_dir,
-                mppt, strings_per_mppt, capacity, progress)
+                mppt, total_strings, capacity, progress)
 
             SessionStore.update(sid,
                                 stage=2,
@@ -482,6 +527,12 @@ async def stage2_run(body: dict):
                 'der_total': result['der_total'],
                 'review_count': result['review_count'],
                 'review_items': result.get('review_items', []),
+                'stage2_validation': result.get('stage2_validation', {}),
+                'stage2_pass': result.get('stage2_pass', False),
+                'fail_reasons': result.get('fail_reasons', []),
+                'phase_type': result.get('phase_type', 'unknown'),
+                'mppt_count': result.get('mppt_count', 0),
+                'total_strings': result.get('total_strings', 0),
             })
         except Exception as e:
             await ws_manager.send_json(sid, {
@@ -532,6 +583,9 @@ async def stage3_run(body: dict):
                 'level': 'ok',
                 'filename': result['filename'],
                 'validation': result['validation'],
+                'stage4': result.get('stage4'),
+                'stage4_pass': result.get('stage4_pass', False),
+                'phase_type': result.get('phase_type', 'unknown'),
                 'synonym_added': result['synonym_added'],
                 'review_recorded': result['review_recorded'],
             })
@@ -548,6 +602,18 @@ async def stage3_run(body: dict):
 
 
 # ─── H01 매핑 ────────────────────────────────────────────────────────────────
+
+_RE_CLEAN_REG = __import__('re').compile(r'^([A-Za-z0-9_가-힣]+)')
+
+
+def _parse_reg_display(s: str) -> str:
+    """'NAME (0x0123); NAME2 (0x0456)' → 'NAME' (첫 항목의 깨끗한 이름)"""
+    if not s:
+        return ''
+    first = s.split(';')[0].strip()
+    m = _RE_CLEAN_REG.match(first)
+    return m.group(1) if m else ''
+
 
 @router.get('/h01-mapping/{session_id}')
 def get_h01_mapping(session_id: str):
@@ -569,16 +635,45 @@ def get_h01_mapping(session_id: str):
         ws = wb['H01_MAPPING']
         DATA_START = 4
 
-        # H열 전체에서 사용 가능한 레지스터 목록 수집 (드롭다운용)
-        available_registers = []
+        # H열 전체에서 사용 가능한 레지스터 목록 수집 (드롭다운용) — 알파벳 정렬
+        # J/K/L열(숨김 메타데이터)에서 레지스터별 FC + 주소 맵을 읽음
+        #   J=name, K="3"/"4"/"3,4", L="0x0091|0x0091" (fcs 순서와 동일)
         seen = set()
+        name_to_fcs: dict[str, list[int]] = {}
+        name_fc_to_addr: dict[tuple, str] = {}
         for row_idx in range(DATA_START, ws.max_row + 1):
             val = ws.cell(row=row_idx, column=8).value  # H열
             if val:
                 v = str(val).strip()
-                if v and v not in seen:
-                    available_registers.append(v)
+                if v:
                     seen.add(v)
+            jname = ws.cell(row=row_idx, column=10).value  # J열
+            kfcs = ws.cell(row=row_idx, column=11).value   # K열
+            laddr = ws.cell(row=row_idx, column=12).value  # L열
+            if jname:
+                nm = str(jname).strip()
+                fcs: list[int] = []
+                if kfcs:
+                    for tok in str(kfcs).split(','):
+                        t = tok.strip()
+                        if t in ('3', '4'):
+                            fcs.append(int(t))
+                fcs = sorted(set(fcs))
+                if nm and nm not in name_to_fcs:
+                    name_to_fcs[nm] = fcs
+                # 주소 매핑 — fcs 순서와 같은 길이의 '|' 구분 문자열
+                if nm and laddr:
+                    addrs = str(laddr).split('|')
+                    for fc, addr in zip(fcs, addrs):
+                        if addr:
+                            name_fc_to_addr[(nm, fc)] = addr.strip()
+        available_registers = sorted(seen)
+        # 드롭다운에서 사용할 풍부한 형태 (FC + 주소 정보 포함)
+        available_with_fc = []
+        for nm in available_registers:
+            fcs = name_to_fcs.get(nm, [])
+            addrs = {fc: name_fc_to_addr.get((nm, fc), '') for fc in fcs}
+            available_with_fc.append({'name': nm, 'fcs': fcs, 'addrs': addrs})
 
         # H01 필드 데이터 (B열에 값이 있는 행만 동적으로 읽기)
         fields = []
@@ -587,25 +682,69 @@ def get_h01_mapping(session_id: str):
             if not h01_field:
                 break
             description = str(ws.cell(row=row, column=3).value or '').strip()
-            current_register = str(ws.cell(row=row, column=4).value or '').strip()
+            current_raw = str(ws.cell(row=row, column=4).value or '').strip()
+            # 깨끗한 register name 추출 (auto-fill 형식 "NAME (addr); ..." → NAME만)
+            current_clean = _parse_reg_display(current_raw)
+            # M열: 매칭 출처 (Stage2 가 기록) — 'pdf' / 'handler' / 'der' / ''
+            match_source_raw = str(ws.cell(row=row, column=13).value or '').strip().lower()
+            # 매칭 판정:
+            #   pdf      → clean name 이 available 목록에 실제 존재해야 진짜 매칭
+            #   handler  → 항상 매칭 (HANDLER 계산 — pv_voltage/current/power)
+            #   der      → 항상 매칭 (DER-AVM 고정 주소)
+            if match_source_raw == 'handler':
+                is_matched = True
+                match_source = 'handler'
+            elif match_source_raw == 'der':
+                is_matched = True
+                match_source = 'der'
+            else:
+                is_matched = bool(current_clean) and current_clean in available_registers
+                match_source = 'pdf' if is_matched else ''
 
-            # 추천 후보 (E~G열)
+            # 추천 후보 (E~G열) — 동일하게 정리
             suggestions = []
             for col in (5, 6, 7):
                 sv = ws.cell(row=row, column=col).value
                 if sv:
-                    suggestions.append(str(sv).strip())
+                    clean = _parse_reg_display(str(sv).strip())
+                    if clean and clean in available_registers and clean not in suggestions:
+                        suggestions.append(clean)
+
+            # FC 코드 (I열, col 9)
+            fc_val = ws.cell(row=row, column=9).value
+            fc = int(fc_val) if fc_val else 3
+
+            # 현재 매칭된 레지스터의 FC 정보로 lock/ambiguous 판단
+            cur_fcs = name_to_fcs.get(current_clean, []) if current_clean else []
+            fc_locked = len(cur_fcs) == 1
+            fc_ambiguous = len(cur_fcs) >= 2
+            if fc_locked:
+                # 단일 FC만 갖는 레지스터면 그 값으로 강제
+                fc = cur_fcs[0]
+            # 현재 선택된 (name, fc) 조합의 실제 주소 — 사용자 검증용
+            current_addr = name_fc_to_addr.get((current_clean, fc), '') if current_clean else ''
 
             fields.append({
                 'h01_field': h01_field,
                 'description': description,
-                'current_register': current_register,
-                'is_matched': bool(current_register),
+                'current_register': current_clean,  # 깨끗한 이름만
+                'current_raw': current_raw,  # 원본 (디버깅용)
+                'is_matched': is_matched,
+                'match_source': match_source,  # 'pdf' / 'handler' / 'der' / ''
                 'suggestions': suggestions,
+                'fc': fc,
+                'fc_locked': fc_locked,
+                'fc_ambiguous': fc_ambiguous,
+                'current_fcs': cur_fcs,
+                'current_addr': current_addr,
             })
 
         wb.close()
-        return {'fields': fields, 'available_registers': available_registers}
+        return {
+            'fields': fields,
+            'available_registers': available_registers,
+            'available_with_fc': available_with_fc,
+        }
 
     except HTTPException:
         raise
@@ -625,6 +764,7 @@ def save_h01_mapping(session_id: str, body: dict):
         raise HTTPException(400, 'Stage 2 not completed')
 
     mappings = body.get('mappings', {})
+    fc_map = body.get('fc', {})  # {h01_field: 3 or 4}
 
     try:
         import openpyxl
@@ -643,6 +783,8 @@ def save_h01_mapping(session_id: str, body: dict):
             if h01_field in mappings:
                 ws.cell(row=row, column=4, value=mappings[h01_field] or None)
                 updated += 1
+            if h01_field in fc_map:
+                ws.cell(row=row, column=9, value=int(fc_map[h01_field]))
 
         wb.save(stage2_excel)
         wb.close()
@@ -652,6 +794,287 @@ def save_h01_mapping(session_id: str, body: dict):
         raise
     except Exception as e:
         raise HTTPException(500, f'H01_MAPPING 저장 오류: {str(e)}')
+
+
+# ─── MPPT_MAPPING (Stage 2) ──────────────────────────────────────────────────
+
+@router.get('/mppt-mapping/{session_id}')
+def get_mppt_mapping(session_id: str):
+    """Stage2 Excel의 MPPT_MAPPING 시트를 읽어 JSON 반환"""
+    s = SessionStore.get(session_id)
+    if not s:
+        raise HTTPException(404, 'session not found')
+
+    stage2_excel = s.get('stage2_excel')
+    if not stage2_excel or not os.path.exists(stage2_excel):
+        raise HTTPException(400, 'Stage 2 not completed')
+
+    try:
+        import openpyxl
+        wb = openpyxl.load_workbook(stage2_excel, data_only=True)
+        if 'MPPT_MAPPING' not in wb.sheetnames:
+            raise HTTPException(404, 'MPPT_MAPPING sheet not found')
+
+        ws = wb['MPPT_MAPPING']
+        DATA_START = 4
+
+        seen = set()
+        name_to_addr: dict[str, str] = {}
+        name_to_fc: dict[str, str] = {}
+        for row_idx in range(DATA_START, ws.max_row + 1):
+            val = ws.cell(row=row_idx, column=8).value
+            if val:
+                v = str(val).strip()
+                if v:
+                    seen.add(v)
+            jname = ws.cell(row=row_idx, column=10).value
+            kfc = ws.cell(row=row_idx, column=11).value
+            laddr = ws.cell(row=row_idx, column=12).value
+            if jname:
+                nm = str(jname).strip()
+                if nm and nm not in name_to_addr:
+                    name_to_addr[nm] = str(laddr or '').strip()
+                    name_to_fc[nm] = str(kfc or '3').strip()
+        available_registers = sorted(seen)
+        available_with_fc = [
+            {'name': nm, 'addr': name_to_addr.get(nm, ''), 'fc': name_to_fc.get(nm, '3')}
+            for nm in available_registers
+        ]
+
+        # B열에 값이 있는 행만 동적으로 읽기
+        fields = []
+        for row in range(DATA_START, ws.max_row + 1):
+            field = str(ws.cell(row=row, column=2).value or '').strip()
+            if not field:
+                break
+            description = str(ws.cell(row=row, column=3).value or '').strip()
+            current_raw = str(ws.cell(row=row, column=4).value or '').strip()
+            current_clean = _parse_reg_display(current_raw)
+
+            match_source_raw = str(ws.cell(row=row, column=13).value or '').strip().lower()
+            if match_source_raw == 'handler':
+                is_matched = True
+                match_source = 'handler'
+            elif match_source_raw == 'der':
+                is_matched = True
+                match_source = 'der'
+            else:
+                is_matched = bool(current_clean) and current_clean in available_registers
+                match_source = 'pdf' if is_matched else ''
+
+            suggestions = []
+            for col in (5, 6, 7):
+                sv = ws.cell(row=row, column=col).value
+                if sv:
+                    clean = _parse_reg_display(str(sv).strip())
+                    if clean and clean not in suggestions:
+                        suggestions.append(clean)
+
+            fc_val = ws.cell(row=row, column=9).value
+            fc = int(fc_val) if fc_val else 3
+            current_addr = name_to_addr.get(current_clean, '') if current_clean else ''
+
+            fields.append({
+                'field': field,
+                'description': description,
+                'current_register': current_clean,
+                'current_raw': current_raw,
+                'is_matched': is_matched,
+                'match_source': match_source,
+                'suggestions': suggestions,
+                'fc': fc,
+                'current_addr': current_addr,
+            })
+
+        wb.close()
+        return {
+            'fields': fields,
+            'available_registers': available_registers,
+            'available_with_fc': available_with_fc,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f'MPPT_MAPPING 읽기 오류: {str(e)}')
+
+
+@router.post('/mppt-mapping/{session_id}')
+def save_mppt_mapping(session_id: str, body: dict):
+    """사용자가 수정한 MPPT 매핑을 Stage2 Excel에 저장"""
+    s = SessionStore.get(session_id)
+    if not s:
+        raise HTTPException(404, 'session not found')
+
+    stage2_excel = s.get('stage2_excel')
+    if not stage2_excel or not os.path.exists(stage2_excel):
+        raise HTTPException(400, 'Stage 2 not completed')
+
+    mappings = body.get('mappings', {})
+    try:
+        import openpyxl
+        wb = openpyxl.load_workbook(stage2_excel)
+        if 'MPPT_MAPPING' not in wb.sheetnames:
+            raise HTTPException(404, 'MPPT_MAPPING sheet not found')
+        ws = wb['MPPT_MAPPING']
+        DATA_START = 4
+        updated = 0
+        for row in range(DATA_START, ws.max_row + 1):
+            field = str(ws.cell(row=row, column=2).value or '').strip()
+            if not field:
+                break
+            if field in mappings:
+                ws.cell(row=row, column=4, value=mappings[field] or None)
+                ws.cell(row=row, column=13, value='pdf' if mappings[field] else '')
+                updated += 1
+        wb.save(stage2_excel)
+        wb.close()
+        return {'status': 'ok', 'updated': updated}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f'MPPT_MAPPING 저장 오류: {str(e)}')
+
+
+# ─── INFO_MAPPING (Stage 1) ──────────────────────────────────────────────────
+
+@router.get('/info-mapping/{session_id}')
+def get_info_mapping(session_id: str):
+    """Stage1 Excel의 INFO_MAPPING 시트를 읽어 JSON 반환 (Model + SN)"""
+    s = SessionStore.get(session_id)
+    if not s:
+        raise HTTPException(404, 'session not found')
+
+    stage1_excel = s.get('stage1_excel')
+    if not stage1_excel or not os.path.exists(stage1_excel):
+        raise HTTPException(400, 'Stage 1 not completed')
+
+    try:
+        import openpyxl
+        wb = openpyxl.load_workbook(stage1_excel, data_only=True)
+        if 'INFO_MAPPING' not in wb.sheetnames:
+            raise HTTPException(404, 'INFO_MAPPING sheet not found')
+
+        ws = wb['INFO_MAPPING']
+        DATA_START = 4
+
+        # H열 전체 후보 + J/K/L 메타 수집
+        seen = set()
+        name_to_addr: dict[str, str] = {}
+        name_to_fc: dict[str, str] = {}
+        for row_idx in range(DATA_START, ws.max_row + 1):
+            val = ws.cell(row=row_idx, column=8).value
+            if val:
+                v = str(val).strip()
+                if v:
+                    seen.add(v)
+            jname = ws.cell(row=row_idx, column=10).value
+            kfc = ws.cell(row=row_idx, column=11).value
+            laddr = ws.cell(row=row_idx, column=12).value
+            if jname:
+                nm = str(jname).strip()
+                if nm and nm not in name_to_addr:
+                    name_to_addr[nm] = str(laddr or '').strip()
+                    name_to_fc[nm] = str(kfc or '3').strip()
+        available_registers = sorted(seen)
+        available_with_fc = [
+            {'name': nm, 'addr': name_to_addr.get(nm, ''), 'fc': name_to_fc.get(nm, '3')}
+            for nm in available_registers
+        ]
+
+        # 데이터 행 — model, sn
+        fields = []
+        for row in range(DATA_START, DATA_START + 2):
+            field = str(ws.cell(row=row, column=2).value or '').strip()
+            if not field:
+                break
+            description = str(ws.cell(row=row, column=3).value or '').strip()
+            current_raw = str(ws.cell(row=row, column=4).value or '').strip()
+            current_clean = _parse_reg_display(current_raw)
+
+            match_source_raw = str(ws.cell(row=row, column=13).value or '').strip().lower()
+            is_matched = bool(current_clean) and current_clean in available_registers
+            match_source = match_source_raw if match_source_raw else ('pdf' if is_matched else '')
+
+            suggestions = []
+            for col in (5, 6, 7):
+                sv = ws.cell(row=row, column=col).value
+                if sv:
+                    clean = _parse_reg_display(str(sv).strip())
+                    if clean and clean not in suggestions:
+                        suggestions.append(clean)
+
+            fc_val = ws.cell(row=row, column=9).value
+            fc = int(fc_val) if fc_val else 3
+
+            current_addr = name_to_addr.get(current_clean, '') if current_clean else ''
+
+            fields.append({
+                'field': field,
+                'description': description,
+                'current_register': current_clean,
+                'current_raw': current_raw,
+                'is_matched': is_matched,
+                'match_source': match_source,
+                'suggestions': suggestions,
+                'fc': fc,
+                'current_addr': current_addr,
+            })
+
+        wb.close()
+        return {
+            'fields': fields,
+            'available_registers': available_registers,
+            'available_with_fc': available_with_fc,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f'INFO_MAPPING 읽기 오류: {str(e)}')
+
+
+@router.post('/info-mapping/{session_id}')
+def save_info_mapping(session_id: str, body: dict):
+    """사용자가 수정한 INFO 매핑을 Stage1 Excel에 저장"""
+    s = SessionStore.get(session_id)
+    if not s:
+        raise HTTPException(404, 'session not found')
+
+    stage1_excel = s.get('stage1_excel')
+    if not stage1_excel or not os.path.exists(stage1_excel):
+        raise HTTPException(400, 'Stage 1 not completed')
+
+    mappings = body.get('mappings', {})
+
+    try:
+        import openpyxl
+        wb = openpyxl.load_workbook(stage1_excel)
+        if 'INFO_MAPPING' not in wb.sheetnames:
+            raise HTTPException(404, 'INFO_MAPPING sheet not found')
+
+        ws = wb['INFO_MAPPING']
+        DATA_START = 4
+        updated = 0
+        for row in range(DATA_START, DATA_START + 2):
+            field = str(ws.cell(row=row, column=2).value or '').strip()
+            if not field:
+                break
+            if field in mappings:
+                ws.cell(row=row, column=4, value=mappings[field] or None)
+                # 사용자 수동 매핑은 'pdf' 출처로 기록
+                ws.cell(row=row, column=13, value='pdf' if mappings[field] else '')
+                updated += 1
+
+        wb.save(stage1_excel)
+        wb.close()
+        return {'status': 'ok', 'updated': updated}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f'INFO_MAPPING 저장 오류: {str(e)}')
 
 
 # ─── 파일 다운로드 ───────────────────────────────────────────────────────────

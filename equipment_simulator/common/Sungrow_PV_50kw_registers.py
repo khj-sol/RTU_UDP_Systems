@@ -31,17 +31,15 @@ class RegisterMap:
     # =========================================================================
     # Monitoring Data
     # =========================================================================
-    L2_VOLTAGE                               = 0x0005  # U16
     FREQUENCY                                = 0x0008  # U16
     FAULT                                    = 0x0009  # U16
     L1_VOLTAGE                               = 0x000C  # U16
-    PV_POWER                                 = 0x0011  # U16
+    COMMUNICATE_FAULT                        = 0x000D  # U16
+    AC_POWER                                 = 0x0011  # U16
     L1_CURRENT                               = 0x0027  # U16
     L2_CURRENT                               = 0x002B  # U16
-    SUPPRESSION                              = 0x0055  # U16
+    CUMULATIVE_ENERGY                        = 0x0055  # U16
     DAILY_ENERGY                             = 0x138B  # U16, scale kWh 0.1
-    CUMULATIVE_ENERGY                        = 0x138C  # U32, scale kWh
-    CUMULATIVE_ENERGY_HIGH                   = 0x138D
     PV_VOLTAGE                               = 0x1393  # U16
     MPPT_1_CURRENT                           = 0x1394  # U16, scale A
     MPPT_2_VOLTAGE                           = 0x1395  # U16, scale A
@@ -72,11 +70,9 @@ class RegisterMap:
     # =========================================================================
     # Alarm / Error Codes
     # =========================================================================
+    L2_VOLTAGE                               = 0x0005  # U16
     ALARM_RUN                                = 0x000A  # U16
-    COMMUNICATE_FAULT                        = 0x000D  # U16
-    TOTAL_FAULT_BIT_DEVICE_IS_INFAULT_STOP_STATE = 0x0012  # U16
     INVERTER_PARALLEL_COMMUNICATION_ALARM    = 0x004B  # U16
-    REVERSE_CONNECTION_ALARM_OF_THE_METER_CT = 0x0054  # U16
     ELECTRIC_ARC_FAULT                       = 0x0058  # U16
     GROUNDING_CABLE_FAULT                    = 0x006A  # U16
     METER_COMMUNICATION_ABNORMALALARM        = 0x0202  # U16
@@ -106,6 +102,7 @@ class RegisterMap:
     PV_STRING_COUNT                          = 8
 
     # --- RTU modbus_handler / simulator 필수 alias ---
+    INNER_TEMP                               = INTERNALTEMPERATURE
     T_PHASE_VOLTAGE                          = S_PHASE_VOLTAGE  # L3 없음 → 단상 대체
     T_PHASE_CURRENT                          = S_PHASE_CURRENT  # L3 없음 → 단상 대체
     TOTAL_ENERGY                             = CUMULATIVE_ENERGY
@@ -117,29 +114,25 @@ class RegisterMap:
     STRING6_CURRENT                          = STRING_6_CURRENT
     STRING7_CURRENT                          = STRING_7_CURRENT
     STRING8_CURRENT                          = STRING_8_CURRENT
-    ERROR_CODE3                              = TOTAL_FAULT_BIT_DEVICE_IS_INFAULT_STOP_STATE
+    ERROR_CODE3                              = INVERTER_PARALLEL_COMMUNICATION_ALARM
     DER_POWER_FACTOR_SET                     = 0x07D0
     DER_ACTION_MODE                          = 0x07D1
     DER_REACTIVE_POWER_PCT                   = 0x07D2
     DER_ACTIVE_POWER_PCT                     = 0x07D3
     INVERTER_ON_OFF                          = 0x0834
+    MPPT_NUMBER                              = 0x1A4A  # default MPPT count register
+    MPPT1_VOLTAGE                            = PV_VOLTAGE
+    CUMULATIVE_ENERGY_LOW                    = CUMULATIVE_ENERGY
+    DER_AVM_DIGITAL_METERCONNECT_STATUS      = 0x1210
 
 
 
 
-    # ── Simulator compatibility aliases ──
-    AC_POWER                    = 0x13A9  # Total active power (5033)
-    INVERTER_MODE               = 0x13AE  # Running state (5038)
-    INNER_TEMP                  = INTERNALTEMPERATURE  # 0x1390
-    MPPT1_VOLTAGE               = PV_VOLTAGE  # 0x1393
-    MPPT3_VOLTAGE               = MPPT_3_VOLTAGE  # 0x1397
-    MPPT3_CURRENT               = MPPT_3_CURRENT  # 0x1398
-
-
-    # IV Scan block layout
-    IV_TRACKER_BLOCK_SIZE             = 0x0100  # 256 regs per tracker
-    IV_SCAN_DATA_POINTS              = 64      # default data points
-
+    # --- Simulator compatibility aliases ---
+    MPPT3_VOLTAGE                            = MPPT_3_VOLTAGE
+    MPPT3_CURRENT                            = MPPT_3_CURRENT
+    PV_POWER                                 = 0x0011  # U16, PV power
+    INVERTER_MODE                            = 0x13AE  # U16, running state
 
 class InverterMode:
     """Inverter Mode Table (0x101D)"""
@@ -196,7 +189,7 @@ class ControlMode:
 
 
 class ErrorCode1:
-    """Error Code Table1 (0x000A) — Bit field"""
+    """Error Code Table1 (0x0005) — Bit field"""
     BITS = {
         0:  "Inverter over dc-bias current",
         1:  "Inverter relay abnormal",
@@ -226,7 +219,7 @@ class ErrorCode1:
 
 
 class ErrorCode2:
-    """Error Code Table2 (0x000D) — Bit field"""
+    """Error Code Table2 (0x000A) — Bit field"""
     BITS = {
         0:  "Grid over voltage",
         1:  "Grid under voltage",
@@ -256,7 +249,7 @@ class ErrorCode2:
 
 
 class ErrorCode3:
-    """Error Code Table3 (0x0012) — Bit field"""
+    """Error Code Table3 (0x004B) — Bit field"""
     BITS = {
         0:  "Reserved",
         1:  "Logger/E-Display EEPROM fail",
@@ -286,7 +279,7 @@ class ErrorCode3:
 
 
 class ErrorCode4:
-    """Error Code Table4 (0x0025) — Bit field"""
+    """Error Code Table4 (0x0058) — Bit field"""
     BITS = {
     }
 
@@ -300,7 +293,7 @@ class ErrorCode4:
 
 
 class ErrorCode5:
-    """Error Code Table5 (0x004B) — Bit field"""
+    """Error Code Table5 (0x006A) — Bit field"""
     BITS = {
     }
 
@@ -314,7 +307,7 @@ class ErrorCode5:
 
 
 class ErrorCode6:
-    """Error Code Table6 (0x0054) — Bit field"""
+    """Error Code Table6 (0x0202) — Bit field"""
     BITS = {
     }
 
@@ -328,7 +321,7 @@ class ErrorCode6:
 
 
 class ErrorCode7:
-    """Error Code Table7 (0x0058) — Bit field"""
+    """Error Code Table7 (0x0640) — Bit field"""
     BITS = {
     }
 
@@ -342,7 +335,7 @@ class ErrorCode7:
 
 
 class ErrorCode8:
-    """Error Code Table8 (0x006A) — Bit field"""
+    """Error Code Table8 (0x0650) — Bit field"""
     BITS = {
     }
 
@@ -356,7 +349,7 @@ class ErrorCode8:
 
 
 class ErrorCode9:
-    """Error Code Table9 (0x0202) — Bit field"""
+    """Error Code Table9 (0x13AF) — Bit field"""
     BITS = {
     }
 
@@ -370,7 +363,7 @@ class ErrorCode9:
 
 
 class ErrorCode10:
-    """Error Code Table10 (0x0640) — Bit field"""
+    """Error Code Table10 (0x13B0) — Bit field"""
     BITS = {
     }
 
@@ -384,7 +377,7 @@ class ErrorCode10:
 
 
 class ErrorCode11:
-    """Error Code Table11 (0x0650) — Bit field"""
+    """Error Code Table11 (0x13B1) — Bit field"""
     BITS = {
     }
 
@@ -398,7 +391,7 @@ class ErrorCode11:
 
 
 class ErrorCode12:
-    """Error Code Table12 (0x13AF) — Bit field"""
+    """Error Code Table12 (0x13B2) — Bit field"""
     BITS = {
     }
 
@@ -412,7 +405,7 @@ class ErrorCode12:
 
 
 class ErrorCode13:
-    """Error Code Table13 (0x13B0) — Bit field"""
+    """Error Code Table13 (0x13B3) — Bit field"""
     BITS = {
     }
 
@@ -426,7 +419,7 @@ class ErrorCode13:
 
 
 class ErrorCode14:
-    """Error Code Table14 (0x13B1) — Bit field"""
+    """Error Code Table14 (0x13B4) — Bit field"""
     BITS = {
     }
 
@@ -440,7 +433,7 @@ class ErrorCode14:
 
 
 class ErrorCode15:
-    """Error Code Table15 (0x13B2) — Bit field"""
+    """Error Code Table15 (0x13B5) — Bit field"""
     BITS = {
     }
 
@@ -454,7 +447,7 @@ class ErrorCode15:
 
 
 class ErrorCode16:
-    """Error Code Table16 (0x13B3) — Bit field"""
+    """Error Code Table16 (0x2500) — Bit field"""
     BITS = {
     }
 
@@ -468,7 +461,7 @@ class ErrorCode16:
 
 
 class ErrorCode17:
-    """Error Code Table17 (0x13B4) — Bit field"""
+    """Error Code Table17 (0x5500) — Bit field"""
     BITS = {
     }
 
@@ -482,49 +475,7 @@ class ErrorCode17:
 
 
 class ErrorCode18:
-    """Error Code Table18 (0x13B5) — Bit field"""
-    BITS = {
-    }
-
-    @classmethod
-    def decode(cls, value):
-        return [f"E{b}:{d}" for b, d in cls.BITS.items() if value & (1 << b)]
-
-    @classmethod
-    def to_string(cls, value):
-        return ", ".join(cls.decode(value)) if value else "OK"
-
-
-class ErrorCode19:
-    """Error Code Table19 (0x2500) — Bit field"""
-    BITS = {
-    }
-
-    @classmethod
-    def decode(cls, value):
-        return [f"E{b}:{d}" for b, d in cls.BITS.items() if value & (1 << b)]
-
-    @classmethod
-    def to_string(cls, value):
-        return ", ".join(cls.decode(value)) if value else "OK"
-
-
-class ErrorCode20:
-    """Error Code Table20 (0x5500) — Bit field"""
-    BITS = {
-    }
-
-    @classmethod
-    def decode(cls, value):
-        return [f"E{b}:{d}" for b, d in cls.BITS.items() if value & (1 << b)]
-
-    @classmethod
-    def to_string(cls, value):
-        return ", ".join(cls.decode(value)) if value else "OK"
-
-
-class ErrorCode21:
-    """Error Code Table21 (0x9100) — Bit field"""
+    """Error Code Table18 (0x9100) — Bit field"""
     BITS = {
     }
 
@@ -544,6 +495,16 @@ class SungrowStatusConverter:
     @classmethod
     def to_inverter_mode(cls, raw):
         return raw
+
+    @classmethod
+    def to_solarize(cls, raw):
+        """RTU 호환 alias"""
+        return cls.to_inverter_mode(raw)
+
+    @classmethod
+    def to_h01(cls, raw):
+        """RTU 호환 alias"""
+        return cls.to_inverter_mode(raw)
 
 
 # Dynamic-loader alias required by modbus_handler.load_register_module
@@ -676,13 +637,11 @@ DATA_TYPES = {
     'ALARM_RUN': 'U16',
     'L1_VOLTAGE': 'U16',
     'COMMUNICATE_FAULT': 'U16',
-    'PV_POWER': 'U16',
-    'TOTAL_FAULT_BIT_DEVICE_IS_INFAULT_STOP_STATE': 'U16',
+    'AC_POWER': 'U16',
     'L1_CURRENT': 'U16',
     'L2_CURRENT': 'U16',
     'INVERTER_PARALLEL_COMMUNICATION_ALARM': 'U16',
-    'REVERSE_CONNECTION_ALARM_OF_THE_METER_CT': 'U16',
-    'SUPPRESSION': 'U16',
+    'CUMULATIVE_ENERGY': 'U16',
     'ELECTRIC_ARC_FAULT': 'U16',
     'GROUNDING_CABLE_FAULT': 'U16',
     'METER_COMMUNICATION_ABNORMALALARM': 'U16',
@@ -691,7 +650,6 @@ DATA_TYPES = {
     'SERIAL_NUMBER': 'U16',
     'DEVICE_MODEL': 'U16',
     'DAILY_ENERGY': 'U16',
-    'CUMULATIVE_ENERGY': 'U32',
     'TOTAL_RUNNING_TIME': 'U32',
     'TOTAL_RUNNING_TIME_HIGH': 'U16',
     'INTERNALTEMPERATURE': 'S16',
@@ -763,15 +721,15 @@ READ_BLOCKS = [
 DATA_PARSER = {
     'mode                ': 'INVERTER_MODE',
     'r_voltage           ': 'DEA_L1_VOLTAGE (0x03EE~0x03EF); FAULT (0x0009); L1_VOLTAGE (0x000C)',
-    's_voltage           ': 'DEA_L2_VOLTAGE (0x03F0~0x03F1); L2_VOLTAGE (0x0005); COMMUNICATE_FAULT (0x000D)',
-    't_voltage           ': 'DEA_L3_VOLTAGE (0x03F2~0x03F3)',
+    's_voltage           ': 'DEA_L2_VOLTAGE (0x03F0~0x03F1); COMMUNICATE_FAULT (0x000D); L2_VOLTAGE (0x0005)',
+    't_voltage           ': 'DEA_L3_VOLTAGE (0x03F2~0x03F3); ERROR_CODE1 (0x13AF); ERROR_CODE2 (0x13B1)',
     'r_current           ': 'DEA_L1_CURRENT (0x03E8~0x03E9); L1_CURRENT (0x0027)',
     's_current           ': 'DEA_L2_CURRENT (0x03EA~0x03EB); L2_CURRENT (0x002B)',
     't_current           ': 'DEA_L3_CURRENT (0x03EC~0x03ED)',
     'frequency           ': 'DEA_FREQUENCY (0x03FA~0x03FB); FREQUENCY (0x0008)',
-    'ac_power            ': 'DEA_TOTAL_ACTIVE_POWER (0x03F4~0x03F5)',
-    'cumulative_energy   ': 'CUMULATIVE_ENERGY (0x138C); SUPPRESSION (0x0055)',
-    'alarm1              ': 'ERROR_CODE1 (0x13AF)',
+    'ac_power            ': 'DEA_TOTAL_ACTIVE_POWER (0x03F4~0x03F5); AC_POWER (0x0011)',
+    'cumulative_energy   ': 'CUMULATIVE_ENERGY (0x138C)',
+    'alarm1              ': 'ERROR_CODE1 (0x13AF); ALARM_RUN (0x000A)',
     'mppt1_voltage'        : 'PV_VOLTAGE',
     'mppt1_current'        : 'MPPT_1_CURRENT',
     'mppt2_voltage'        : 'MPPT_2_VOLTAGE',

@@ -169,19 +169,56 @@ def read_stage1_excel_v2(excel_path: str) -> dict:
                     result['monitoring'].append(reg)
 
     # ── 5_IV 시트: IV 레지스터 (backward compat: 4_IV도 지원) ──
+    # 두 섹션:
+    #   1) IV Scan Command (헤더: Name/Address/Type/R/W/Description)
+    #   2) IV Data 레지스터 매핑 (헤더: No/Type/Name/Address/Regs/Data Type/Scale)
+    # 빈 행이나 새 섹션 제목 행에서 헤더 재감지
     iv_sheet = '5_IV' if '5_IV' in wb.sheetnames else ('4_IV' if '4_IV' in wb.sheetnames else None)
     if iv_sheet:
         ws = wb[iv_sheet]
-        for row in ws.iter_rows(min_row=2, values_only=True):
+        col_name = col_addr = col_type = None
+        in_data_rows = False
+        for row in ws.iter_rows(values_only=True):
             cells = [str(c).strip() if c is not None else '' for c in row]
-            if cells[0] and cells[0].isdigit() and len(cells) >= 4:
-                addr = parse_address(cells[3]) if len(cells) > 3 else None
-                if addr is not None:
-                    result['iv_regs'].append(RegisterRow(
-                        definition=cells[2] if len(cells) > 2 else cells[1],
-                        address=addr, data_type=cells[5] if len(cells) > 5 else 'U16',
-                        category='IV_SCAN',
-                    ))
+            if not any(cells):
+                # 빈 행 → 다음 섹션 헤더 대기 모드
+                in_data_rows = False
+                col_name = col_addr = col_type = None
+                continue
+            upper = [c.upper() for c in cells]
+            # 헤더 감지: NAME + ADDRESS 컬럼 있는 행
+            if 'NAME' in upper and 'ADDRESS' in upper:
+                col_name = upper.index('NAME')
+                col_addr = upper.index('ADDRESS')
+                if 'TYPE' in upper:
+                    col_type = upper.index('TYPE')
+                else:
+                    col_type = None
+                # 'DATA TYPE' 컬럼이 있으면 그것을 사용
+                if 'DATA TYPE' in upper:
+                    col_type = upper.index('DATA TYPE')
+                in_data_rows = True
+                continue
+            if not in_data_rows or col_name is None:
+                continue
+            # 데이터 행
+            try:
+                name = cells[col_name] if col_name < len(cells) else ''
+                addr_str = cells[col_addr] if col_addr < len(cells) else ''
+                if not name or not addr_str:
+                    continue
+                addr = parse_address(addr_str)
+                if addr is None:
+                    continue
+                dtype = cells[col_type] if col_type is not None and col_type < len(cells) else 'U16'
+                result['iv_regs'].append(RegisterRow(
+                    definition=name,
+                    address=addr,
+                    data_type=dtype or 'U16',
+                    category='IV_SCAN',
+                ))
+            except (IndexError, ValueError):
+                continue
 
     wb.close()
     return result
@@ -256,6 +293,9 @@ def _parse_section_row(cells: list, header: list, category: str) -> Optional[Reg
             col_map['definition'] = i
         elif 'address' in hl:
             col_map['address'] = i
+        elif hl == 'fc':
+            # Modbus Function Code (3=Holding, 4=Input)
+            col_map['fc'] = i
         elif 'type' in hl and 'data' not in hl:
             col_map['type'] = i
         elif 'unit' in hl or 'scale' in hl:
@@ -277,6 +317,7 @@ def _parse_section_row(cells: list, header: list, category: str) -> Optional[Reg
 
     addr_raw = cells[col_map['address']] if 'address' in col_map else ''
     addr = parse_address(addr_raw)
+    fc_val = cells[col_map['fc']] if 'fc' in col_map and col_map['fc'] < len(cells) else ''
 
     return RegisterRow(
         definition=defn,
@@ -285,6 +326,7 @@ def _parse_section_row(cells: list, header: list, category: str) -> Optional[Reg
         data_type=cells[col_map.get('type', 99)] if col_map.get('type', 99) < len(cells) else 'U16',
         scale=cells[col_map.get('scale', 99)] if col_map.get('scale', 99) < len(cells) else '',
         rw=cells[col_map.get('rw', 99)] if col_map.get('rw', 99) < len(cells) else 'RO',
+        fc=fc_val,
         h01_field=cells[col_map.get('h01_field', 99)] if col_map.get('h01_field', 99) < len(cells) else '',
         comment=cells[col_map.get('comment', 99)] if col_map.get('comment', 99) < len(cells) else '',
         category=category,
@@ -317,8 +359,8 @@ def generate_review_alternatives(
         alts = []
         addr = reg.address if isinstance(reg.address, int) else parse_address(reg.address)
 
-        # 1) synonym_db 퍼지 매칭
-        fuzzy = match_synonym_fuzzy(reg.definition, synonym_db, threshold=0.4)
+        # 1) synonym_db 퍼지 매칭 (Phase B: 0.4 → 0.75 false positive 방지)
+        fuzzy = match_synonym_fuzzy(reg.definition, synonym_db, threshold=0.75)
         if fuzzy:
             alts.append({
                 'definition': fuzzy['field'],
@@ -472,12 +514,12 @@ def _add_h01_mapping_sheet(wb, s1: dict, openpyxl_module) -> None:
     ws['A1'] = 'H01_MAPPING — H01 필드별 레지스터 수동 매핑'
     ws['A1'].font = Font(bold=True, size=13)
     ws['A2'] = ('※ D열에서 매핑할 레지스터명을 선택/입력하세요.'
-                '  E~G열은 추천 후보, H열은 전체 목록(드롭다운용).')
+                '  E~G열은 추천 후보, H열은 전체 목록, I열은 FC코드(3 or 4).')
     ws['A2'].font = Font(italic=True, color='555555')
 
     # Row 3 헤더
     headers = ['No', 'H01 Field', '설명', '매칭된 레지스터 (주소)',
-               '추천 후보 1', '추천 후보 2', '추천 후보 3', '전체 레지스터 목록']
+               '추천 후보 1', '추천 후보 2', '추천 후보 3', '전체 레지스터 목록', 'FC']
     for j, h in enumerate(headers, start=1):
         cell = ws.cell(row=3, column=j, value=h)
         cell.font = hdr_font
@@ -486,10 +528,17 @@ def _add_h01_mapping_sheet(wb, s1: dict, openpyxl_module) -> None:
 
     # 자동 매칭 빌드: h01_match 테이블 우선 사용 (Stage1 H01 매칭 결과)
     h01_auto: Dict[str, List[Tuple[str, str]]] = {}
+    h01_fc: Dict[str, str] = {}  # h01_field → FC ('3' or '4')
+    # 매칭 출처 추적 (col M 기록용 + Stage3/UI 분류)
+    #   'pdf'     : PDF 일반/phase-aware 매칭 (PDF_LINE/PDF_PHASE/PDF_ALIAS_R/PDF)
+    #   'handler' : HANDLER 계산 매칭 (pv_voltage/current/power)
+    #   'der'     : DER-AVM 고정 주소 매칭 (DEA_*)
+    h01_source: Dict[str, str] = {}
     all_cats = (s1.get('monitoring', []) + s1.get('info', []) +
                 s1.get('status', []) + s1.get('alarm', []))
 
-    # 1차: h01_match 테이블에서 매칭 정보 수집 (DER/HANDLER/PDF 전부 포함)
+    # 1차: h01_match 테이블에서 매칭 정보 수집
+    # PDF/HANDLER/DER 모두 D열에 표시 (UI 가 source 별로 라벨링)
     for hm in s1.get('h01_match', []):
         field = hm.get('field', '').strip()
         status = hm.get('status', '')
@@ -502,49 +551,117 @@ def _add_h01_mapping_sheet(wb, s1: dict, openpyxl_module) -> None:
         if source == 'HANDLER':
             display_name = 'HANDLER'
             display_addr = ''
+            src_kind = 'handler'
         elif source == 'DER':
+            # DER-AVM 가상 주소 — der_name (예: DEA_TOTAL_ACTIVE_POWER) 표시
+            display_name = name or defn or 'DER'
+            display_addr = addr
+            src_kind = 'der'
+        elif source in ('PDF_LINE', 'PDF_PHASE', 'PDF_ALIAS_R'):
             display_name = name or defn
             display_addr = addr
+            src_kind = 'pdf'
         else:
             display_name = name or defn
             display_addr = addr
+            src_kind = 'pdf'
         if display_name:
             entries = h01_auto.setdefault(field, [])
             if not any(e[0] == display_name for e in entries):
                 entries.append((display_name, display_addr))
+            # 첫 번째 source 만 기록 (PDF > HANDLER > DER 우선순위 X — 등장 순서)
+            if field not in h01_source:
+                h01_source[field] = src_kind
 
-    # 2차: reg.h01_field에서 추가 매칭 보완 (h01_match에 없는 것)
+    # 2차: reg.h01_field에서 추가 매칭 보완 + FC 수집
     for reg in all_cats:
         h01 = (getattr(reg, 'h01_field', '') or '').strip()
         if h01 and h01 in {f for f, _ in _H01_MAPPING_FIELDS}:
             name = to_upper_snake(reg.definition)
             addr = getattr(reg, 'address_hex', '') or ''
+            fc = str(getattr(reg, 'fc', '') or '').strip()
             if name:
                 entries = h01_auto.setdefault(h01, [])
                 if not any(e[0] == name for e in entries):
                     entries.append((name, addr))
+            if fc and h01 not in h01_fc:
+                h01_fc[h01] = fc
 
-    # 전체 레지스터 목록 (H열, 드롭다운용) — 이름만
-    avail_entries: list = []
-    seen_avail: set = set()
+    # 전체 레지스터 목록 (H열, 드롭다운용) — 이름만, 알파벳 정렬
+    # 동시에 name → {fc} 맵 수집 (FC3/FC4 구분용)
+    def _norm_fc(v) -> str:
+        s = str(v or '').strip()
+        if not s:
+            return ''
+        if s in ('3', '03', 'FC03', 'fc03', 'Fc03'):
+            return '3'
+        if s in ('4', '04', 'FC04', 'fc04', 'Fc04'):
+            return '4'
+        return ''
+
+    name_to_fcs: Dict[str, set] = {}
+    # (name, fc) → address (Hex 문자열) 매핑 — 같은 이름이 FC3/FC4 양쪽에 있을 때
+    # 사용자가 어느 FC인지 검증할 수 있도록 주소도 함께 노출
+    name_fc_to_addr: Dict[tuple, str] = {}
     for reg in all_cats:
         name = to_upper_snake(reg.definition)
-        if name and name not in seen_avail:
-            avail_entries.append(name)
-            seen_avail.add(name)
+        if not name:
+            continue
+        fc_n = _norm_fc(getattr(reg, 'fc', ''))
+        addr_hex = getattr(reg, 'address_hex', '') or ''
+        if fc_n:
+            name_to_fcs.setdefault(name, set()).add(fc_n)
+            if (name, fc_n) not in name_fc_to_addr and addr_hex:
+                name_fc_to_addr[(name, fc_n)] = addr_hex
+        else:
+            name_to_fcs.setdefault(name, set())
+    avail_entries: list = sorted(name_to_fcs.keys())
 
     DATA_START = 4
     n_fields = len(_H01_MAPPING_FIELDS)
+
+    # Phase C: Stage3와 동일한 semantic validator 공유
+    try:
+        from .stage1 import _h01_semantic_valid
+    except ImportError:
+        def _h01_semantic_valid(field, name):
+            return True
 
     # 데이터 행
     for i, (field, desc) in enumerate(_H01_MAPPING_FIELDS):
         row = DATA_START + i
         matched_list = h01_auto.get(field, [])
 
-        # D열: 매칭된 레지스터 전부 표시 (세미콜론 구분)
-        if matched_list:
+        # Phase C: semantic 검증을 통과한 후보만 D열에 auto-populate
+        # HANDLER/DEA_* 는 semantic valid 통과 (Stage3 에서 자동 alias 처리)
+        valid_matched = [
+            (name, addr) for name, addr in matched_list
+            if _h01_semantic_valid(field, name)
+        ]
+
+        # Fallback: h01_match 에 없거나 HANDLER 만 있으면 all_cats 에서
+        # _suggest_candidates 로 최고 점수 후보를 자동 채택 (top 1)
+        # HANDLER 뿐이면 실제 PDF 레지스터도 함께 표시
+        if (not valid_matched) or all(n == 'HANDLER' for n, _ in valid_matched):
+            candidates = _suggest_candidates(field, all_cats)
+            auto_candidates = [
+                c for c in candidates
+                if _h01_semantic_valid(field, c['name'])
+            ]
+            if auto_candidates:
+                # 드롭다운 H 열에 존재하는 것만 자동 채택 (실제 추출 레지스터)
+                for ac in auto_candidates[:1]:  # 최고 점수 1개만 auto
+                    nm = ac['name']
+                    if nm in name_to_fcs and not any(e[0] == nm for e in valid_matched):
+                        valid_matched.append((nm, ac.get('addr_hex', '')))
+                        # 출처 미설정인 경우만 'pdf' 로 표기 (handler/der 는 그대로 유지)
+                        if not h01_source.get(field):
+                            h01_source[field] = 'pdf'
+
+        # D열: semantic-valid 매칭만 표시 (세미콜론 구분)
+        if valid_matched:
             parts = []
-            for name, addr in matched_list:
+            for name, addr in valid_matched:
                 parts.append(f'{name} ({addr})' if addr else name)
             matched_display = '; '.join(parts)
         else:
@@ -556,12 +673,20 @@ def _add_h01_mapping_sheet(wb, s1: dict, openpyxl_module) -> None:
 
         cell_d = ws.cell(row=row, column=4, value=matched_display)
         cell_d.border = thin
-        cell_d.fill = auto_fill if matched_list else empty_fill
+        cell_d.fill = auto_fill if valid_matched else empty_fill
 
-        # 추천 후보 (E~G열) — 이미 매칭된 레지스터는 제외
-        matched_names = {e[0] for e in matched_list}
+        # M열 (숨김): 매칭 출처 — 'pdf' / 'handler' / 'der' / ''
+        # API 및 UI 가 라벨링에 사용
+        ws.cell(row=row, column=13, value=h01_source.get(field, ''))
+
+        # 추천 후보 (E~G열) — 이미 매칭된 것 제외 + semantic 검증 통과만
+        matched_names = {e[0] for e in matched_list} | {n for n, _ in valid_matched}
         candidates = _suggest_candidates(field, all_cats)
-        filtered = [c for c in candidates if c['name'] not in matched_names]
+        filtered = [
+            c for c in candidates
+            if c['name'] not in matched_names
+            and _h01_semantic_valid(field, c['name'])
+        ]
         for ci, cand in enumerate(filtered[:3]):
             val = f'{cand["name"]} ({cand["addr_hex"]})' if cand['addr_hex'] else cand['name']
             cell = ws.cell(row=row, column=5 + ci, value=val)
@@ -569,8 +694,44 @@ def _add_h01_mapping_sheet(wb, s1: dict, openpyxl_module) -> None:
             cell.fill = suggest_fill
 
     # H열: 전체 레지스터 목록 (드롭다운 소스)
+    # J/K/L열(숨김): 레지스터 → FC + 주소 맵 — API에서 읽음
+    #   J = name
+    #   K = "3" / "4" / "3,4"
+    #   L = "0x0091" (FC3 주소) / "|0x0091" (FC4 주소) / "0x0091|0x0091" (양쪽)
+    #       — fcs 리스트 순서와 동일하게 '|' 구분
     for i, name in enumerate(avail_entries):
         ws.cell(row=DATA_START + i, column=8, value=name).fill = ref_fill
+        ws.cell(row=DATA_START + i, column=10, value=name)
+        fcs = sorted(name_to_fcs.get(name, set()))
+        ws.cell(row=DATA_START + i, column=11, value=','.join(fcs) if fcs else '')
+        addr_parts = [name_fc_to_addr.get((name, fc), '') for fc in fcs]
+        ws.cell(row=DATA_START + i, column=12, value='|'.join(addr_parts) if addr_parts else '')
+
+    # I열: FC 코드 (기본값 자동, 사용자 수정 가능)
+    # 기본 FC 감지 (MONITORING 다수파)
+    _fc_vals = [str(getattr(r, 'fc', '')).strip() for r in all_cats
+                if str(getattr(r, 'fc', '')).strip()]
+    if _fc_vals and all(v in ('4', '04', 'FC04') for v in _fc_vals):
+        default_fc = '4'
+    else:
+        default_fc = '3'
+
+    # 매칭된 레지스터의 FC를 우선 사용 (단일 FC만 갖는 레지스터면 자동확정)
+    for i, (field, desc) in enumerate(_H01_MAPPING_FIELDS):
+        row = DATA_START + i
+        fc_val = h01_fc.get(field, '')
+        if not fc_val:
+            # D열의 첫 매칭 레지스터로부터 FC 자동 추론
+            matched_list = h01_auto.get(field, [])
+            for nm, _addr in matched_list:
+                fcs = name_to_fcs.get(nm, set())
+                if len(fcs) == 1:
+                    fc_val = next(iter(fcs))
+                    break
+        if not fc_val:
+            fc_val = default_fc
+        cell_fc = ws.cell(row=row, column=9, value=int(fc_val))
+        cell_fc.border = thin
 
     # DataValidation — D열에 H열 범위 드롭다운
     last_avail_row = DATA_START + max(len(avail_entries), n_fields) - 1
@@ -590,6 +751,13 @@ def _add_h01_mapping_sheet(wb, s1: dict, openpyxl_module) -> None:
         dv.sqref = f'D{DATA_START}:D{last_data_row}'
         ws.add_data_validation(dv)
 
+    # DataValidation — I열 FC 드롭다운 (3 or 4)
+    dv_fc = DataValidation(type='list', formula1='"3,4"', allow_blank=False, showDropDown=False)
+    dv_fc.prompt = 'FC03=Holding, FC04=Input'
+    dv_fc.promptTitle = 'Function Code'
+    dv_fc.sqref = f'I{DATA_START}:I{last_data_row}'
+    ws.add_data_validation(dv_fc)
+
     ws.column_dimensions['A'].width = 5
     ws.column_dimensions['B'].width = 22
     ws.column_dimensions['C'].width = 30
@@ -598,6 +766,228 @@ def _add_h01_mapping_sheet(wb, s1: dict, openpyxl_module) -> None:
     ws.column_dimensions['F'].width = 35
     ws.column_dimensions['G'].width = 35
     ws.column_dimensions['H'].width = 35
+    ws.column_dimensions['I'].width = 5
+    # J/K/L: 숨김 메타데이터 (FC + 주소 맵)
+    # M: 숨김 메타데이터 (매칭 출처 pdf/handler/der)
+    ws.column_dimensions['J'].hidden = True
+    ws.column_dimensions['K'].hidden = True
+    ws.column_dimensions['L'].hidden = True
+    ws.column_dimensions['M'].hidden = True
+
+
+def _add_mppt_mapping_sheet(wb, s1: dict, mppt_count: int, total_strings: int,
+                            openpyxl_module) -> None:
+    """MPPT_MAPPING 시트 추가 — Stage2 MPPT/String 패널용.
+
+    각 행: mppt1_voltage, mppt1_current, ..., string1_current, ...
+    구조: H01_MAPPING 과 동일한 컬럼 규약 (A~M).
+    매칭 데이터는 s1['h01_match'] 에서 추출.
+    """
+    from openpyxl.styles import Font, PatternFill, Border, Side
+    from openpyxl.worksheet.datavalidation import DataValidation
+
+    ws = wb.create_sheet('MPPT_MAPPING')
+
+    thin = Border(
+        left=Side(style='thin'), right=Side(style='thin'),
+        top=Side(style='thin'), bottom=Side(style='thin'))
+    hdr_font = Font(bold=True, color='FFFFFF')
+    hdr_fill = PatternFill('solid', fgColor='333333')
+    auto_fill  = PatternFill('solid', fgColor='D5F5E3')
+    empty_fill = PatternFill('solid', fgColor='FDECEA')
+    ref_fill   = PatternFill('solid', fgColor='EBF5FB')
+    suggest_fill = PatternFill('solid', fgColor='FFF9C4')
+
+    ws['A1'] = 'MPPT_MAPPING — MPPT/String 전압·전류 수동 매핑'
+    ws['A1'].font = Font(bold=True, size=13)
+    ws['A2'] = '※ D열에서 매핑할 레지스터 선택. E~G는 추천 후보, H는 전체 레지스터.'
+    ws['A2'].font = Font(italic=True, color='555555')
+
+    headers = ['No', 'Field', '설명', '매칭된 레지스터 (주소)',
+               '추천 후보 1', '추천 후보 2', '추천 후보 3',
+               '전체 레지스터 목록', 'FC']
+    for j, h in enumerate(headers, start=1):
+        cell = ws.cell(row=3, column=j, value=h)
+        cell.font = hdr_font
+        cell.fill = hdr_fill
+        cell.border = thin
+
+    # 필드 리스트 구성: mppt N voltage/current, string N voltage/current
+    fields_def: List[Tuple[str, str]] = []
+    for n in range(1, max(1, mppt_count) + 1):
+        fields_def.append((f'mppt{n}_voltage', f'MPPT{n} 전압'))
+        fields_def.append((f'mppt{n}_current', f'MPPT{n} 전류'))
+    for n in range(1, max(0, total_strings) + 1):
+        fields_def.append((f'string{n}_voltage', f'String{n} 전압'))
+        fields_def.append((f'string{n}_current', f'String{n} 전류'))
+
+    # h01_match 에서 매칭 정보 수집 (status O/~ 만)
+    h01_matched: Dict[str, Tuple[str, str]] = {}
+    h01_source: Dict[str, str] = {}
+    for hm in s1.get('h01_match', []):
+        field = (hm.get('field') or '').strip()
+        status = hm.get('status', '')
+        if not field or status not in ('O', '~'):
+            continue
+        defn = hm.get('definition', '') or ''
+        addr = hm.get('address', '') or ''
+        source = hm.get('source', '')
+        name = to_upper_snake(defn) if defn and defn != '-' else ''
+        # 첫 번째 주소만 (multiple address handling)
+        first_addr = addr.split(';')[0].split('~')[0].strip() if addr else ''
+        if name:
+            if field not in h01_matched:
+                h01_matched[field] = (name, first_addr)
+                if source == 'HANDLER':
+                    h01_source[field] = 'handler'
+                elif source == 'DER':
+                    h01_source[field] = 'der'
+                else:
+                    h01_source[field] = 'pdf'
+
+    # 추천 후보용 — 각 필드에 대해 키워드 기반 후보 검색
+    all_cats = (s1.get('monitoring', []) + s1.get('info', []) +
+                s1.get('status', []) + s1.get('alarm', []))
+
+    def _suggest_for_field(field: str) -> list:
+        """mpptN_voltage, stringN_current 등에 대한 후보 검색."""
+        m_mppt_v = re.match(r'^mppt(\d+)_voltage$', field)
+        m_mppt_i = re.match(r'^mppt(\d+)_current$', field)
+        m_str_v = re.match(r'^string(\d+)_voltage$', field)
+        m_str_i = re.match(r'^string(\d+)_current$', field)
+        n = None
+        kind = None  # 'pv_v', 'pv_i', 'str_v', 'str_i'
+        if m_mppt_v:
+            n, kind = int(m_mppt_v.group(1)), 'pv_v'
+        elif m_mppt_i:
+            n, kind = int(m_mppt_i.group(1)), 'pv_i'
+        elif m_str_v:
+            n, kind = int(m_str_v.group(1)), 'str_v'
+        elif m_str_i:
+            n, kind = int(m_str_i.group(1)), 'str_i'
+        if n is None:
+            return []
+
+        results = []
+        seen = set()
+        for reg in all_cats:
+            name = to_upper_snake(reg.definition) if reg.definition else ''
+            if not name or name in seen:
+                continue
+            nm_lower = name.lower()
+            hit = False
+            if kind == 'pv_v':
+                if re.search(rf'(pv|mppt|reg|mod|module|vpv)_?{n}_?(input_?)?(voltage|volt|dcv)$', nm_lower):
+                    hit = True
+            elif kind == 'pv_i':
+                if re.search(rf'(pv|mppt|reg|mod|module|ipv)_?{n}_?(input_?)?(current|curr|dca)$', nm_lower):
+                    hit = True
+            elif kind == 'str_v':
+                if re.search(rf'string_?{n}_?(input_?)?(voltage|volt)$', nm_lower):
+                    hit = True
+            elif kind == 'str_i':
+                if re.search(rf'string_?{n}_?(input_?)?(current|curr)$', nm_lower):
+                    hit = True
+            if hit:
+                addr = getattr(reg, 'address_hex', '') or ''
+                results.append({'name': name, 'addr': addr})
+                seen.add(name)
+                if len(results) >= 3:
+                    break
+        return results
+
+    # 전체 후보 풀 (드롭다운 H열)
+    name_to_addr: Dict[str, str] = {}
+    name_to_fc: Dict[str, str] = {}
+    for reg in all_cats:
+        if not reg.definition:
+            continue
+        nm = to_upper_snake(reg.definition)
+        if not nm or nm in name_to_addr:
+            continue
+        addr_hex = getattr(reg, 'address_hex', '') or ''
+        name_to_addr[nm] = addr_hex
+        fc = str(getattr(reg, 'fc', '') or '').strip()
+        name_to_fc[nm] = fc if fc in ('3', '4') else '3'
+    avail_entries = sorted(name_to_addr.keys())
+
+    DATA_START = 4
+    n_fields = len(fields_def)
+
+    for i, (field, desc) in enumerate(fields_def):
+        row = DATA_START + i
+        ws.cell(row=row, column=1, value=i + 1).border = thin
+        ws.cell(row=row, column=2, value=field).border = thin
+        ws.cell(row=row, column=3, value=desc).border = thin
+
+        match = h01_matched.get(field)
+        src = h01_source.get(field, '')
+        if match:
+            name, addr = match
+            if src == 'handler':
+                display = 'HANDLER'
+            else:
+                display = f'{name} ({addr})' if addr else name
+        else:
+            display = ''
+
+        cell_d = ws.cell(row=row, column=4, value=display)
+        cell_d.border = thin
+        cell_d.fill = auto_fill if display else empty_fill
+
+        # 추천 후보 (E~G)
+        cands = _suggest_for_field(field)
+        # 매칭된 것은 후보에서 제외
+        matched_name = match[0] if match else ''
+        cands = [c for c in cands if c['name'] != matched_name]
+        for ci, c in enumerate(cands[:3]):
+            val = f'{c["name"]} ({c["addr"]})' if c['addr'] else c['name']
+            c_e = ws.cell(row=row, column=5 + ci, value=val)
+            c_e.border = thin
+            c_e.fill = suggest_fill
+
+        # FC (I열)
+        fc_val = '3'
+        if matched_name and matched_name in name_to_fc:
+            fc_val = name_to_fc[matched_name]
+        ws.cell(row=row, column=9, value=int(fc_val)).border = thin
+
+        # M열 (숨김): 출처
+        ws.cell(row=row, column=13, value=src)
+
+    # H열: 전체 후보 + J/K/L
+    for i, name in enumerate(avail_entries):
+        ws.cell(row=DATA_START + i, column=8, value=name).fill = ref_fill
+        ws.cell(row=DATA_START + i, column=10, value=name)
+        ws.cell(row=DATA_START + i, column=11, value=name_to_fc.get(name, '3'))
+        ws.cell(row=DATA_START + i, column=12, value=name_to_addr.get(name, ''))
+
+    # DataValidation: D열 드롭다운
+    last_avail_row = DATA_START + max(len(avail_entries), n_fields) - 1
+    last_data_row = DATA_START + n_fields - 1
+    if avail_entries and n_fields > 0:
+        dv = DataValidation(
+            type='list',
+            formula1=f'$H${DATA_START}:$H${last_avail_row}',
+            allow_blank=True,
+            showDropDown=False,
+        )
+        ws.add_data_validation(dv)
+        dv.add(f'D{DATA_START}:D{last_data_row}')
+
+    ws.column_dimensions['A'].width = 5
+    ws.column_dimensions['B'].width = 18
+    ws.column_dimensions['C'].width = 22
+    ws.column_dimensions['D'].width = 40
+    ws.column_dimensions['E'].width = 30
+    ws.column_dimensions['F'].width = 30
+    ws.column_dimensions['G'].width = 30
+    ws.column_dimensions['H'].width = 30
+    ws.column_dimensions['I'].width = 6
+    ws.column_dimensions['J'].hidden = True
+    ws.column_dimensions['K'].hidden = True
+    ws.column_dimensions['L'].hidden = True
+    ws.column_dimensions['M'].hidden = True
 
 
 # ─── Stage 2 메인 함수 ───────────────────────────────────────────────────────
@@ -606,11 +996,16 @@ def run_stage2(
     stage1_path: str,
     output_dir: str,
     mppt_count: int,
-    strings_per_mppt: int,
+    total_strings: int,
     capacity: str = '',
     progress: ProgressCallback = None,
 ) -> dict:
-    """Stage 2: Stage 1 Excel + 파라미터 → Stage 2 Excel (3시트)"""
+    """Stage 2: Stage 1 Excel + 파라미터 → Stage 2 Excel (3시트)
+
+    total_strings: 인버터 전체의 총 String 개수 (MPPT 수와 독립).
+                   Growatt 처럼 MPPT × N ≠ Total String 인 비대칭 인버터 지원.
+                   균등 분배가 가능하면 strings_per_mppt = total // mppt 로 파생.
+    """
     def log(msg, level='info'):
         if progress:
             progress(msg, level)
@@ -618,8 +1013,10 @@ def run_stage2(
     openpyxl = get_openpyxl()
     from openpyxl.styles import Font, PatternFill, Border, Side
 
-    total_strings = mppt_count * strings_per_mppt
-    log(f'MPPT: {mppt_count}, Strings/MPPT: {strings_per_mppt}, Total: {total_strings}')
+    # MPPT당 String 수는 균등 분배 가정으로 파생 (코드 생성용 — 비대칭이면 0 가능)
+    strings_per_mppt = (total_strings // mppt_count) if mppt_count > 0 else 0
+    log(f'MPPT: {mppt_count}, Total Strings: {total_strings} '
+        f'({strings_per_mppt}/MPPT 균등분배 가정)')
 
     # ── Step 1: Stage 1 Excel 읽기 (V2 4시트) ──
     log('Stage 1 Excel 읽기...')
@@ -705,6 +1102,200 @@ def run_stage2(
 
     log(f'총 레지스터: {total_regs}개, H01: {h01_matched}/{h01_total}, DER: {der_matched}/{der_total}')
 
+    # ── Stage 2 검증: MPPT 전압/전류 + String 전압/전류 추출 여부 ──
+    # 인버터 타입:
+    #   String type   : MPPT 1~N개, 각각 V/I 있음. 일부는 String 전류도 있음.
+    #   Central type  : MPPT 1개. V는 PV_VOLTAGE, I는 PV1_CURRENT/PV2_CURRENT 등
+    #                   "PV (n) 전류" 형식으로 표시될 수 있음.
+    # 매핑 의미: MPPT/String V/I → H01 의 pv_voltage/pv_current/pv_power
+    #           (pv_power 는 직접 또는 V*I 계산)
+    import re as _re
+    _H01_MPPT_V_RE = _re.compile(r'^mppt(\d+)_voltage$', _re.I)
+    _H01_MPPT_I_RE = _re.compile(r'^mppt(\d+)_current$', _re.I)
+    _H01_STR_V_RE  = _re.compile(r'^string(\d+)_voltage$', _re.I)
+    _H01_STR_I_RE  = _re.compile(r'^string(\d+)_current$', _re.I)
+    # central type fallback names
+    _CENTRAL_PV_V = {'PV_VOLTAGE', 'PV_INPUT_VOLTAGE', 'DC_VOLTAGE', 'DC_INPUT_VOLTAGE',
+                     'BUS_VOLTAGE', 'DC_BUS_VOLTAGE', 'VPV', 'VDC', 'V_DC', 'V_PV'}
+    _CENTRAL_PV_I = {'PV_CURRENT', 'PV_INPUT_CURRENT', 'DC_CURRENT', 'DC_INPUT_CURRENT',
+                     '태양전지_전류', 'IPV', 'IDC', 'I_DC', 'I_PV'}
+
+    mppt_v_found = set()
+    mppt_i_found = set()
+    str_v_found = set()
+    str_i_found = set()
+    central_pv_v_found = False
+    central_pv_i_count = set()  # PV(n) 전류 개수
+
+    for reg in s1['monitoring'] + s1['info']:
+        h01 = (getattr(reg, 'h01_field', '') or '').strip().lower()
+        # h01_field 기반 (가장 신뢰 높음)
+        if h01:
+            m = _H01_MPPT_V_RE.match(h01)
+            if m:
+                mppt_v_found.add(int(m.group(1))); continue
+            m = _H01_MPPT_I_RE.match(h01)
+            if m:
+                mppt_i_found.add(int(m.group(1))); continue
+            m = _H01_STR_V_RE.match(h01)
+            if m:
+                str_v_found.add(int(m.group(1))); continue
+            m = _H01_STR_I_RE.match(h01)
+            if m:
+                str_i_found.add(int(m.group(1))); continue
+        # 이름 기반 보조 매칭
+        name = to_upper_snake(reg.definition) if reg.definition else ''
+        if not name:
+            continue
+        # 채널 번호 기반 (MPPTn/PVn/REGn 등)
+        cm = _re.match(r'^(?:MPPT|PV|REG|MOD|MODULE|VPV)_?(\d+)_?(?:INPUT_?)?(VOLTAGE|VOLT|DCV)$', name)
+        if cm:
+            mppt_v_found.add(int(cm.group(1))); continue
+        cm = _re.match(r'^(?:MPPT|PV|REG|MOD|MODULE|IPV)_?(\d+)_?(?:INPUT_?)?(CURRENT|CURR|DCA)$', name)
+        if cm:
+            mppt_i_found.add(int(cm.group(1)))
+            central_pv_i_count.add(int(cm.group(1)))  # central type "PV(n)"도 같이 카운트
+            continue
+        # STRING n V/I
+        sm = _re.match(r'^STRING_?(\d+)_?(?:INPUT_?)?(VOLTAGE|VOLT|CURRENT|CURR)$', name)
+        if sm:
+            idx = int(sm.group(1))
+            if 'VOLT' in sm.group(2):
+                str_v_found.add(idx)
+            else:
+                str_i_found.add(idx)
+            continue
+        # Central type fallback (PV_VOLTAGE 단독, 채널 번호 없음)
+        if name in _CENTRAL_PV_V:
+            central_pv_v_found = True
+        if name in _CENTRAL_PV_I:
+            mppt_i_found.add(1)  # 단일 PV 전류 → MPPT1로
+        # 한글 "태양전지N_전류"
+        km = _re.match(r'태양전지\s*(\d+)\s*_?\s*(전압|전류)', reg.definition or '')
+        if km:
+            idx = int(km.group(1))
+            if km.group(2) == '전압':
+                mppt_v_found.add(idx)
+            else:
+                mppt_i_found.add(idx)
+
+    # Central type 보정: MPPT V는 없는데 PV_VOLTAGE 단독이면 mppt1_voltage로 카운트
+    if not mppt_v_found and central_pv_v_found:
+        mppt_v_found.add(1)
+
+    # 검증 카운트
+    stage2_validation = {
+        'mppt_voltage': {
+            'found': len([i for i in mppt_v_found if 1 <= i <= mppt_count]),
+            'expected': mppt_count,
+        },
+        'mppt_current': {
+            'found': len([i for i in mppt_i_found if 1 <= i <= mppt_count]),
+            'expected': mppt_count,
+        },
+        'string_voltage': {
+            'found': len([i for i in str_v_found if 1 <= i <= total_strings]),
+            'expected': total_strings,
+        },
+        'string_current': {
+            'found': len([i for i in str_i_found if 1 <= i <= total_strings]),
+            'expected': total_strings,
+        },
+    }
+
+    # ── IV Scan 검증: 지원 인버터에 한해 IV 명령/결과 레지스터 ──
+    # meta['iv_scan'] 은 'Yes'/'No'/'-' 문자열 또는 bool 일 수 있음
+    _iv_raw = meta.get('iv_scan', False)
+    if isinstance(_iv_raw, bool):
+        iv_supported = _iv_raw
+    else:
+        iv_supported = str(_iv_raw).strip().lower() in ('yes', 'true', '1', 'y')
+    iv_data_points = 0
+    try:
+        iv_data_points = int(meta.get('iv_data_points', 0) or 0)
+    except (ValueError, TypeError):
+        pass
+    iv_trackers = 0
+    try:
+        iv_trackers = int(meta.get('iv_trackers', 0) or 0)
+    except (ValueError, TypeError):
+        pass
+
+    iv_command_found = False
+    iv_result_found = 0
+    if iv_supported:
+        # IV 명령 레지스터 (IV_CURVE_SCAN, IV_SCAN_COMMAND, 0x600D 등)
+        for reg in s1.get('iv_regs', []) + s1['monitoring']:
+            n = (to_upper_snake(reg.definition) if reg.definition else '').upper()
+            if n in ('IV_CURVE_SCAN', 'IV_SCAN_COMMAND', 'IV_SCAN_CONTROL',
+                     'IV_SCAN_START', 'IV_COMMAND'):
+                iv_command_found = True
+                break
+            # 주소 0x600D (Solarize 표준)
+            try:
+                addr = reg.address if isinstance(reg.address, int) else None
+                if addr in (0x600D, 0x600E):
+                    iv_command_found = True
+                    break
+            except Exception:
+                pass
+
+        # IV 결과 레지스터 (tracker별 voltage 블록 + string current 블록)
+        # 5_IV 시트에서 읽은 모든 데이터 레지스터를 카운트
+        # 단, IV_CURVE_SCAN/IV_SCAN_COMMAND 같은 명령 레지스터는 제외
+        _IV_CMD_NAMES = {'IV_CURVE_SCAN', 'IV_SCAN_COMMAND', 'IV_SCAN_CONTROL',
+                         'IV_SCAN_START', 'IV_COMMAND'}
+        for reg in s1.get('iv_regs', []):
+            n = (to_upper_snake(reg.definition) if reg.definition else '').upper()
+            if not n or n in _IV_CMD_NAMES:
+                continue
+            iv_result_found += 1
+
+    stage2_validation['iv_scan'] = {
+        'supported': iv_supported,
+        'command_found': iv_command_found,
+        'result_count': iv_result_found,
+        'expected_trackers': iv_trackers,
+        'data_points': iv_data_points,
+    }
+
+    # Stage 2 PASS 판정: MPPT V/I + String V/I + IV(지원시) 모두 충족
+    # String V 는 optional — 대부분 인버터는 String 별 voltage 미지원
+    # (Growatt 등 일부만 제공). String V 가 0 이면 OK, 있는데 부족하면 fail.
+    fail_reasons = []
+    mv = stage2_validation['mppt_voltage']
+    mi = stage2_validation['mppt_current']
+    sv = stage2_validation['string_voltage']
+    si = stage2_validation['string_current']
+    if mv['found'] < mv['expected']:
+        fail_reasons.append(f"MPPT V {mv['found']}/{mv['expected']}")
+    if mi['found'] < mi['expected']:
+        fail_reasons.append(f"MPPT I {mi['found']}/{mi['expected']}")
+    # String V 는 0 이면 통과 (미지원), 1+ 이면 expected 충족 필요
+    if sv['found'] > 0 and sv['found'] < sv['expected']:
+        fail_reasons.append(f"String V {sv['found']}/{sv['expected']}")
+    # String I 도 동일하게 처리 (대부분 인버터 String 모니터링 없음)
+    if si['found'] > 0 and si['found'] < si['expected']:
+        fail_reasons.append(f"String I {si['found']}/{si['expected']}")
+    if iv_supported:
+        if not iv_command_found:
+            fail_reasons.append("IV 명령 레지스터 미발견")
+        if iv_result_found <= 0:
+            fail_reasons.append("IV 결과 레지스터 미발견")
+    stage2_validation['pass'] = len(fail_reasons) == 0
+    stage2_validation['fail_reasons'] = fail_reasons
+
+    log(f'MPPT V: {stage2_validation["mppt_voltage"]["found"]}/{mppt_count}, '
+        f'MPPT I: {stage2_validation["mppt_current"]["found"]}/{mppt_count}, '
+        f'String V: {stage2_validation["string_voltage"]["found"]}/{total_strings}, '
+        f'String I: {stage2_validation["string_current"]["found"]}/{total_strings}')
+    log(f'Stage 2 검증: {"✓ PASS" if stage2_validation["pass"] else "✗ WARN — " + ", ".join(fail_reasons)}',
+        'ok' if stage2_validation['pass'] else 'warn')
+    if iv_supported:
+        log(f'IV Scan: cmd {"✓" if iv_command_found else "✗"}, '
+            f'result regs {iv_result_found}, trackers {iv_trackers}, '
+            f'points {iv_data_points}')
+
     # ── Step 6: Excel 생성 (3시트) ──
     basename = os.path.splitext(os.path.basename(stage1_path))[0].replace('_stage1', '')
     cap_str = f'_{capacity}' if capacity else ''
@@ -755,8 +1346,11 @@ def run_stage2(
     ws['A1'].font = title_font
     meta_items = [
         ('제조사', manufacturer), ('용량', capacity or '-'),
-        ('MPPT', mppt_count), ('String/MPPT', strings_per_mppt),
+        ('원본 파일', f'{basename}.pdf'),
+        ('Phase Type', meta.get('phase_type', 'unknown')),
+        ('MPPT', mppt_count),
         ('Total Strings', total_strings),
+        ('String/MPPT (파생)', strings_per_mppt),
         ('H01 매칭', f'{h01_matched}/{h01_total}'),
         ('DER 매칭', f'{der_matched}/{der_total}'),
         ('총 레지스터', total_regs), ('REVIEW', len(remaining_review)),
@@ -865,7 +1459,7 @@ def run_stage2(
     summary_items = [
         ('제조사', manufacturer), ('용량', capacity or '-'),
         ('MPPT', f'{mppt_count} (PDF max {meta.get("max_mppt", "?")}개)'),
-        ('String', f'{total_strings} ({strings_per_mppt}/MPPT)'),
+        ('String', f'총 {total_strings}개 (파생 {strings_per_mppt}/MPPT)'),
         ('H01 매칭', f'{h01_matched}/{h01_total}'),
         ('DER 매칭', f'{der_matched}/{der_total}'),
         ('총 레지스터', total_regs),
@@ -909,6 +1503,14 @@ def run_stage2(
     # ═══════════════════════════════════════════════════════════════════
     _add_h01_mapping_sheet(wb, s1, openpyxl)
 
+    # ═══════════════════════════════════════════════════════════════════
+    # Sheet 5: MPPT_MAPPING — MPPT/String 전압·전류 수동 매핑
+    # ═══════════════════════════════════════════════════════════════════
+    try:
+        _add_mppt_mapping_sheet(wb, s1, mppt_count, total_strings, openpyxl)
+    except Exception as _e:
+        log(f'MPPT_MAPPING 시트 생성 실패: {_e}', 'warn')
+
     wb.save(output_path)
     wb.close()
     log(f'Stage 2 완료: {output_name}', 'ok')
@@ -938,4 +1540,10 @@ def run_stage2(
         'review_items': review_items,
         'register_count': total_regs,
         'counts': counts,
+        'stage2_validation': stage2_validation,
+        'stage2_pass': stage2_validation.get('pass', False),
+        'fail_reasons': stage2_validation.get('fail_reasons', []),
+        'mppt_count': mppt_count,
+        'total_strings': total_strings,
+        'phase_type': meta.get('phase_type', 'unknown'),
     }

@@ -181,6 +181,13 @@ class RTUState:
     _prev_seen: float = 0.0   # previous last_seen for interval calc
     rtu_info: dict = field(default_factory=dict)  # {model, phone, serial, firmware}
     dev_caps: dict = field(default_factory=dict)  # {dev_num: {iv_scan: bool, der_avm: bool}}
+    # Offline->online reconnect edge-detection flag.
+    # Set True by stale_rtu_checker when marking offline, checked+cleared
+    # atomically under engine._lock by _handle_h01_async to ensure the
+    # rtu_reconnect event is broadcast exactly once per reconnect cycle
+    # (fixes race where 13 concurrent H01 device handlers each fired
+    # rtu_reconnect because DB-based check saw 'offline' before any upsert).
+    _reconnect_pending: bool = False
 
 
 # ============================================================================
@@ -811,11 +818,19 @@ class UDPEngine:
             detail = "Heartbeat ping"
 
         elif body_type == BODY_TYPE_RTU_EVENT:
-            event_type = "rtu_event"
             if len(body) > 0:
                 event_len = body[0]
                 if len(body) > event_len:
                     detail = body[1:1 + event_len].decode('utf-8', errors='ignore')
+            # RTU_EVENT body carrying the literal string 'HEARTBEAT' is the
+            # new-form heartbeat (replaces empty body_type=0). Classify it as
+            # 'heartbeat' so main.py routes it to _LOG_ONLY_EVENTS and the
+            # dashboard Response Log stays clean, identical to the legacy
+            # body_type=0 heartbeat behavior.
+            if detail == 'HEARTBEAT':
+                event_type = "heartbeat"
+            else:
+                event_type = "rtu_event"
 
         elif body_type == BODY_TYPE_RTU_INFO:
             event_type = "rtu_info"
@@ -855,20 +870,28 @@ class UDPEngine:
         elif body_type == BODY_TYPE_INVERTER_MODEL:
             event_type = "inverter_model"
             pos = 0
+<<<<<<< HEAD
             parts = []
             model_name = ""
             serial_number = ""
+=======
+            parsed = {}
+>>>>>>> 9837d06791ee1e2c66fd4a43108878afbb4ff0a1
             for fname in ['model_name', 'serial_number']:
                 if pos < len(body):
                     size = body[pos]
                     pos += 1
                     if pos + size <= len(body):
+<<<<<<< HEAD
                         value = body[pos:pos + size].decode('utf-8', errors='ignore')
                         if fname == 'model_name':
                             model_name = value.strip()
                         elif fname == 'serial_number':
                             serial_number = value.strip()
                         parts.append(f"{fname}={value}")
+=======
+                        parsed[fname] = body[pos:pos + size].decode('utf-8', errors='ignore')
+>>>>>>> 9837d06791ee1e2c66fd4a43108878afbb4ff0a1
                         pos += size
             # Parse capability flags: bit0=iv_scan, bit1=der_avm
             cap_iv = False
@@ -877,10 +900,10 @@ class UDPEngine:
                 cap = body[pos]
                 cap_iv = bool(cap & 0x01)
                 cap_der = bool(cap & 0x02)
-                parts.append(f"iv_scan={cap_iv}, der_avm={cap_der}")
             with self._lock:
                 state = self.rtu_registry.get(rtu_id)
                 if state:
+<<<<<<< HEAD
                     existing_caps = state.dev_caps.get(dev_num, {})
                     state.dev_caps[dev_num] = {
                         **existing_caps,
@@ -890,6 +913,16 @@ class UDPEngine:
                         'serial_number': serial_number,
                         'manufacturer': _infer_inverter_manufacturer(model_name=model_name),
                     }
+=======
+                    state.dev_caps[dev_num] = {
+                        'iv_scan': cap_iv,
+                        'der_avm': cap_der,
+                        'model_name': parsed.get('model_name', ''),
+                        'serial_number': parsed.get('serial_number', ''),
+                    }
+            parts = [f"{k}={v}" for k, v in parsed.items()]
+            parts.append(f"iv_scan={cap_iv}, der_avm={cap_der}")
+>>>>>>> 9837d06791ee1e2c66fd4a43108878afbb4ff0a1
             detail = f"INV{dev_num}: " + (", ".join(parts) if parts else "empty")
 
         elif body_type == BODY_TYPE_CONTROL_CHECK:
@@ -984,6 +1017,32 @@ class UDPEngine:
                                           f"INV{dev_num}: All {total_str} strings received")
                 else:
                     detail = f"INV{dev_num}: IV data string {str_num}/{total_str}, {point_count} points (no scan session)"
+
+        elif body_type == BODY_TYPE_MODBUS_RESULT:
+            # Raw Modbus test result: fc(1B)+slave(1B)+addr(2B)+rc(1B)+count(2B)+data
+            event_type = "modbus_test_result"
+            if len(body) >= 7:
+                mb_fc, mb_slave, mb_addr, mb_rc, mb_count = struct.unpack('>BBHbH', body[:7])
+                regs = []
+                if mb_count > 0 and len(body) >= 7 + mb_count * 2:
+                    regs = list(struct.unpack(f'>{mb_count}H', body[7:7 + mb_count * 2]))
+                rc_names = {0: 'OK', -1: 'TIMEOUT', -2: 'ERROR'}
+                # Build hex string for compact log
+                hex_vals = ' '.join(f'{v:04X}' for v in regs) if regs else ''
+                detail = (f"FC{mb_fc:02d} slave={mb_slave} addr=0x{mb_addr:04X} "
+                          f"rc={rc_names.get(mb_rc, mb_rc)} count={mb_count}"
+                          f"{' data=[' + hex_vals + ']' if regs else ''}")
+                # Store structured data for WebSocket broadcast
+                if not hasattr(self, '_modbus_test_results'):
+                    self._modbus_test_results = {}
+                # Raw H05 packet hex for logging
+                raw_h05_hex = data.hex().upper()
+                self._modbus_test_results[rtu_id] = {
+                    'fc': mb_fc, 'slave_id': mb_slave, 'address': mb_addr,
+                    'result_code': mb_rc, 'count': mb_count, 'registers': regs,
+                    'raw_hex': raw_h05_hex,
+                    'timestamp': int(time.time()),
+                }
 
         logger.info(f"H05 from RTU:{rtu_id} type={event_type}: {detail}")
 
@@ -1123,6 +1182,39 @@ class UDPEngine:
             logger.error(f"Failed to send H03 to RTU:{rtu_id}")
             return False
 
+    def send_h03_modbus_test(self, rtu_id: int, fc: int, slave_id: int,
+                              address: int, count: int,
+                              values: list = None):
+        """Send extended H03 for raw Modbus test (ctrl_type 20 or 21).
+
+        Returns dict with 'ok' bool and 'packet_hex' string.
+        """
+        with self._lock:
+            state = self.rtu_registry.get(rtu_id)
+        if not state:
+            logger.warning(f"send_h03_modbus_test: RTU {rtu_id} not found")
+            return {'ok': False, 'packet_hex': ''}
+
+        is_write = values is not None and len(values) > 0
+        ctrl_type = CTRL_MODBUS_WRITE if is_write else CTRL_MODBUS_READ
+        seq = self._next_seq()
+        packet = struct.pack(H03_FORMAT,
+                             VERSION_H03, seq, ctrl_type, DEVICE_INVERTER, 1, 0)
+        packet += struct.pack('>BBHH', fc, slave_id, address, count)
+        if is_write:
+            packet += struct.pack(f'>{count}H', *values[:count])
+
+        pkt_hex = packet.hex().upper()
+        dest_port = state.port if state.port else self.rtu_port
+        if self._safe_sendto(packet, (state.ip, dest_port)):
+            self.stats['h03_sent'] += 1
+            op = 'WRITE' if is_write else 'READ'
+            logger.info(f"Sent H03 Modbus {op} to RTU:{rtu_id}: "
+                        f"FC{fc:02d} slave={slave_id} addr=0x{address:04X} "
+                        f"count={count} pkt=[{pkt_hex}]")
+            return {'ok': True, 'packet_hex': pkt_hex}
+        return {'ok': False, 'packet_hex': pkt_hex}
+
     def send_h07(self, rtu_id: int, ftp_host: str, ftp_port: int,
                  ftp_user: str, ftp_pass: str, ftp_path: str, filename: str) -> bool:
         """Send H07 firmware update command to a specific RTU."""
@@ -1177,11 +1269,15 @@ class UDPEngine:
                 status = "online" if age < threshold else "offline"
                 total_solar = 0
                 total_grid = 0
+                has_grid_device = False
                 for (dt, dn), data in state.devices.items():
-                    if dt == 1:
+                    if dt == DEVICE_INVERTER:
                         total_solar += data.get('ac_power', 0)
-                    elif dt == 4:
-                        total_grid += data.get('total_power', 0)
+                    elif dt in (DEVICE_POWER_METER, DEVICE_PROTECTION_RELAY):
+                        has_grid_device = True
+                        # _parse_relay produces total_active_power; older
+                        # protocols may use total_power. Try both for compat.
+                        total_grid += data.get('total_active_power', data.get('total_power', 0))
                 # Determine RTU type from model name
                 model = state.rtu_info.get('model', '')
                 if 'SRPV' in model:
@@ -1197,8 +1293,13 @@ class UDPEngine:
                     'last_seen': state.last_seen,
                     'status': status,
                     'device_count': len(state.devices),
+                    'devices_on': sum(1 for d in state.devices.values()
+                                      if not d.get('error')),
+                    'devices_off': sum(1 for d in state.devices.values()
+                                       if d.get('error')),
                     'total_solar_power': total_solar,
                     'total_grid_power': total_grid,
+                    'has_grid_device': has_grid_device,
                     'avg_interval': round(state.avg_interval),
                     'rtu_type': rtu_type,
                     'rtu_info': state.rtu_info,

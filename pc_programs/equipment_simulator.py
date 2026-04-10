@@ -74,7 +74,7 @@ from collections import deque
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 try:
-    from pymodbus.server import StartSerialServer
+    from pymodbus.server import StartSerialServer, StartTcpServer
     from pymodbus.datastore import ModbusServerContext, ModbusSequentialDataBlock
     from pymodbus import ModbusDeviceIdentification
     # pymodbus 3.7+ renamed ModbusSlaveContext to ModbusDeviceContext
@@ -87,7 +87,7 @@ except ImportError as e:
     print("Install: pip install pymodbus")
     sys.exit(1)
 
-from common.Solarize_PV_50kw_registers import (
+from common.Solarize_50_3_registers import (
     RegisterMap, InverterMode, SCALE,
     generate_iv_voltage_data, generate_iv_current_data,
     get_iv_tracker_voltage_registers, get_iv_string_current_registers
@@ -95,7 +95,7 @@ from common.Solarize_PV_50kw_registers import (
 
 # IV Scan 상수 — 레지스터 파일에 없을 수 있으므로 시뮬레이터 자체 정의
 try:
-    from common.Solarize_PV_50kw_registers import IVScanCommand, IVScanStatus
+    from common.Solarize_50_3_registers import IVScanCommand, IVScanStatus
 except ImportError:
     class IVScanCommand:
         NON_ACTIVE = 0
@@ -115,19 +115,19 @@ from common.REF_weather_registers import (
     wind_speed_to_raw, wind_direction_to_raw, module_temp_to_raw,
     accum_radiation_to_raw
 )
-from common.Kstar_PV_60kw_registers import RegisterMap as KstarRegisters
-from common.Huawei_PV_50kw_registers import RegisterMap as HuaweiRegisters
+from common.Kstar_60_3_MPPT3_STR9_registers import RegisterMap as KstarRegisters
+from common.Huawei_50_3_MPPT4_STR8_registers import RegisterMap as HuaweiRegisters
 try:
-    from common.Huawei_PV_50kw_registers import HuaweiStatusConverter
+    from common.Huawei_50_3_MPPT4_STR8_registers import HuaweiStatusConverter
 except ImportError:
-    from common.Huawei_PV_50kw_registers import HuaweiPvStatusConverter as HuaweiStatusConverter
+    from common.Huawei_50_3_MPPT4_STR8_registers import HuaweiPvStatusConverter as HuaweiStatusConverter
 try:
-    from common.Ekos_PV_10kw_registers import RegisterMap as EkosRegisters, InverterMode as EkosInverterMode
+    from common.Ekos_10_3_MPPT1_STR2_registers import RegisterMap as EkosRegisters, InverterMode as EkosInverterMode
 except ImportError:
     EkosRegisters = None
     EkosInverterMode = None
 try:
-    from common.Sungrow_PV_50kw_registers import RegisterMap as SungrowRegisters, InverterMode as SungrowInverterMode
+    from common.Sungrow_50_3_MPPT4_STR8_registers import RegisterMap as SungrowRegisters, InverterMode as SungrowInverterMode
 except ImportError:
     SungrowRegisters = None
     SungrowInverterMode = None
@@ -325,9 +325,12 @@ def get_register_name(addr):
 class ModbusLoggedHoldingBlock(ModbusSequentialDataBlock):
     """Modbus Holding Register Block with logging"""
     
-    CONTROL_REGISTERS = [0x0834, 0x07D0, 0x07D1, 0x07D2, 0x07D3, 0x600D]
+    # Default DER-AVM standardized control registers. Per-protocol overrides
+    # (e.g. CPS 0x6001, Growatt 0x6000 vendor ON/OFF) are appended at runtime
+    # from the register file via _augment_control_registers().
+    DEFAULT_CONTROL_REGISTERS = [0x0834, 0x07D0, 0x07D1, 0x07D2, 0x07D3, 0x600D]
     IV_STRING_BASES = [0x8040, 0x8080, 0x8180, 0x81C0, 0x82C0, 0x8300, 0x8400, 0x8440]
-    
+
     def __init__(self, address, values, logger=None, simulator=None, name="HR"):
         super().__init__(address, values)
         self.logger = logger
@@ -336,6 +339,9 @@ class ModbusLoggedHoldingBlock(ModbusSequentialDataBlock):
         self._update_lock = threading.Lock()
         self.simulator = simulator
         self.name = name  # "INV" or "RLY" or "WTH"
+        # Instance-level copy so each simulator instance can add vendor-
+        # specific control addresses without affecting other protocols.
+        self.CONTROL_REGISTERS = list(self.DEFAULT_CONTROL_REGISTERS)
     
     def getValues(self, address, count=1):
         result = super().getValues(address, count)
@@ -429,378 +435,6 @@ class ModbusLoggedInputBlock(ModbusSequentialDataBlock):
 
 # =============================================================================
 # Inverter Simulator (Solarize)
-# =============================================================================
-
-class InverterSimulator:
-    """Solarize Inverter Modbus Simulator - Slave ID 1"""
-
-    VERSION = "1.2.0"
-    MODEL_NAME = "SRPV-3-50-KS"
-    SERIAL_NUMBER = "SRZ2024001234"
-    FIRMWARE_VERSION = "V2.1.5"
-    NOMINAL_POWER = 50000  # 50kW
-    IV_SCAN_DURATION = 5.0
-
-    def __init__(self, logger=None, env=None):
-        self.logger = logger or logging.getLogger("InvSim")
-        self.running = False
-        self.env = env or _get_shared_env()
-
-        # Simulation state
-        self.start_time = time.time()
-        self.total_energy = 1000.0
-        self.today_energy = 0.0
-        self.mode = InverterMode.ON_GRID
-        
-        # Control states
-        self.on_off = 0
-        self.power_limit = 1000
-        self.power_factor_set = 1000
-        self.reactive_power_set = 0
-        self.control_mode = 'PF'
-        self.operation_mode = 0
-        
-        # IV Scan state
-        self.iv_scan_status = IVScanStatus.IDLE
-        self.iv_scan_start_time = 0
-        self.iv_scan_data_points = 64
-        self._iv_strings_read = set()
-        
-        # MPPT/String configuration
-        self.mppt_count = 4
-        self.string_count = 8
-        self.strings_per_mppt = 2
-        self.tracker_voc = [450.0, 448.0, 452.0, 449.0]
-        self.tracker_v_min = [200.0, 200.0, 200.0, 200.0]
-        self.string_isc = [10.5, 10.3, 10.6, 10.4, 10.5, 10.2, 10.7, 10.3]
-        
-        # Create datastore
-        self.store = self._create_datastore()
-        
-        # Current values for display
-        self._current = {}
-        self._current_lock = threading.Lock()
-
-    def _create_datastore(self):
-        """Create Modbus datastore"""
-        hr_block = ModbusLoggedHoldingBlock(0, [0] * 0x8500, self.logger, simulator=self, name="INV")
-        
-        store = ModbusSlaveContext(
-            di=ModbusSequentialDataBlock(0, [0] * 100),
-            co=ModbusSequentialDataBlock(0, [0] * 100),
-            hr=hr_block,
-            ir=ModbusSequentialDataBlock(0, [0] * 100)
-        )
-        
-        # Assign store first so init methods can use it
-        self.store = store
-        
-        # Set internal update flag to prevent recursion during init
-        hr_block._internal_update = True
-        self._init_device_info()
-        self._init_iv_scan_registers()
-        hr_block._internal_update = False
-        
-        return store
-    
-    def _init_device_info(self):
-        """Initialize device information registers using store.setValues()"""
-        # Model name (16 registers = 32 bytes, matching RTU read_model_info)
-        model_bytes = self.MODEL_NAME.encode('utf-8').ljust(32, b'\x00')
-        model_regs = [(model_bytes[i*2] << 8) | model_bytes[i*2+1] for i in range(16)]
-        self.store.setValues(3, RegisterMap.DEVICE_MODEL_NAME, model_regs)
-
-        # Serial number (8 registers = 16 bytes)
-        serial_bytes = self.SERIAL_NUMBER.encode('utf-8').ljust(16, b'\x00')
-        serial_regs = [(serial_bytes[i*2] << 8) | serial_bytes[i*2+1] for i in range(8)]
-        self.store.setValues(3, RegisterMap.DEVICE_SERIAL_NUMBER, serial_regs)
-        
-        # Firmware version (3 registers)
-        fw_bytes = self.FIRMWARE_VERSION.encode('utf-8').ljust(6, b'\x00')
-        fw_regs = [(fw_bytes[i*2] << 8) | fw_bytes[i*2+1] for i in range(3)]
-        self.store.setValues(3, RegisterMap.FIRMWARE_VERSION, fw_regs)
-        
-        # Device info registers
-        self.store.setValues(3, RegisterMap.MPPT_NUMBER, [self.mppt_count])
-        self.store.setValues(3, RegisterMap.NOMINAL_ACTIVE_POWER_LOW_WORD, [self.NOMINAL_POWER & 0xFFFF])
-        self.store.setValues(3, RegisterMap.NOMINAL_ACTIVE_POWER_HIGH_WORD, [(self.NOMINAL_POWER >> 16) & 0xFFFF])
-        self.store.setValues(3, RegisterMap.GRID_PHASE_NUMBER, [3])
-        self.store.setValues(3, RegisterMap.NOMINAL_VOLTAGE, [3800])
-        self.store.setValues(3, RegisterMap.NOMINAL_FREQUENCY, [6000])
-        
-        # Control registers
-        self.store.setValues(3, RegisterMap.INVERTER_ON_OFF, [self.on_off])
-        self.store.setValues(3, RegisterMap.DER_ACTIVE_POWER_PCT, [self.power_limit])
-        self.store.setValues(3, RegisterMap.DER_POWER_FACTOR_SET, [self.power_factor_set])
-        self.store.setValues(3, RegisterMap.DER_REACTIVE_POWER_PCT, [self.reactive_power_set])
-        self.store.setValues(3, RegisterMap.DER_ACTION_MODE, [self.operation_mode])
-        self.store.setValues(3, 0x600D, [IVScanStatus.IDLE])
-        
-        # DEA registers
-        self.store.setValues(3, 0x03F9, [1000])   # DEA_POWER_FACTOR low word
-        self.store.setValues(3, 0x03FB, [600])    # DEA_FREQUENCY low word
-        self.store.setValues(3, RegisterMap.DER_AVM_DIGITAL_METERCONNECT_STATUS + 1, [0x0001])
-    
-    def _init_iv_scan_registers(self):
-        """Initialize IV Scan data registers — 200V~Voc, 64점"""
-        for mppt in range(1, self.mppt_count + 1):
-            voc = self.tracker_voc[mppt - 1]
-
-            v_regs = get_iv_tracker_voltage_registers(mppt, self.iv_scan_data_points)
-            voltages = generate_iv_voltage_data(voc, 200.0, self.iv_scan_data_points)
-            self.store.setValues(3, v_regs['base'], voltages)
-
-            for string in range(1, self.strings_per_mppt + 1):
-                string_idx = (mppt - 1) * self.strings_per_mppt + (string - 1)
-                isc = self.string_isc[string_idx]
-                i_regs = get_iv_string_current_registers(mppt, string, self.iv_scan_data_points)
-                currents = generate_iv_current_data(isc, voc, 200.0, self.iv_scan_data_points)
-                self.store.setValues(3, i_regs['base'], currents)
-    
-    def _get_sun_factor(self):
-        """Get sun intensity from shared environment."""
-        return self.env.get_sun_fraction()
-
-    def _update_registers(self):
-        """Update register values using store.setValues()"""
-        env = self.env
-        sun_factor = self._get_sun_factor()
-
-        if self.on_off == 1 or self.mode != InverterMode.ON_GRID:
-            sun_factor = 0
-
-        power_cap = self.NOMINAL_POWER * (self.power_limit / 1000.0)
-        EFFICIENCY = 0.97
-
-        # PV voltage: 600-800V range, affected by temperature
-        pv_v_factor = env.get_pv_voltage_factor()
-
-        # AC output first, then back-calculate PV
-        if sun_factor > 0:
-            possible_ac_w = sun_factor * self.NOMINAL_POWER * EFFICIENCY
-            ac_power_w = min(possible_ac_w, power_cap)
-            pv_power_w = ac_power_w / EFFICIENCY
-        else:
-            ac_power_w = 0
-            pv_power_w = 0
-
-        pv_power = int(pv_power_w * 10)
-
-        if self.control_mode == 'PF':
-            pf = self.power_factor_set / 1000.0
-            pf = max(0.85, min(1.0, abs(pf)))
-            if ac_power_w > 0 and pf < 1.0:
-                reactive_power_w = ac_power_w * math.tan(math.acos(pf))
-                if self.power_factor_set < 0:
-                    reactive_power_w = -reactive_power_w
-            else:
-                reactive_power_w = 0
-        else:
-            rp_pct = self.reactive_power_set
-            if rp_pct >= 32768:
-                rp_pct = rp_pct - 65536
-            reactive_power_w = self.NOMINAL_POWER * (rp_pct / 1000.0)
-            if ac_power_w > 0:
-                apparent = math.sqrt(ac_power_w**2 + reactive_power_w**2)
-                pf = ac_power_w / apparent if apparent > 0 else 1.0
-            else:
-                pf = 1.0
-
-        ac_power = int(ac_power_w * 10)
-        ac_voltage = 3800 + int(random.uniform(-20, 20))
-        ac_freq = int(env.frequency * 100)  # 0.01Hz units
-        phase_power = ac_power // 3
-
-        apparent_power = math.sqrt(ac_power_w**2 + reactive_power_w**2) if ac_power_w > 0 else 0
-        phase_current = int((apparent_power / math.sqrt(3)) / 380 * 100) if apparent_power > 0 else 0
-
-        if ac_power > 0:
-            self.total_energy += (ac_power / 10) / 3600000
-            self.today_energy += (ac_power / 10) / 3600
-
-        # Phase data (L1, L2, L3)
-        for base in [RegisterMap.L1_VOLTAGE, RegisterMap.L2_VOLTAGE, RegisterMap.L3_VOLTAGE]:
-            self.store.setValues(3, base, [ac_voltage, phase_current, phase_power & 0xFFFF, (phase_power >> 16) & 0xFFFF, ac_freq])
-
-        # MPPT data — realistic PV voltage 600-800V range
-        mppt_addresses = [
-            (RegisterMap.MPPT1_VOLTAGE, RegisterMap.MPPT1_CURRENT, RegisterMap.MPPT1_POWER + 1),
-            (RegisterMap.MPPT2_VOLTAGE, RegisterMap.MPPT2_CURRENT, RegisterMap.MPPT2_POWER + 1),
-            (RegisterMap.MPPT3_VOLTAGE, RegisterMap.MPPT3_CURRENT, RegisterMap.MPPT3_POWER + 1),
-            (RegisterMap.MPPT4_VOLTAGE, RegisterMap.MPPT4_CURRENT, RegisterMap.MPPT4_POWER + 1),
-        ]
-
-        for i, (v_addr, c_addr, p_addr) in enumerate(mppt_addresses):
-            if pv_power_w > 0:
-                # Base PV voltage ~700V, varies with temperature and sun
-                base_v = 700.0 * pv_v_factor + i * 5.0 + random.uniform(-3, 3)
-                mppt_v = int(base_v * 10)  # 0.1V units
-                mppt_power_w = pv_power_w / 4
-                mppt_c = int((mppt_power_w / base_v) * 100) if base_v > 0 else 0  # 0.01A
-                mppt_p = int(mppt_power_w * 10)
-            else:
-                mppt_v = 0
-                mppt_c = 0
-                mppt_p = 0
-            self.store.setValues(3, v_addr, [mppt_v])
-            self.store.setValues(3, c_addr, [mppt_c])
-            self.store.setValues(3, p_addr, [mppt_p & 0xFFFF, (mppt_p >> 16) & 0xFFFF])
-
-        # String data
-        for i in range(self.string_count):
-            mppt_idx = i // 2
-            if pv_power_w > 0:
-                base_v = 700.0 * pv_v_factor + mppt_idx * 5.0 + (i % 2) * 2.0
-                str_voltage = int(base_v * 10)
-                mppt_current_a = (pv_power_w / 4) / base_v if base_v > 0 else 0
-                str_current = int((mppt_current_a / self.strings_per_mppt + (i % 2) * 0.3) * 100)
-            else:
-                str_voltage = 0
-                str_current = 0
-            base_addr = RegisterMap.STRING1_VOLTAGE + i * 2
-            self.store.setValues(3, base_addr, [str_voltage, str_current])
-
-        # Power registers
-        self.store.setValues(3, RegisterMap.PV_POWER + 1, [pv_power & 0xFFFF, (pv_power >> 16) & 0xFFFF])
-        self.store.setValues(3, RegisterMap.AC_POWER + 1, [ac_power & 0xFFFF, (ac_power >> 16) & 0xFFFF])
-
-        # Mode and status
-        mode_val = InverterMode.STANDBY if self.on_off == 1 else self.mode
-        self.store.setValues(3, RegisterMap.INVERTER_MODE, [mode_val])
-        # Inner temperature from environment
-        inner_temp = int(env.air_temp + sun_factor * 25.0 + random.uniform(-2, 2))
-        self.store.setValues(3, RegisterMap.INNER_TEMP, [max(0, inner_temp)])
-        self.store.setValues(3, RegisterMap.ERROR_CODE1, [0, 0, 0])
-
-        # Energy registers
-        total_kwh = int(self.total_energy)
-        self.store.setValues(3, RegisterMap.CUMULATIVE_ENERGY_LOW, [total_kwh & 0xFFFF, (total_kwh >> 16) & 0xFFFF])
-
-        # Power factor
-        pf_reg = int(pf * 1000)
-        self.store.setValues(3, RegisterMap.POWER_FACTOR, [pf_reg & 0xFFFF])
-        
-        # DEA-AVM registers
-        phase_current_dea = int(phase_current / 10)
-        active_power_dea = int(ac_power / 1000)
-        reactive_power_dea = int(reactive_power_w)
-        frequency_dea = int(ac_freq / 10)
-        status_flags = 0x0001 if self.on_off == 0 else 0x0000
-        
-        def to_u32(val):
-            if val < 0:
-                val = val + 0x100000000
-            return val
-        
-        active_u32 = to_u32(active_power_dea)
-        reactive_u32 = to_u32(reactive_power_dea)
-        pf_u32 = to_u32(pf_reg)
-        
-        dea_values = [
-            phase_current_dea & 0xFFFF, (phase_current_dea >> 16) & 0xFFFF,
-            phase_current_dea & 0xFFFF, (phase_current_dea >> 16) & 0xFFFF,
-            phase_current_dea & 0xFFFF, (phase_current_dea >> 16) & 0xFFFF,
-            ac_voltage & 0xFFFF, (ac_voltage >> 16) & 0xFFFF,
-            ac_voltage & 0xFFFF, (ac_voltage >> 16) & 0xFFFF,
-            ac_voltage & 0xFFFF, (ac_voltage >> 16) & 0xFFFF,
-            active_u32 & 0xFFFF, (active_u32 >> 16) & 0xFFFF,
-            reactive_u32 & 0xFFFF, (reactive_u32 >> 16) & 0xFFFF,
-            pf_u32 & 0xFFFF, (pf_u32 >> 16) & 0xFFFF,
-            frequency_dea & 0xFFFF, (frequency_dea >> 16) & 0xFFFF,
-            status_flags, 0,
-        ]
-        self.store.setValues(3, 0x03E9, dea_values)  # DEA_L1_CURRENT low word
-        
-        # IV Scan status
-        if self.iv_scan_status == IVScanStatus.RUNNING:
-            elapsed_scan = time.time() - self.iv_scan_start_time
-            if elapsed_scan >= self.IV_SCAN_DURATION:
-                self.iv_scan_status = IVScanStatus.FINISHED
-                self._regenerate_iv_data()
-        elif self.iv_scan_status == IVScanStatus.FINISHED:
-            # Auto-reset to IDLE after 60s if strings not fully read
-            if time.time() - self.iv_scan_start_time > self.IV_SCAN_DURATION + 60:
-                self.iv_scan_status = IVScanStatus.IDLE
-                self._iv_strings_read.clear()
-        
-        self.store.setValues(3, 0x600D, [self.iv_scan_status])
-        
-        # Store for display
-        self._current = {
-            'sun_factor': sun_factor,
-            'pv_power_kw': pv_power_w / 1000,
-            'ac_power_kw': ac_power_w / 1000,
-            'reactive_kvar': reactive_power_w / 1000,
-            'voltage': ac_voltage / 10,
-            'freq': ac_freq / 100,
-            'pf': pf,
-            'on_off': 'ON' if self.on_off == 0 else 'OFF',
-            'mode': self.mode,
-            'ctrl_mode': self.control_mode,
-            'power_limit': self.power_limit,
-        }
-    
-    def _regenerate_iv_data(self):
-        """Regenerate IV Scan data — 200V~Voc 등간격, 스캔 시점 파워 참조.
-
-        I(V) = Isc * (1 - exp((V - Voc) / (n * Vt * Ns)))
-        Isc는 현재 복사량(sun_fraction) 비례.
-        """
-        env = self.env
-        sun_frac = max(0.1, env.get_sun_fraction())
-
-        for mppt in range(1, self.mppt_count + 1):
-            voc = self.tracker_voc[mppt - 1] + random.uniform(-3, 3)
-
-            v_regs = get_iv_tracker_voltage_registers(mppt, self.iv_scan_data_points)
-            voltages = generate_iv_voltage_data(voc, 200.0, self.iv_scan_data_points)
-            self.store.setValues(3, v_regs['base'], voltages)
-
-            isc_cap = _calc_isc_cap(voc, self.NOMINAL_POWER, self.string_count)
-            for string in range(1, self.strings_per_mppt + 1):
-                string_idx = (mppt - 1) * self.strings_per_mppt + (string - 1)
-                isc = min(self.string_isc[string_idx], isc_cap) * sun_frac + random.uniform(-0.2, 0.2)
-                isc = max(0.5, isc)
-
-                currents = generate_iv_current_data(isc, voc, 200.0, self.iv_scan_data_points)
-                i_regs = get_iv_string_current_registers(mppt, string, self.iv_scan_data_points)
-                self.store.setValues(3, i_regs['base'], currents)
-    
-    def _check_control_changes(self):
-        """Check for control register changes using store.getValues()"""
-        new_onoff = self.store.getValues(3, RegisterMap.INVERTER_ON_OFF, count=1)[0]
-        if new_onoff != self.on_off and new_onoff in [0, 1]:
-            self.on_off = new_onoff
-            self.mode = InverterMode.ON_GRID if self.on_off == 0 else InverterMode.SHUTDOWN
-        
-        new_power = self.store.getValues(3, RegisterMap.DER_ACTIVE_POWER_PCT, count=1)[0]
-        if new_power != self.power_limit and 0 <= new_power <= 1100:
-            self.power_limit = new_power
-        
-        new_pf = self.store.getValues(3, RegisterMap.DER_POWER_FACTOR_SET, count=1)[0]
-        if new_pf != self.power_factor_set:
-            self.power_factor_set = new_pf
-            self.control_mode = 'PF'
-        
-        new_rp = self.store.getValues(3, RegisterMap.DER_REACTIVE_POWER_PCT, count=1)[0]
-        if new_rp != self.reactive_power_set:
-            self.reactive_power_set = new_rp
-            self.control_mode = 'RP'
-        
-        new_mode = self.store.getValues(3, RegisterMap.DER_ACTION_MODE, count=1)[0]
-        if new_mode != self.operation_mode:
-            self.operation_mode = new_mode
-        
-        iv_cmd = self.store.getValues(3, 0x600D, count=1)[0]
-        if iv_cmd == IVScanCommand.ACTIVE and self.iv_scan_status in [IVScanStatus.IDLE, IVScanStatus.FINISHED]:
-            self.iv_scan_status = IVScanStatus.RUNNING
-            self.iv_scan_start_time = time.time()
-            self._iv_strings_read.clear()
-            self.store.setValues(3, 0x600D, [IVScanStatus.RUNNING])
-
-
-# =============================================================================
-# Relay Simulator (KDU-300)
 # =============================================================================
 
 class RelaySimulator:
@@ -1175,1070 +809,6 @@ class _KstarNightOffBlock(ModbusSequentialDataBlock):
         return super().getValues(address, count)
 
 
-class KstarSimulator:
-    """Kstar KSG-60KT-M1 Inverter Modbus Simulator - Slave ID 4
-
-    FC04 (Input Register): 실시간 데이터 (Block1~3, Block5)
-    FC03 (Holding Register): 장비 정보 (Block4)
-    60kW, 3 MPPT, 9 strings (MPPT당 3개)
-    """
-
-    VERSION = "1.0.0"
-    MODEL_NAME = "KSG-60KT-M1"
-    NOMINAL_POWER = 60000       # 60kW
-    NOMINAL_VOLTAGE = 3800      # 0.1V → 380V (line-to-line)
-    NOMINAL_FREQUENCY = 6000    # 0.01Hz → 60.00Hz
-
-    # PV MPPT nominal voltages (0.1V)
-    PV_VOLTAGE_NOMINAL = [3900, 3850, 3920]  # MPPT1~3
-
-    def __init__(self, logger=None, env=None):
-        self.logger = logger or logging.getLogger("KstarSim")
-        self.running = False
-        self.env = env or _get_shared_env()
-
-        self.start_time = time.time()
-        self.total_energy_wh = 2000000.0   # 초기 누적 발전량 2000kWh (단위: Wh)
-        self.today_energy_wh = 0.0
-
-        # DER-AVM Control states
-        self.on_off = 0                # 0=ON, 1=OFF
-        self.power_limit = 1000        # 0.1% units (1000 = 100%)
-        self.power_factor_set = 1000   # 0.001 units (1000 = 1.0)
-        self.reactive_power_set = 0    # 0.1% units
-        self.control_mode = 'PF'       # 'PF' or 'RP'
-        self.operation_mode = 0
-
-        # IV Scan state
-        self.iv_scan_status = 0  # 0=Idle, 1=Scanning
-        self.iv_scan_start_time = 0
-        self.IV_SCAN_DURATION = 5.0
-
-        self.store = self._create_datastore()
-        self._current = {}
-        self._init_iv_scan_data()
-
-    def _create_datastore(self):
-        """FC04 Input Register + FC03 Holding Register 데이터스토어 생성"""
-        # FC04 (ir): Block1-5 (3000~3249) + IV data (5000~7399)
-        # Extra margin (7500) to avoid off-by-one in pymodbus address validation
-        ir_block = _KstarNightOffBlock(0, [0] * 7500)
-
-        # FC03 (hr): Block4(3200~3217) + DER Control(0x07D0~0x0834) + IV trigger(0x0FB3=4035)
-        hr_block = ModbusLoggedHoldingBlock(
-            0, [0] * 4040,
-            self.logger, simulator=self, name="KST"
-        )
-
-        store = ModbusSlaveContext(
-            di=ModbusSequentialDataBlock(0, [0] * 10),
-            co=ModbusSequentialDataBlock(0, [0] * 10),
-            hr=hr_block,
-            ir=ir_block,
-        )
-        self.store = store
-        self.ir_block = ir_block  # FC04 Input Register 블록 직접 참조
-        self._init_device_info()
-        self._init_control_registers()
-        return store
-
-    def _init_control_registers(self):
-        """DER-AVM 제어 레지스터 초기값 설정 (FC03 Holding Register)"""
-        self.store.store['h']._internal_update = True
-        try:
-            self.store.setValues(3, KstarRegisters.DER_POWER_FACTOR_SET, [self.power_factor_set])
-            self.store.setValues(3, KstarRegisters.DER_ACTION_MODE, [self.operation_mode])
-            self.store.setValues(3, KstarRegisters.DER_REACTIVE_POWER_PCT, [self.reactive_power_set])
-            self.store.setValues(3, KstarRegisters.DER_ACTIVE_POWER_PCT, [self.power_limit])
-            self.store.setValues(3, KstarRegisters.INVERTER_ON_OFF, [self.on_off])
-        finally:
-            self.store.store['h']._internal_update = False
-
-    def _init_device_info(self):
-        """Block4 (FC03, 3200~3217) 장비 정보 초기화"""
-        # MODEL_NAME_BASE = 3200, 8 regs ASCII
-        model_bytes = self.MODEL_NAME.encode('ascii').ljust(16, b'\x00')
-        model_regs = [(model_bytes[i * 2] << 8) | model_bytes[i * 2 + 1] for i in range(8)]
-        self.store.setValues(3, KstarRegisters.MODEL_NAME_BASE, model_regs)
-
-        # ARM_VERSION = 3216: 버전 100 (1.00)
-        self.store.setValues(3, KstarRegisters.ARM_VERSION, [100])
-        # DSP_VERSION = 3217: 버전 100 (1.00)
-        self.store.setValues(3, KstarRegisters.DSP_VERSION, [100])
-
-        # Block5: 시리얼번호 (FC04, 3228~3238, 11 regs ASCII)
-        serial = "KST2024001234"
-        serial_bytes = serial.encode('ascii').ljust(22, b'\x00')
-        serial_regs = [(serial_bytes[i * 2] << 8) | serial_bytes[i * 2 + 1] for i in range(11)]
-        self.store.setValues(4, KstarRegisters.SERIAL_NUMBER_BASE, serial_regs)
-
-    def _get_sun_factor(self):
-        """Get sun factor from shared environment."""
-        return self.env.get_sun_fraction()
-
-    def _update_registers(self):
-        """실시간 FC04 레지스터 업데이트"""
-        env = self.env
-        sun = self._get_sun_factor()
-        sun_var = sun  # cloud effects already in env
-
-        # Kstar: 밤에 인버터 전원 OFF → Modbus FC04 응답 불가 시뮬레이션
-        ir_block = self.store.store.get('i')
-        if ir_block and hasattr(ir_block, 'night_off'):
-            ir_block.night_off = (sun_var <= 0.01 and self.on_off == 0)
-
-        EFFICIENCY = 0.97
-        power_cap = self.NOMINAL_POWER * (self.power_limit / 1000.0)
-        pv_v_factor = env.get_pv_voltage_factor()
-
-        if sun_var > 0.01 and self.on_off == 0:
-            possible_ac_w = sun_var * self.NOMINAL_POWER * EFFICIENCY
-            ac_power_w = int(min(possible_ac_w, power_cap))
-            pv_total_w = ac_power_w / EFFICIENCY
-        else:
-            ac_power_w = 0
-            pv_total_w = 0
-
-        # PV (DC) — 3 MPPT, voltage affected by temperature
-        pv_voltages = [int(v * pv_v_factor * (0.95 + 0.05 * sun_var) + random.uniform(-10, 10))
-                       if sun_var > 0.01 else 0
-                       for v in self.PV_VOLTAGE_NOMINAL]
-        pv_powers_w = [int(pv_total_w / 3 * random.uniform(0.98, 1.02))
-                       for _ in range(3)] if pv_total_w > 0 else [0, 0, 0]
-        pv_currents = [int(pv_powers_w[i] / (pv_voltages[i] * 0.1) * 100)
-                       if pv_voltages[i] > 0 and pv_powers_w[i] > 0 else 0
-                       for i in range(3)]
-
-        self.store.setValues(4, KstarRegisters.PV1_VOLTAGE,
-                             pv_voltages + [0, 0, 0])
-        self.store.setValues(4, KstarRegisters.PV1_CURRENT,
-                             pv_currents + [0])
-        self.store.setValues(4, KstarRegisters.PV1_POWER,
-                             pv_powers_w + [0])
-
-        # PF / reactive power control
-        if self.control_mode == 'PF':
-            pf = self.power_factor_set / 1000.0
-            pf = max(0.85, min(1.0, abs(pf)))
-            if ac_power_w > 0 and pf < 1.0:
-                reactive_power_w = ac_power_w * math.tan(math.acos(pf))
-                if self.power_factor_set < 0:
-                    reactive_power_w = -reactive_power_w
-            else:
-                reactive_power_w = 0
-                pf = 1.0
-        else:
-            rp_pct = self.reactive_power_set
-            if rp_pct >= 32768:
-                rp_pct = rp_pct - 65536
-            reactive_power_w = self.NOMINAL_POWER * (rp_pct / 1000.0)
-            if ac_power_w > 0:
-                apparent = math.sqrt(ac_power_w**2 + reactive_power_w**2)
-                pf = ac_power_w / apparent if apparent > 0 else 1.0
-            else:
-                pf = 1.0
-
-        # Cumulative energy
-        self.total_energy_wh += ac_power_w / 3600.0
-        self.today_energy_wh += ac_power_w / 3600.0
-        energy_01kwh = int(self.total_energy_wh / 100)
-        self.store.setValues(4, KstarRegisters.CUMULATIVE_PRODUCTION_L,
-                             [energy_01kwh & 0xFFFF, (energy_01kwh >> 16) & 0xFFFF])
-
-        today_01kwh = int(self.today_energy_wh / 100)
-        self.store.setValues(4, KstarRegisters.DAILY_PRODUCTION, [today_01kwh & 0xFFFF])
-
-        # Status
-        if self.on_off == 1:
-            self.store.setValues(4, KstarRegisters.SYSTEM_STATUS, [1])
-            self.store.setValues(4, KstarRegisters.INVERTER_STATUS, [1])
-        elif sun_var > 0.01:
-            self.store.setValues(4, KstarRegisters.SYSTEM_STATUS, [0])
-            self.store.setValues(4, KstarRegisters.INVERTER_STATUS, [4])
-        else:
-            self.store.setValues(4, KstarRegisters.SYSTEM_STATUS, [1])
-            self.store.setValues(4, KstarRegisters.INVERTER_STATUS, [1])
-
-        # Temperature from environment
-        radiator_temp = int((env.air_temp + sun_var * 25.0 + random.uniform(-2, 2)) * 10)
-        self.store.setValues(4, KstarRegisters.RADIATOR_TEMP, [max(0, radiator_temp) & 0xFFFF])
-        self.store.setValues(4, KstarRegisters.CHASSIS_TEMP,
-                             [max(0, int(radiator_temp * 0.85)) & 0xFFFF])
-
-        # AC output
-        per_phase_w = ac_power_w // 3
-        ac_v = self.NOMINAL_VOLTAGE + int(random.uniform(-20, 20))
-        apparent_w = math.sqrt(ac_power_w**2 + reactive_power_w**2) if ac_power_w > 0 else 0
-        ac_cur = int((apparent_w / 3) / (ac_v * 0.1) * 100) if ac_v > 0 else 0
-
-        # Grid frequency from environment
-        grid_freq = int(env.frequency * 100)  # 0.01Hz
-        self.store.setValues(4, KstarRegisters.GRID_FREQUENCY, [grid_freq])
-
-        # R상 전압/전류/전력
-        self.store.setValues(4, KstarRegisters.INV_R_VOLTAGE, [ac_v])
-        self.store.setValues(4, KstarRegisters.INV_R_CURRENT, [ac_cur])
-        self.store.setValues(4, KstarRegisters.INV_S_FREQUENCY, [grid_freq])
-        self.store.setValues(4, KstarRegisters.INV_R_POWER,
-                             [per_phase_w & 0xFFFF])  # S16 범위 내 (60kW/3=20kW)
-
-        # S상 전압/전류/전력
-        self.store.setValues(4, KstarRegisters.INV_S_VOLTAGE, [ac_v])
-        self.store.setValues(4, KstarRegisters.INV_S_CURRENT, [ac_cur])
-        self.store.setValues(4, KstarRegisters.INV_S_POWER,
-                             [per_phase_w & 0xFFFF])
-
-        # T상 전압/전류/전력
-        self.store.setValues(4, KstarRegisters.INV_T_VOLTAGE, [ac_v])
-        self.store.setValues(4, KstarRegisters.INV_T_CURRENT, [ac_cur])
-        self.store.setValues(4, KstarRegisters.INV_T_POWER,
-                             [per_phase_w & 0xFFFF])
-
-        # 계통 R상 전압 (GRID_R_VOLTAGE = 3097)
-        self.store.setValues(4, KstarRegisters.GRID_R_VOLTAGE, [ac_v])
-
-        # ── DEA-AVM Real-time Monitoring (0x03E8-0x03FD) ──────────────────────
-        def _to_s32_regs(v):
-            v = int(v)
-            if v < 0: v += 0x100000000
-            return [v & 0xFFFF, (v >> 16) & 0xFFFF]
-
-        dea_phase_current = ac_cur // 10  # ac_cur is 0.01A, //10 → 0.1A
-        dea_voltage = ac_v               # already 0.1V scale
-        dea_active = ac_power_w * 10     # 0.1W
-        dea_reactive = int(reactive_power_w)  # 1Var
-        dea_pf = int(pf * 1000)          # 0.001
-        dea_freq = 600                   # 0.1Hz = 60.0Hz
-        is_running = (self.on_off == 0 and sun_var > 0.01)
-        dea_status = 0x0001 if is_running else 0
-
-        dea = []
-        dea += _to_s32_regs(dea_phase_current)  # L1 Current
-        dea += _to_s32_regs(dea_phase_current)  # L2 Current
-        dea += _to_s32_regs(dea_phase_current)  # L3 Current
-        dea += _to_s32_regs(dea_voltage)         # L1 Voltage
-        dea += _to_s32_regs(dea_voltage)         # L2 Voltage
-        dea += _to_s32_regs(dea_voltage)         # L3 Voltage
-        dea += _to_s32_regs(dea_active)           # Active Power
-        dea += _to_s32_regs(dea_reactive)         # Reactive Power
-        dea += _to_s32_regs(dea_pf)               # Power Factor
-        dea += _to_s32_regs(dea_freq)             # Frequency
-        dea += [dea_status & 0xFFFF, 0]           # Status Flags
-        self.store.setValues(3, 0x03E8, dea)
-
-        night_off = ir_block.night_off if ir_block and hasattr(ir_block, 'night_off') else False
-        self._current = {
-            'sun_factor': sun_var,
-            'pv_power_kw': sum(pv_powers_w) / 1000.0,
-            'ac_power_kw': ac_power_w / 1000.0,
-            'reactive_kvar': reactive_power_w / 1000.0,
-            'power_factor': pf,
-            'voltage': ac_v / 10.0,
-            'on_off': 'POWER OFF' if night_off else ('OFF' if self.on_off == 1 else ('Running' if sun_var > 0.01 else 'Standby')),
-            'ctrl_mode': self.control_mode,
-        }
-
-    def _check_control_changes(self):
-        """DER-AVM 제어 레지스터 변경 감지 (Verterking과 동일 로직)"""
-        new_onoff = self.store.getValues(3, KstarRegisters.INVERTER_ON_OFF, count=1)[0]
-        if new_onoff != self.on_off and new_onoff in [0, 1]:
-            self.on_off = new_onoff
-            self.logger.info(f"[KST] ON/OFF changed: {'OFF' if new_onoff else 'ON'}")
-
-        new_power = self.store.getValues(3, KstarRegisters.DER_ACTIVE_POWER_PCT, count=1)[0]
-        if new_power != self.power_limit and 0 <= new_power <= 1100:
-            self.power_limit = new_power
-            self.logger.info(f"[KST] Active power limit: {new_power/10:.1f}%")
-
-        new_pf = self.store.getValues(3, KstarRegisters.DER_POWER_FACTOR_SET, count=1)[0]
-        if new_pf != self.power_factor_set:
-            self.power_factor_set = new_pf
-            self.control_mode = 'PF'
-            self.logger.info(f"[KST] PF set: {new_pf/1000:.3f} (mode=PF)")
-
-        new_rp = self.store.getValues(3, KstarRegisters.DER_REACTIVE_POWER_PCT, count=1)[0]
-        if new_rp != self.reactive_power_set:
-            self.reactive_power_set = new_rp
-            self.control_mode = 'RP'
-            self.logger.info(f"[KST] Reactive power set: {new_rp/10:.1f}% (mode=RP)")
-
-        new_mode = self.store.getValues(3, KstarRegisters.DER_ACTION_MODE, count=1)[0]
-        if new_mode != self.operation_mode:
-            self.operation_mode = new_mode
-
-        # IV Scan trigger: register 4035 (FC06 write → FC03 holding)
-        iv_cmd = self.store.getValues(3, KstarRegisters.IV_SCAN_COMMAND, count=1)[0]
-        if iv_cmd != 0 and self.iv_scan_status == 0:
-            self.iv_scan_status = 1  # Scanning
-            self.iv_scan_start_time = time.time()
-            # Reset trigger
-            self.store.setValues(3, KstarRegisters.IV_SCAN_COMMAND, [0])
-            # Regenerate IV data
-            self._init_iv_scan_data()
-            # Update status register (FC04 input register 3126)
-            self.store.setValues(4, KstarRegisters.IV_SCAN_STATUS, [0x0001])  # low=1 (scanning)
-            self.logger.info("[KST] IV Scan started")
-
-        # Auto-complete after duration
-        if self.iv_scan_status == 1:
-            elapsed = time.time() - self.iv_scan_start_time
-            progress = min(int(elapsed / self.IV_SCAN_DURATION * 100), 100)
-            # Update progress in status register (high byte = progress%)
-            self.store.setValues(4, KstarRegisters.IV_SCAN_STATUS, [(progress << 8) | 0x01])
-            if elapsed >= self.IV_SCAN_DURATION:
-                self.iv_scan_status = 2  # Finished
-                self.store.setValues(4, KstarRegisters.IV_SCAN_STATUS, [0x0002])  # low=2 (finished)
-                self.logger.info("[KST] IV Scan completed")
-
-        # Auto-reset after 60s
-        if self.iv_scan_status == 2 and time.time() - self.iv_scan_start_time > self.IV_SCAN_DURATION + 60:
-            self.iv_scan_status = 0
-
-    def _init_iv_scan_data(self):
-        """Pre-populate IV curve data in FC04 registers — 200V~Voc, 100점, 스캔 시점 파워 참조."""
-        from common.Kstar_PV_60kw_registers import generate_iv_voltage_data, generate_iv_current_data
-        mppt_count = 3
-        strings_per_mppt = 3   # Stage2 메타: Kstar 60kW = 3 MPPT × 3 String
-        data_points = KstarRegisters.IV_POINTS_PER_STRING  # 100
-        sun_frac = max(0.1, self.env.get_sun_fraction())
-
-        total_strings = mppt_count * strings_per_mppt
-        for mppt in range(mppt_count):
-            voc = 750.0 + mppt * 10.0 + random.uniform(-5, 5)
-            # Isc 상한: 정규화 Pmpp(Isc=1)로 역산 → 합산 ≤ 인버터 용량
-            isc_base = _calc_isc_cap(voc, self.NOMINAL_POWER, total_strings) * sun_frac
-
-            voltages = generate_iv_voltage_data(voc, 200.0, data_points)
-
-            for s in range(strings_per_mppt):
-                string_idx = mppt * strings_per_mppt + s
-                base = KstarRegisters.IV_DATA_BASE + string_idx * KstarRegisters.IV_REGS_PER_STRING
-                isc_str = max(0.5, isc_base + random.uniform(-0.3, 0.3))
-
-                currents = generate_iv_current_data(isc_str, voc, 200.0, data_points)
-
-                # Write interleaved V/I pairs to FC04 input registers
-                iv_regs = []
-                for p in range(data_points):
-                    iv_regs.append(voltages[p])
-                    iv_regs.append(currents[p])
-                self.store.setValues(4, base, iv_regs)
-
-
-# =============================================================================
-# Huawei SUN2000-50KTL Inverter Simulator
-# =============================================================================
-
-class HuaweiSimulator:
-    """Huawei SUN2000-50KTL Inverter Modbus Simulator - Slave ID 5
-
-    FC03 (Holding Register): 모든 실시간 데이터
-    50kW, 4 MPPT, 8 strings (MPPT당 2개)
-    레지스터 주소 범위: 32000 ~ 32107
-    """
-
-    VERSION = "1.0.0"
-    MODEL_NAME = "SUN2000-50KTL-M0"
-    NOMINAL_POWER  = 50000   # 50kW
-    NOMINAL_VOLTAGE = 380    # V (line-to-line)
-    NOMINAL_FREQUENCY = 6000 # 0.01Hz → 60.00Hz
-
-    # MPPT별 PV 전압 공칭값 (0.1V 단위) – MPPT1~4
-    PV_VOLTAGE_NOMINAL = [4500, 4480, 4520, 4490]
-
-    def __init__(self, logger=None, env=None):
-        self.logger = logger or logging.getLogger("HuaweiSim")
-        self.running = False
-        self.env = env or _get_shared_env()
-
-        self.start_time = time.time()
-        self.total_energy_kwh = 3000.0  # 초기 누적 발전량 3000kWh
-
-        self.store = self._create_datastore()
-        self._current = {}
-
-    def _create_datastore(self):
-        """FC03 Holding Register 데이터스토어 생성
-        최대 레지스터 주소 32107 → hr block 최소 크기 32109
-        여유 확보를 위해 32120으로 설정
-        """
-        hr_block = ModbusSequentialDataBlock(0, [0] * 32120)
-
-        store = ModbusSlaveContext(
-            di=ModbusSequentialDataBlock(0, [0] * 10),
-            co=ModbusSequentialDataBlock(0, [0] * 10),
-            hr=hr_block,
-            ir=ModbusSequentialDataBlock(0, [0] * 10),
-        )
-        self.store = store
-        self._init_registers()
-        return store
-
-    def _init_registers(self):
-        """초기 레지스터 값 설정"""
-        # Running Status: Standby
-        self.store.setValues(3, HuaweiRegisters.RUNNINGSTATUS, [1])  # STANDBY=1
-        # Fault codes: 0
-        self.store.setValues(3, HuaweiRegisters.FAULT_CODE, [0, 0, 0, 0])
-        # Grid frequency: 60.00Hz → 6000 (0.01Hz)
-        self.store.setValues(3, HuaweiRegisters.FREQUENCY, [self.NOMINAL_FREQUENCY])
-        # Power factor: 1.000 → 1000 (0.001)
-        self.store.setValues(3, HuaweiRegisters.POWER_FACTOR, [1000])
-        # Internal temp: 35.0°C → 350 (0.1°C)
-        self.store.setValues(3, HuaweiRegisters.INTERNALTEMPERATURE, [350])
-
-    def _get_sun_factor(self):
-        """Get sun factor from shared environment."""
-        return self.env.get_sun_fraction()
-
-    def _update_registers(self):
-        """FC03 Holding Register update (Huawei SUN2000 register map)"""
-        env = self.env
-        sun_var = self._get_sun_factor()
-        pv_v_factor = env.get_pv_voltage_factor()
-
-        # PV string data (32016~32031, 16 regs)
-        pv_regs = []
-        for mppt_i in range(4):
-            v_nom = self.PV_VOLTAGE_NOMINAL[mppt_i]
-            for _ in range(2):
-                if sun_var > 0:
-                    v = int(v_nom * pv_v_factor * (0.92 + 0.08 * sun_var) + random.uniform(-10, 10))
-                    # Current proportional to radiation
-                    i = int(sun_var * 1050 + random.uniform(-20, 20))
-                    i = max(0, i)
-                else:
-                    v = 0
-                    i = 0
-                pv_regs.append(v & 0xFFFF)
-                pv_regs.append(i & 0xFFFF)
-        self.store.setValues(3, HuaweiRegisters.PV_VOLTAGE, pv_regs)
-
-        # DC input power (S32, 1W)
-        pv_power_w = int(self.NOMINAL_POWER * sun_var * random.uniform(0.97, 1.03)) \
-                     if sun_var > 0 else 0
-        self.store.setValues(3, HuaweiRegisters.PV_POWER,
-                             [(pv_power_w >> 16) & 0xFFFF, pv_power_w & 0xFFFF])
-
-        # AC 3-phase voltage (U16, 1V)
-        ac_v = self.NOMINAL_VOLTAGE + int(random.uniform(-2, 2))
-        self.store.setValues(3, HuaweiRegisters.POWERGRIDPHASE_AVOLTAGE, [ac_v, ac_v, ac_v])
-
-        # AC power and current
-        ac_power_w = int(pv_power_w * 0.97)
-        phase_ma = int(ac_power_w / 3 / ac_v * 1000) if (ac_power_w > 0 and ac_v > 0) else 0
-        cur_regs = []
-        for _ in range(3):
-            cur_regs += [(phase_ma >> 16) & 0xFFFF, phase_ma & 0xFFFF]
-        self.store.setValues(3, HuaweiRegisters.POWERGRIDPHASE_ACURRENT, cur_regs)
-
-        # Active power / reactive power / PF / frequency
-        pf_val = int(random.uniform(0.98, 1.0) * 1000) if ac_power_w > 0 else 1000
-        grid_freq = int(env.frequency * 100)
-        self.store.setValues(3, HuaweiRegisters.PHASE_AACTIVEPOWER,
-                             [(ac_power_w >> 16) & 0xFFFF, ac_power_w & 0xFFFF])
-        self.store.setValues(3, HuaweiRegisters.REACTIVE_POWER, [0, 0])
-        self.store.setValues(3, HuaweiRegisters.POWER_FACTOR, [pf_val])
-        self.store.setValues(3, HuaweiRegisters.FREQUENCY, [grid_freq])
-
-        # Running Status (32000)
-        status = 3 if sun_var > 0.01 else 1
-        self.store.setValues(3, HuaweiRegisters.RUNNINGSTATUS, [status])
-
-        # Internal temperature (S16, 0.1C) — from environment
-        temp = int((env.air_temp + sun_var * 25.0 + random.uniform(-2, 2)) * 10)
-        self.store.setValues(3, HuaweiRegisters.INTERNALTEMPERATURE, [temp & 0xFFFF])
-
-        # Cumulative energy (U32, 1kWh)
-        self.total_energy_kwh += ac_power_w / 3600000.0
-        energy_kwh = int(self.total_energy_kwh)
-        self.store.setValues(3, HuaweiRegisters.CUMULATIVE_ENERGY,
-                             [(energy_kwh >> 16) & 0xFFFF, energy_kwh & 0xFFFF])
-
-        # DEA-AVM registers
-        def _to_s32_regs(v):
-            v = int(v)
-            if v < 0: v += 0x100000000
-            return [v & 0xFFFF, (v >> 16) & 0xFFFF]
-
-        dea_phase_current = int(phase_ma / 100)
-        dea_voltage = 3800
-        dea_active = ac_power_w * 10
-        dea_reactive = 0
-        dea_pf = pf_val
-        dea_freq = int(env.frequency * 10)
-        is_running = sun_var > 0.01
-        dea_status = 0x0001 if is_running else 0
-
-        dea = []
-        dea += _to_s32_regs(dea_phase_current)
-        dea += _to_s32_regs(dea_phase_current)
-        dea += _to_s32_regs(dea_phase_current)
-        dea += _to_s32_regs(dea_voltage)
-        dea += _to_s32_regs(dea_voltage)
-        dea += _to_s32_regs(dea_voltage)
-        dea += _to_s32_regs(dea_active)
-        dea += _to_s32_regs(dea_reactive)
-        dea += _to_s32_regs(dea_pf)
-        dea += _to_s32_regs(dea_freq)
-        dea += [dea_status & 0xFFFF, 0]
-        self.store.setValues(3, 0x03E8, dea)
-
-        self._current = {
-            'sun_factor': sun_var,
-            'pv_power_kw': pv_power_w / 1000.0,
-            'ac_power_kw': ac_power_w / 1000.0,
-            'voltage': ac_v,
-            'status': 'On-grid' if sun_var > 0.01 else 'Standby',
-        }
-
-
-# =============================================================================
-# Ekos Inverter Simulator
-# =============================================================================
-
-class EkosSimulator:
-    """Ekos Inverter Modbus Simulator
-
-    FC03 (Holding Register): Float32 data registers + DER-AVM control
-    SCALE['power'] = 1.0 → stores raw W (NOT W×10)
-    Float32 for power, voltage, current, frequency, power factor
-    Stage2 메타: 10kW, 1 MPPT, 2 strings
-    """
-
-    VERSION = "1.0.0"
-    MODEL_NAME = "EKOS-10K-3P"
-    NOMINAL_POWER = 10000       # 10kW
-    NOMINAL_VOLTAGE = 380.0     # V (line-to-line)
-    NOMINAL_FREQUENCY = 60.0    # Hz
-
-    # MPPT nominal voltages (V, real float) — 1 MPPT
-    PV_VOLTAGE_NOMINAL = [390.0]
-
-    def __init__(self, logger=None, env=None):
-        self.logger = logger or logging.getLogger("EkosSim")
-        self.running = False
-        self.env = env or _get_shared_env()
-
-        self.start_time = time.time()
-        self.total_energy_wh = 2000000.0   # Initial cumulative: 2000kWh in Wh
-
-        # DER-AVM Control states
-        self.on_off = 0                # 0=ON, 1=OFF
-        self.power_limit = 1000        # 0.1% units (1000 = 100%)
-        self.power_factor_set = 1000   # 0.001 units (1000 = 1.0)
-        self.reactive_power_set = 0    # 0.1% units
-        self.control_mode = 'PF'
-        self.operation_mode = 0
-
-        self.store = self._create_datastore()
-        self._current = {}
-
-    @staticmethod
-    def _float32_to_regs(value):
-        """Convert a Python float to two U16 registers (big-endian Float32)"""
-        packed = struct.pack('>f', value)
-        hi = (packed[0] << 8) | packed[1]
-        lo = (packed[2] << 8) | packed[3]
-        return [hi, lo]
-
-    def _create_datastore(self):
-        """FC03 Holding Register datastore"""
-        # Max register: 0x0834 = 2100, plus DER control area
-        hr_block = ModbusLoggedHoldingBlock(
-            0, [0] * 0x8500,
-            self.logger, simulator=self, name="EKOS"
-        )
-
-        store = ModbusSlaveContext(
-            di=ModbusSequentialDataBlock(0, [0] * 10),
-            co=ModbusSequentialDataBlock(0, [0] * 10),
-            hr=hr_block,
-            ir=ModbusSequentialDataBlock(0, [0] * 10),
-        )
-        self.store = store
-        self._init_control_registers()
-        return store
-
-    def _init_control_registers(self):
-        """DER-AVM control register initial values"""
-        self.store.store['h']._internal_update = True
-        try:
-            self.store.setValues(3, EkosRegisters.DER_POWER_FACTOR_SET, [self.power_factor_set])
-            self.store.setValues(3, EkosRegisters.DER_ACTION_MODE, [self.operation_mode])
-            self.store.setValues(3, EkosRegisters.DER_REACTIVE_POWER_PCT, [self.reactive_power_set])
-            self.store.setValues(3, EkosRegisters.DER_ACTIVE_POWER_PCT, [self.power_limit])
-            self.store.setValues(3, EkosRegisters.INVERTER_ON_OFF, [self.on_off])
-        finally:
-            self.store.store['h']._internal_update = False
-
-    def _get_sun_factor(self):
-        """Get sun factor from shared environment."""
-        return self.env.get_sun_fraction()
-
-    def _update_registers(self):
-        """Update FC03 registers — Float32 for analog values, raw W for power"""
-        env = self.env
-        sun_var = self._get_sun_factor()
-        pv_v_factor = env.get_pv_voltage_factor()
-
-        EFFICIENCY = 0.97
-        power_cap = self.NOMINAL_POWER * (self.power_limit / 1000.0)
-
-        if sun_var > 0.01 and self.on_off == 0:
-            possible_ac_w = sun_var * self.NOMINAL_POWER * EFFICIENCY
-            ac_power_w = int(min(possible_ac_w, power_cap))
-            pv_total_w = ac_power_w / EFFICIENCY
-        else:
-            ac_power_w = 0
-            pv_total_w = 0
-
-        # PV MPPT data (Float32 voltage V, Float32 current A)
-        pv_powers_w = []
-        for i in range(2):
-            if pv_total_w > 0:
-                v = self.PV_VOLTAGE_NOMINAL[i] * pv_v_factor * (0.92 + 0.08 * sun_var) + random.uniform(-2, 2)
-                pw = pv_total_w / 2 * random.uniform(0.98, 1.02)
-                c = pw / v if v > 0 else 0
-                pv_powers_w.append(pw)
-            else:
-                v = 0.0
-                c = 0.0
-                pv_powers_w.append(0)
-
-            v_addr = [EkosRegisters.MPPT1_VOLTAGE, EkosRegisters.MPPT2_VOLTAGE][i]
-            c_addr = [EkosRegisters.MPPT1_CURRENT, EkosRegisters.MPPT2_CURRENT][i]
-            self.store.setValues(3, v_addr, self._float32_to_regs(v))
-            self.store.setValues(3, c_addr, self._float32_to_regs(c))
-
-        # PV total power (Float32, raw W)
-        self.store.setValues(3, EkosRegisters.PV_POWER,
-                             self._float32_to_regs(float(sum(pv_powers_w))))
-
-        # PF / reactive power control
-        if self.control_mode == 'PF':
-            pf = self.power_factor_set / 1000.0
-            pf = max(0.85, min(1.0, abs(pf)))
-            if ac_power_w > 0 and pf < 1.0:
-                reactive_power_w = ac_power_w * math.tan(math.acos(pf))
-                if self.power_factor_set < 0:
-                    reactive_power_w = -reactive_power_w
-            else:
-                reactive_power_w = 0
-                pf = 1.0
-        else:
-            rp_pct = self.reactive_power_set
-            if rp_pct >= 32768:
-                rp_pct = rp_pct - 65536
-            reactive_power_w = self.NOMINAL_POWER * (rp_pct / 1000.0)
-            if ac_power_w > 0:
-                apparent = math.sqrt(ac_power_w**2 + reactive_power_w**2)
-                pf = ac_power_w / apparent if apparent > 0 else 1.0
-            else:
-                pf = 1.0
-
-        # AC power (Float32, raw W)
-        self.store.setValues(3, EkosRegisters.AC_POWER,
-                             self._float32_to_regs(float(ac_power_w)))
-
-        # AC 3-phase voltage (Float32, V)
-        for v_addr in [EkosRegisters.R_PHASE_VOLTAGE, EkosRegisters.S_PHASE_VOLTAGE,
-                       EkosRegisters.T_PHASE_VOLTAGE]:
-            self.store.setValues(3, v_addr,
-                                 self._float32_to_regs(self.NOMINAL_VOLTAGE))
-
-        # AC 3-phase current (Float32, A)
-        apparent_w = math.sqrt(ac_power_w**2 + reactive_power_w**2) if ac_power_w > 0 else 0
-        phase_current_a = (apparent_w / 3) / self.NOMINAL_VOLTAGE if self.NOMINAL_VOLTAGE > 0 else 0
-        for c_addr in [EkosRegisters.R_PHASE_CURRENT, EkosRegisters.S_PHASE_CURRENT,
-                       EkosRegisters.T_PHASE_CURRENT]:
-            self.store.setValues(3, c_addr,
-                                 self._float32_to_regs(phase_current_a))
-
-        # Frequency (Float32, Hz) — from environment
-        self.store.setValues(3, EkosRegisters.FREQUENCY,
-                             self._float32_to_regs(env.frequency))
-
-        # Power factor (Float32)
-        self.store.setValues(3, EkosRegisters.POWER_FACTOR,
-                             self._float32_to_regs(pf))
-
-        # Inverter mode (U16)
-        if self.on_off == 1:
-            mode = 0x0000  # Stop
-        elif sun_var > 0.01:
-            mode = 0x0008  # MPP (On-Grid)
-        else:
-            mode = 0x0002  # Waiting Time (Standby)
-        self.store.setValues(3, EkosRegisters.INVERTER_MODE, [mode])
-
-        # Inner temp (U16) — from environment
-        temp = int(env.air_temp + sun_var * 25.0 + random.uniform(-2, 2))
-        self.store.setValues(3, EkosRegisters.INNER_TEMP, [max(0, temp) & 0xFFFF])
-
-        # Error codes (U16)
-        self.store.setValues(3, EkosRegisters.ERROR_CODE1, [0])
-        self.store.setValues(3, EkosRegisters.ERROR_CODE2, [0])
-
-        # Total energy (Float32, Wh)
-        self.total_energy_wh += ac_power_w / 3600.0
-        self.store.setValues(3, EkosRegisters.TOTAL_ENERGY,
-                             self._float32_to_regs(float(self.total_energy_wh)))
-
-        # String currents (U16, 0.01A)
-        string_addrs = [EkosRegisters.STRING1_CURRENT, EkosRegisters.STRING2_CURRENT,
-                        EkosRegisters.STRING3_CURRENT, EkosRegisters.STRING4_CURRENT]
-        for i, s_addr in enumerate(string_addrs):
-            mppt_i = i // 2
-            if pv_total_w > 0:
-                v = self.PV_VOLTAGE_NOMINAL[mppt_i] * (0.92 + 0.08 * sun_var)
-                str_c = (pv_total_w / 2 / 2) / v if v > 0 else 0  # per-string current
-                self.store.setValues(3, s_addr, [int(str_c * 100) & 0xFFFF])
-            else:
-                self.store.setValues(3, s_addr, [0])
-
-        # ── DEA-AVM Real-time Monitoring (0x03E8-0x03FD) ──────────────────────
-        def _to_s32_regs(v):
-            v = int(v)
-            if v < 0: v += 0x100000000
-            return [v & 0xFFFF, (v >> 16) & 0xFFFF]
-
-        ac_v = self.NOMINAL_VOLTAGE  # 380.0 V (float)
-        dea_phase_current = int(phase_current_a * 10)  # A → 0.1A
-        dea_voltage = int(ac_v * 10)                    # V → 0.1V
-        dea_active = int(ac_power_w * 10)               # W → 0.1W
-        dea_reactive = int(reactive_power_w)             # 1Var
-        dea_pf = int(pf * 1000)                          # 0.001
-        dea_freq = 600                                   # 0.1Hz = 60.0Hz
-        is_running = (self.on_off == 0 and sun_var > 0.01)
-        dea_status = 0x0001 if is_running else 0
-
-        dea = []
-        dea += _to_s32_regs(dea_phase_current)  # L1 Current
-        dea += _to_s32_regs(dea_phase_current)  # L2 Current
-        dea += _to_s32_regs(dea_phase_current)  # L3 Current
-        dea += _to_s32_regs(dea_voltage)         # L1 Voltage
-        dea += _to_s32_regs(dea_voltage)         # L2 Voltage
-        dea += _to_s32_regs(dea_voltage)         # L3 Voltage
-        dea += _to_s32_regs(dea_active)           # Active Power
-        dea += _to_s32_regs(dea_reactive)         # Reactive Power
-        dea += _to_s32_regs(dea_pf)               # Power Factor
-        dea += _to_s32_regs(dea_freq)             # Frequency
-        dea += [dea_status & 0xFFFF, 0]           # Status Flags
-        self.store.setValues(3, 0x03E8, dea)
-
-        self._current = {
-            'sun_factor': sun_var,
-            'pv_power_kw': sum(pv_powers_w) / 1000.0,
-            'ac_power_kw': ac_power_w / 1000.0,
-            'reactive_kvar': reactive_power_w / 1000.0,
-            'power_factor': pf,
-            'voltage': self.NOMINAL_VOLTAGE,
-            'status': 'OFF' if self.on_off == 1 else ('Running' if sun_var > 0.01 else 'Standby'),
-            'ctrl_mode': self.control_mode,
-        }
-
-    def _check_control_changes(self):
-        """DER-AVM control register change detection"""
-        new_onoff = self.store.getValues(3, EkosRegisters.INVERTER_ON_OFF, count=1)[0]
-        if new_onoff != self.on_off and new_onoff in [0, 1]:
-            self.on_off = new_onoff
-            self.logger.info(f"[EKOS] ON/OFF changed: {'OFF' if new_onoff else 'ON'}")
-
-        new_power = self.store.getValues(3, EkosRegisters.DER_ACTIVE_POWER_PCT, count=1)[0]
-        if new_power != self.power_limit and 0 <= new_power <= 1100:
-            self.power_limit = new_power
-            self.logger.info(f"[EKOS] Active power limit: {new_power/10:.1f}%")
-
-        new_pf = self.store.getValues(3, EkosRegisters.DER_POWER_FACTOR_SET, count=1)[0]
-        if new_pf != self.power_factor_set:
-            self.power_factor_set = new_pf
-            self.control_mode = 'PF'
-            self.logger.info(f"[EKOS] PF set: {new_pf/1000:.3f} (mode=PF)")
-
-        new_rp = self.store.getValues(3, EkosRegisters.DER_REACTIVE_POWER_PCT, count=1)[0]
-        if new_rp != self.reactive_power_set:
-            self.reactive_power_set = new_rp
-            self.control_mode = 'RP'
-            self.logger.info(f"[EKOS] Reactive power set: {new_rp/10:.1f}% (mode=RP)")
-
-        new_mode = self.store.getValues(3, EkosRegisters.DER_ACTION_MODE, count=1)[0]
-        if new_mode != self.operation_mode:
-            self.operation_mode = new_mode
-
-
-# =============================================================================
-# Sungrow Inverter Simulator
-# =============================================================================
-
-class SungrowSimulator:
-    """Sungrow Inverter Modbus Simulator
-
-    FC03 (Holding Register): U16/U32 data registers + DER-AVM control
-    SCALE['power'] = 1.0 → stores raw W (NOT W×10)
-    Voltage: 0.1V (U16), Current: 0.1A (U16), Power: raw W (U32)
-    4 MPPT, 8 strings
-    """
-
-    VERSION = "1.0.0"
-    MODEL_NAME = "SG50CX"
-    NOMINAL_POWER = 50000       # 50kW
-    NOMINAL_VOLTAGE = 3800      # 0.1V → 380V (line-to-line)
-    NOMINAL_FREQUENCY = 600     # 0.1Hz → 60.0Hz
-
-    # MPPT nominal voltages (0.1V)
-    PV_VOLTAGE_NOMINAL = [3900, 3850, 3920, 3880]
-
-    def __init__(self, logger=None, env=None):
-        self.logger = logger or logging.getLogger("SungrowSim")
-        self.running = False
-        self.env = env or _get_shared_env()
-
-        self.start_time = time.time()
-        self.total_energy_01kwh = 20000  # Initial: 2000.0 kWh in 0.1kWh units
-        self.today_energy_wh = 0.0
-
-        # DER-AVM Control states
-        self.on_off = 0                # 0=ON, 1=OFF
-        self.power_limit = 1000        # 0.1% units (1000 = 100%)
-        self.power_factor_set = 1000   # 0.001 units (1000 = 1.0)
-        self.reactive_power_set = 0    # 0.1% units
-        self.control_mode = 'PF'
-        self.operation_mode = 0
-
-        self.store = self._create_datastore()
-        self._current = {}
-
-    def _create_datastore(self):
-        """FC03 Holding Register datastore"""
-        # Max register: 0x0834 = 2100, plus data registers up to ~0x0200
-        hr_block = ModbusLoggedHoldingBlock(
-            0, [0] * 0x8500,
-            self.logger, simulator=self, name="SGW"
-        )
-
-        store = ModbusSlaveContext(
-            di=ModbusSequentialDataBlock(0, [0] * 10),
-            co=ModbusSequentialDataBlock(0, [0] * 10),
-            hr=hr_block,
-            ir=ModbusSequentialDataBlock(0, [0] * 10),
-        )
-        self.store = store
-        self._init_control_registers()
-        return store
-
-    def _init_control_registers(self):
-        """DER-AVM control register initial values"""
-        self.store.store['h']._internal_update = True
-        try:
-            self.store.setValues(3, SungrowRegisters.DER_POWER_FACTOR_SET, [self.power_factor_set])
-            self.store.setValues(3, SungrowRegisters.DER_ACTION_MODE, [self.operation_mode])
-            self.store.setValues(3, SungrowRegisters.DER_REACTIVE_POWER_PCT, [self.reactive_power_set])
-            self.store.setValues(3, SungrowRegisters.DER_ACTIVE_POWER_PCT, [self.power_limit])
-            self.store.setValues(3, SungrowRegisters.INVERTER_ON_OFF, [self.on_off])
-        finally:
-            self.store.store['h']._internal_update = False
-
-    def _get_sun_factor(self):
-        """Get sun factor from shared environment."""
-        return self.env.get_sun_fraction()
-
-    def _update_registers(self):
-        """Update FC03 registers — U16/U32 formats, raw W for power"""
-        env = self.env
-        sun_var = self._get_sun_factor()
-        pv_v_factor = env.get_pv_voltage_factor()
-
-        EFFICIENCY = 0.97
-        power_cap = self.NOMINAL_POWER * (self.power_limit / 1000.0)
-
-        if sun_var > 0.01 and self.on_off == 0:
-            possible_ac_w = sun_var * self.NOMINAL_POWER * EFFICIENCY
-            ac_power_w = int(min(possible_ac_w, power_cap))
-            pv_total_w = ac_power_w / EFFICIENCY
-        else:
-            ac_power_w = 0
-            pv_total_w = 0
-
-        # PV MPPT data (voltage 0.1V U16, current 0.1A U16)
-        pv_voltages = [int(v * pv_v_factor * (0.92 + 0.08 * sun_var) + random.uniform(-10, 10))
-                       if sun_var > 0.01 else 0 for v in self.PV_VOLTAGE_NOMINAL]
-        pv_powers_w = [int(pv_total_w / 4 * random.uniform(0.98, 1.02))
-                       for _ in range(4)] if pv_total_w > 0 else [0, 0, 0, 0]
-        pv_currents = [int(pv_powers_w[i] / (pv_voltages[i] * 0.1) * 10)
-                       if pv_voltages[i] > 0 and pv_powers_w[i] > 0 else 0
-                       for i in range(4)]
-
-        # MPPT voltage/current registers (interleaved: V1,V2 then V3,V4, C1,C2 then C3,C4)
-        self.store.setValues(3, SungrowRegisters.MPPT1_VOLTAGE,
-                             [pv_voltages[0], pv_voltages[1]])
-        self.store.setValues(3, SungrowRegisters.MPPT1_CURRENT,
-                             [pv_currents[0], pv_currents[1]])
-        self.store.setValues(3, SungrowRegisters.MPPT3_VOLTAGE,
-                             [pv_voltages[2], pv_voltages[3]])
-        self.store.setValues(3, SungrowRegisters.MPPT3_CURRENT,
-                             [pv_currents[2], pv_currents[3]])
-
-        # PV total power (U32, raw W) — NOT ×10
-        pv_total_w_int = int(pv_total_w)
-        self.store.setValues(3, SungrowRegisters.PV_POWER,
-                             [pv_total_w_int & 0xFFFF, (pv_total_w_int >> 16) & 0xFFFF])
-
-        # PF / reactive power control
-        if self.control_mode == 'PF':
-            pf = self.power_factor_set / 1000.0
-            pf = max(0.85, min(1.0, abs(pf)))
-            if ac_power_w > 0 and pf < 1.0:
-                reactive_power_w = ac_power_w * math.tan(math.acos(pf))
-                if self.power_factor_set < 0:
-                    reactive_power_w = -reactive_power_w
-            else:
-                reactive_power_w = 0
-                pf = 1.0
-        else:
-            rp_pct = self.reactive_power_set
-            if rp_pct >= 32768:
-                rp_pct = rp_pct - 65536
-            reactive_power_w = self.NOMINAL_POWER * (rp_pct / 1000.0)
-            if ac_power_w > 0:
-                apparent = math.sqrt(ac_power_w**2 + reactive_power_w**2)
-                pf = ac_power_w / apparent if apparent > 0 else 1.0
-            else:
-                pf = 1.0
-
-        # AC power (U32, raw W) — NOT ×10
-        self.store.setValues(3, SungrowRegisters.AC_POWER,
-                             [ac_power_w & 0xFFFF, (ac_power_w >> 16) & 0xFFFF])
-
-        # AC 3-phase voltage (U16, 0.1V)
-        ac_v = self.NOMINAL_VOLTAGE  # 3800 = 380.0V
-        self.store.setValues(3, SungrowRegisters.R_PHASE_VOLTAGE, [ac_v])
-        self.store.setValues(3, SungrowRegisters.S_PHASE_VOLTAGE, [ac_v])
-        self.store.setValues(3, SungrowRegisters.T_PHASE_VOLTAGE, [ac_v])
-
-        # AC 3-phase current (U16, 0.1A)
-        apparent_w = math.sqrt(ac_power_w**2 + reactive_power_w**2) if ac_power_w > 0 else 0
-        phase_current_01a = int((apparent_w / 3) / (ac_v * 0.1) * 10) if ac_v > 0 else 0
-        self.store.setValues(3, SungrowRegisters.R_PHASE_CURRENT, [phase_current_01a])
-        self.store.setValues(3, SungrowRegisters.S_PHASE_CURRENT, [phase_current_01a])
-        self.store.setValues(3, SungrowRegisters.T_PHASE_CURRENT, [phase_current_01a])
-
-        # Frequency (U16, 0.1Hz) — from environment
-        self.store.setValues(3, SungrowRegisters.FREQUENCY, [int(env.frequency * 10)])
-
-        # Power factor (S16, 0.001)
-        pf_reg = int(pf * 1000)
-        self.store.setValues(3, SungrowRegisters.POWER_FACTOR, [pf_reg & 0xFFFF])
-
-        # Inverter mode (U16)
-        if self.on_off == 1:
-            mode_raw = 0x0005   # Sungrow SHUTDOWN
-        elif sun_var > 0.01:
-            mode_raw = 0x0002   # Sungrow Running (ON_GRID)
-        else:
-            mode_raw = 0x0001   # Sungrow STANDBY
-        self.store.setValues(3, SungrowRegisters.INVERTER_MODE, [mode_raw])
-
-        # Inner temp (S16, 0.1C) — from environment
-        temp = int((env.air_temp + sun_var * 25.0 + random.uniform(-2, 2)) * 10)
-        self.store.setValues(3, SungrowRegisters.INNER_TEMP, [max(0, temp) & 0xFFFF])
-
-        # Error codes (U16)
-        self.store.setValues(3, SungrowRegisters.ERROR_CODE1, [0])
-        self.store.setValues(3, SungrowRegisters.ERROR_CODE2, [0])
-
-        # Total energy (U32, 0.1kWh)
-        self.today_energy_wh += ac_power_w / 3600.0
-        self.total_energy_01kwh += ac_power_w / 3600.0 / 100.0  # W-sec to 0.1kWh
-        energy_val = int(self.total_energy_01kwh)
-        self.store.setValues(3, SungrowRegisters.TOTAL_ENERGY,
-                             [energy_val & 0xFFFF, (energy_val >> 16) & 0xFFFF])
-
-        # String currents (0.1A, same addresses as MPPT currents for strings 1-4,
-        # separate registers for strings 5-8)
-        for i in range(4):
-            s_addr = [SungrowRegisters.STRING5_CURRENT, SungrowRegisters.STRING6_CURRENT,
-                      SungrowRegisters.STRING7_CURRENT, SungrowRegisters.STRING8_CURRENT][i]
-            if pv_total_w > 0:
-                str_c = (pv_total_w / 4 / 2) / (pv_voltages[i] * 0.1) * 10 if pv_voltages[i] > 0 else 0
-                self.store.setValues(3, s_addr, [int(str_c) & 0xFFFF])
-            else:
-                self.store.setValues(3, s_addr, [0])
-
-        # ── DEA-AVM Real-time Monitoring (0x03E8-0x03FD) ──────────────────────
-        def _to_s32_regs(v):
-            v = int(v)
-            if v < 0: v += 0x100000000
-            return [v & 0xFFFF, (v >> 16) & 0xFFFF]
-
-        # ac_v is 0.1V (3800), phase_current_01a is 0.1A
-        dea_phase_current = phase_current_01a          # already 0.1A
-        dea_voltage = ac_v                              # already 0.1V (3800)
-        dea_active = ac_power_w * 10                    # W → 0.1W
-        dea_reactive = int(reactive_power_w)             # 1Var
-        dea_pf = int(pf * 1000)                          # 0.001
-        dea_freq = 600                                   # 0.1Hz = 60.0Hz
-        is_running = (self.on_off == 0 and sun_var > 0.01)
-        dea_status = 0x0001 if is_running else 0
-
-        dea = []
-        dea += _to_s32_regs(dea_phase_current)  # L1 Current
-        dea += _to_s32_regs(dea_phase_current)  # L2 Current
-        dea += _to_s32_regs(dea_phase_current)  # L3 Current
-        dea += _to_s32_regs(dea_voltage)         # L1 Voltage
-        dea += _to_s32_regs(dea_voltage)         # L2 Voltage
-        dea += _to_s32_regs(dea_voltage)         # L3 Voltage
-        dea += _to_s32_regs(dea_active)           # Active Power
-        dea += _to_s32_regs(dea_reactive)         # Reactive Power
-        dea += _to_s32_regs(dea_pf)               # Power Factor
-        dea += _to_s32_regs(dea_freq)             # Frequency
-        dea += [dea_status & 0xFFFF, 0]           # Status Flags
-        self.store.setValues(3, 0x03E8, dea)
-
-        self._current = {
-            'sun_factor': sun_var,
-            'pv_power_kw': sum(pv_powers_w) / 1000.0,
-            'ac_power_kw': ac_power_w / 1000.0,
-            'reactive_kvar': reactive_power_w / 1000.0,
-            'power_factor': pf,
-            'voltage': ac_v / 10.0,
-            'status': 'OFF' if self.on_off == 1 else ('Running' if sun_var > 0.01 else 'Standby'),
-            'ctrl_mode': self.control_mode,
-        }
-
-    def _check_control_changes(self):
-        """DER-AVM control register change detection"""
-        new_onoff = self.store.getValues(3, SungrowRegisters.INVERTER_ON_OFF, count=1)[0]
-        if new_onoff != self.on_off and new_onoff in [0, 1]:
-            self.on_off = new_onoff
-            self.logger.info(f"[SGW] ON/OFF changed: {'OFF' if new_onoff else 'ON'}")
-
-        new_power = self.store.getValues(3, SungrowRegisters.DER_ACTIVE_POWER_PCT, count=1)[0]
-        if new_power != self.power_limit and 0 <= new_power <= 1100:
-            self.power_limit = new_power
-            self.logger.info(f"[SGW] Active power limit: {new_power/10:.1f}%")
-
-        new_pf = self.store.getValues(3, SungrowRegisters.DER_POWER_FACTOR_SET, count=1)[0]
-        if new_pf != self.power_factor_set:
-            self.power_factor_set = new_pf
-            self.control_mode = 'PF'
-            self.logger.info(f"[SGW] PF set: {new_pf/1000:.3f} (mode=PF)")
-
-        new_rp = self.store.getValues(3, SungrowRegisters.DER_REACTIVE_POWER_PCT, count=1)[0]
-        if new_rp != self.reactive_power_set:
-            self.reactive_power_set = new_rp
-            self.control_mode = 'RP'
-            self.logger.info(f"[SGW] Reactive power set: {new_rp/10:.1f}% (mode=RP)")
-
-        new_mode = self.store.getValues(3, SungrowRegisters.DER_ACTION_MODE, count=1)[0]
-        if new_mode != self.operation_mode:
-            self.operation_mode = new_mode
-
-
-# =============================================================================
-# Generic Inverter Simulator (dynamic register module loading)
-# =============================================================================
-
 class GenericInverterSimulator:
     """Generic Inverter Simulator — dynamically loads any *_registers.py module.
 
@@ -2247,13 +817,47 @@ class GenericInverterSimulator:
     """
 
     VERSION = "1.0.0"
-    NOMINAL_POWER = 50000  # 50kW default
+    NOMINAL_POWER = 50000  # 50kW default (overridden per protocol)
+
+    # Protocol (prefix) → nominal power in W.
+    # Supports new-style names like 'solarize_50_3' via prefix match.
+    _NOMINAL_BY_PROTOCOL = {
+        'solarize': 50000,
+        'senergy':  50000,
+        'sungrow':  50000,
+        'huawei':   50000,
+        'kstar':    60000,
+        'ekos':     10000,
+        'sofar':    50000,
+        'solis':    50000,
+        'growatt':  30000,
+        'cps':      50000,
+        'sunways':  30000,
+        'abb':      50000,
+        'goodwe':   50000,
+    }
+
+    @classmethod
+    def _lookup_by_prefix(cls, table: dict, protocol_name: str, default=None):
+        """Resolve {manufacturer}_{kW}_{phase} protocol to a table entry by
+        trying exact lowercase match first, then prefix up to first underscore,
+        so both old ('solarize') and new ('solarize_50_3') styles work.
+        """
+        key = (protocol_name or '').lower()
+        if key in table:
+            return table[key]
+        prefix = key.split('_', 1)[0]
+        return table.get(prefix, default)
 
     def __init__(self, protocol_name, logger=None, env=None):
         self.protocol_name = protocol_name
         self.logger = logger or logging.getLogger(f"Generic-{protocol_name}")
         self.running = False
         self.env = env or _get_shared_env()
+        # Per-protocol nominal power — prefix match supports both 'solarize'
+        # and 'solarize_50_3' style protocol names.
+        self.NOMINAL_POWER = self._lookup_by_prefix(
+            self._NOMINAL_BY_PROTOCOL, protocol_name, default=50000)
 
         # Load register module dynamically
         self._module = self._load_module(protocol_name)
@@ -2262,8 +866,16 @@ class GenericInverterSimulator:
         self.scale = getattr(self._module, 'SCALE', {})
         self.mppt_channels = getattr(self._module, 'MPPT_CHANNELS', 4)
         self.string_channels = getattr(self._module, 'STRING_CHANNELS', 0)
-        self._get_mppt_regs = getattr(self._module, 'get_mppt_registers', None)
-        self._get_string_regs = getattr(self._module, 'get_string_registers', None)
+        # Helper functions are only reliable for Solarize-compatible protocols.
+        # Other protocols' helpers are Stage3 copies of Solarize layout (wrong addresses).
+        # Use _find_addr + MPPT{n}_ pattern for all non-Solarize protocols.
+        _proto_lower = protocol_name.lower()
+        if _proto_lower.startswith(('solarize', 'senergy', 'verterking')):
+            self._get_mppt_regs = getattr(self._module, 'get_mppt_registers', None)
+            self._get_string_regs = getattr(self._module, 'get_string_registers', None)
+        else:
+            self._get_mppt_regs = None
+            self._get_string_regs = None
 
         # Use FC03 by default (no register file uses RTU_FC_CODE currently)
         self.fc_code = getattr(self._module, 'RTU_FC_CODE', 3)
@@ -2278,6 +890,10 @@ class GenericInverterSimulator:
         self.control_mode = 'PF'
         self.operation_mode = 0
 
+        # IV Scan state
+        self.iv_scan_status = IVScanStatus.IDLE
+        self._iv_strings_read = set()
+
         # Resolve scale factors
         self._s_voltage = self.scale.get('voltage', 0.1)
         self._s_current = self.scale.get('current', 0.01)
@@ -2287,12 +903,92 @@ class GenericInverterSimulator:
         # PV nominal voltages per MPPT (0.1V units → ~390V)
         self._pv_v_nom = [3900 + i * 50 for i in range(self.mppt_channels)]
 
-        self.store = self._create_datastore()
         self._current = {}
         self._current_lock = threading.Lock()
+        self.store = self._create_datastore()
+        self._init_iv_scan_data()
+        self._init_static_info()
 
         self.logger.info(f"[GENERIC] Loaded protocol '{protocol_name}' | "
                          f"MPPT={self.mppt_channels} STR={self.string_channels} FC={self.fc_code:02d}")
+
+    # Per-protocol display name (prefix match) for read_model_info() registers.
+    # Supports both 'solarize' and 'solarize_50_3' style protocol names.
+    _PROTO_MODEL_NAME = {
+        'solarize':  'SRPV-3-50-KS-SIM',
+        'huawei':    'SUN2000-50KTL-SIM',
+        'kstar':     'KSG-60K-DM-SIM',
+        'sungrow':   'SG50CX-SIM',
+        'ekos':      'EKOS-10K-SIM',
+        'senergy':   'SE-50K-SIM',
+        'sofar':     'SOFAR-50KTL-SIM',
+        'solis':     'SOLIS-50K-SIM',
+        'growatt':   'MOD-30KTL3-SIM',
+        'cps':       'CPS-50KTL-SIM',
+        'sunways':   'STT-30KTL-SIM',
+        'abb':       'ABB-50KTL-SIM',
+        'goodwe':    'GW-50KTL-SIM',
+    }
+
+    def _write_string_regs(self, base_addr, text, n_regs):
+        """Pack ASCII text big-endian into n_regs 16-bit registers (zero-padded)."""
+        if base_addr is None:
+            return
+        data = text.encode('utf-8')[:n_regs * 2]
+        data = data.ljust(n_regs * 2, b'\x00')
+        regs = []
+        for i in range(n_regs):
+            hi, lo = data[2 * i], data[2 * i + 1]
+            regs.append((hi << 8) | lo)
+        for i, v in enumerate(regs):
+            self._set_reg(base_addr + i, [v])
+
+    def _init_static_info(self):
+        """Pre-populate DEVICE_MODEL/SERIAL_NUMBER/MPPT_COUNT/NOMINAL_POWER_*
+        so RTU read_model_info() returns realistic per-protocol values."""
+        proto = (self.protocol_name or 'solarize').lower()
+        model_name = self._lookup_by_prefix(
+            self._PROTO_MODEL_NAME, proto, default='SRPV-3-50-KS-SIM')
+        # Stable serial: manufacturer prefix + zero padded
+        prefix = proto.split('_', 1)[0][:3].upper()
+        # slave_id is set later by ModbusServerContext, use 0 placeholder for now
+        # Use protocol_name hash as seed so each instance is distinct enough
+        serial = f"{prefix}{abs(hash(proto)) % 100000000:08d}"
+
+        # DEVICE_MODEL / SERIAL_NUMBER sizes come from the register file's
+        # DEVICE_MODEL_SIZE / DEVICE_SERIAL_NUMBER_SIZE attrs when present.
+        # Without a size constant the default matches the Solarize Korean
+        # V1.2.4 convention (16 regs model, 8 regs serial).
+        # DEVICE_MODEL_SIZE == 1 means the PDF exposes the model as a single
+        # U16 type code (Sungrow, Solis, Growatt, Sunways). In that case we
+        # write MODEL_CODE_DEFAULT (from the register file's code-to-name
+        # lookup table) as a raw numeric value rather than packing ASCII.
+        device_model_addr = self._find_addr('DEVICE_MODEL', 'DEVICE_MODEL_NAME', 'MODEL')
+        if device_model_addr is not None:
+            model_regs = getattr(self.reg_map, 'DEVICE_MODEL_SIZE', None) or 16
+            if model_regs == 1:
+                code_default = getattr(self._module, 'MODEL_CODE_DEFAULT', None)
+                if code_default is not None:
+                    self._set_reg(device_model_addr, [int(code_default) & 0xFFFF])
+            else:
+                self._write_string_regs(device_model_addr, model_name, model_regs)
+
+        serial_addr = self._find_addr('SERIAL_NUMBER', 'DEVICE_SERIAL_NUMBER',
+                                       'SERIAL_NUMBER_BASE')
+        if serial_addr is not None:
+            serial_regs = getattr(self.reg_map, 'DEVICE_SERIAL_NUMBER_SIZE', None) or 8
+            self._write_string_regs(serial_addr, serial, serial_regs)
+
+        mppt_count_addr = self._find_addr('MPPT_COUNT')
+        if mppt_count_addr is not None:
+            self._set_reg(mppt_count_addr, [self.mppt_channels])
+
+        np_lo = self._find_addr('NOMINAL_POWER_LOW', 'NOMINAL_POWER_L')
+        np_hi = self._find_addr('NOMINAL_POWER_HIGH', 'NOMINAL_POWER_H')
+        if np_lo is not None and np_hi is not None:
+            val = int(self.NOMINAL_POWER) & 0xFFFFFFFF
+            self._set_reg(np_lo, [val & 0xFFFF])
+            self._set_reg(np_hi, [(val >> 16) & 0xFFFF])
 
     @staticmethod
     def _load_module(protocol_name):
@@ -2332,29 +1028,67 @@ class GenericInverterSimulator:
                 return addr
         return None
 
+    def _h01_addr(self, h01_field_key):
+        """Resolve an H01 field name (e.g. 'r_voltage') to its (addr, attr_name) via H01_FIELD_MAP.
+
+        H01_FIELD_MAP keys may have trailing spaces (Excel padding artifact);
+        match by stripped key. Returns (None, None) when the field isn't mapped.
+        """
+        fm = getattr(self._module, 'H01_FIELD_MAP', {}) or {}
+        target = h01_field_key.strip()
+        entry = None
+        for k, v in fm.items():
+            if k.strip() == target:
+                entry = v
+                break
+        if entry is None:
+            return None, None
+        reg_attr = entry[0]
+        addr = getattr(self.reg_map, reg_attr, None)
+        if addr is None or not isinstance(addr, int):
+            return None, reg_attr
+        return addr, reg_attr
+
     def _create_datastore(self):
-        """Create Modbus datastore — FC03 holding register or FC04 input register."""
+        """Create Modbus datastore.
+
+        Shares the SAME block between hr and ir so:
+        - Protocols that use FC03 (Read Holding Registers) work as-is
+        - Protocols that use FC04 (Read Input Registers, e.g. Kstar) also read
+          the data, AND DER-AVM control writes (FC06/FC16 → hr) reach the
+          same store that PV/grid data lives in.
+        Without this sharing, FC04 protocols would have their DER-AVM writes
+        go to a dummy 10-register hr block and silently fail.
+        """
         block = ModbusLoggedHoldingBlock(
             0, [0] * 0x8500, self.logger, simulator=self,
             name=self.protocol_name[:3].upper()
         )
 
-        if self.fc_code == 4:
-            store = ModbusSlaveContext(
-                di=ModbusSequentialDataBlock(0, [0] * 10),
-                co=ModbusSequentialDataBlock(0, [0] * 10),
-                hr=ModbusSequentialDataBlock(0, [0] * 10),
-                ir=block,
-            )
-        else:
-            store = ModbusSlaveContext(
-                di=ModbusSequentialDataBlock(0, [0] * 10),
-                co=ModbusSequentialDataBlock(0, [0] * 10),
-                hr=block,
-                ir=ModbusSequentialDataBlock(0, [0] * 10),
-            )
+        store = ModbusSlaveContext(
+            di=ModbusSequentialDataBlock(0, [0] * 10),
+            co=ModbusSequentialDataBlock(0, [0] * 10),
+            hr=block,  # shared — handles FC03 reads and FC06/FC16 writes
+            ir=block,  # shared — handles FC04 reads for Kstar etc.
+        )
 
         self.store = store
+        # Add per-protocol vendor-specific control addresses (e.g. CPS 0x6001,
+        # Growatt 0x6000) to the block's CONTROL_REGISTERS so writes to these
+        # addresses also trigger _check_control_changes. Without this, the
+        # vendor ON/OFF writes succeed silently but the simulator's internal
+        # on_off state never updates, so power output continues.
+        for attr in ('INVERTER_ON_OFF', 'SWITCH_ON_OFF',
+                     'DER_ACTIVE_POWER_PCT', 'DER_POWER_FACTOR_SET',
+                     'DER_REACTIVE_POWER_PCT', 'DER_ACTION_MODE',
+                     'ACTIVE_POWER_PCT', 'POWER_FACTOR_SET',
+                     'REACTIVE_POWER_SET', 'OPERATION_MODE',
+                     'ACTIVE_POWER_LIMIT', 'POWER_FACTOR_SETTING',
+                     'REACTIVE_POWER_LIMIT_PCT', 'REACTIVE_POWER_LIMIT_VAR',
+                     'IV_SCAN_COMMAND'):
+            addr = getattr(self.reg_map, attr, None)
+            if isinstance(addr, int) and addr not in block.CONTROL_REGISTERS:
+                block.CONTROL_REGISTERS.append(addr)
         block._internal_update = True
         self._init_control_registers()
         block._internal_update = False
@@ -2362,7 +1096,7 @@ class GenericInverterSimulator:
 
     def _init_control_registers(self):
         """Set DER-AVM control register initial values."""
-        fc = self.fc_code + 1 if self.fc_code == 4 else 3  # FC04→fc_as_hex=4, FC03→3
+        fc = 4 if self.fc_code == 4 else 3  # FC03=hr, FC04=ir  # FC04→fc_as_hex=4, FC03→3
         addr = self._find_addr('DER_POWER_FACTOR_SET')
         if addr is not None:
             self.store.setValues(fc, addr, [self.power_factor_set])
@@ -2379,6 +1113,71 @@ class GenericInverterSimulator:
         if addr is not None:
             self.store.setValues(fc, addr, [self.on_off])
 
+    def _init_iv_scan_data(self):
+        """Pre-generate IV scan curve data into registers (0x8000+).
+
+        String voltage sweep:
+          V_min  = register file IV_SCAN_V_MIN (Solarize/Senergy 200V,
+                   Kstar 250V — protocol-specific real operating window)
+          Voc    = current MPPT voltage × 1.2 (dynamic, reflects live PV
+                   voltage at scan time — Voc is ~1.2× the MPP voltage
+                   for crystalline silicon cells)
+          N      = register file IV_SCAN_DATA_POINTS (64 or 100)
+        Points are evenly spaced from V_min to Voc per string. Current
+        follows an exponential IV drop approximation so near V_min the
+        current is near Isc and at Voc it drops to ~0 A.
+
+        Called once at startup AND again on every IV scan trigger so the
+        Voc reflects the current MPPT voltage when the scan runs.
+        """
+        get_iv_v = getattr(self._module, 'generate_iv_voltage_data', None)
+        get_iv_i = getattr(self._module, 'generate_iv_current_data', None)
+        get_iv_v_regs = getattr(self._module, 'get_iv_tracker_voltage_registers', None)
+        get_iv_i_regs = getattr(self._module, 'get_iv_string_current_registers', None)
+        if not all([get_iv_v, get_iv_i, get_iv_v_regs, get_iv_i_regs]):
+            return
+        fc = 4 if self.fc_code == 4 else 3  # FC03=hr, FC04=ir
+
+        # Per-protocol V_min: inverter-specific real-world string start
+        # voltage. Solarize/Senergy = 200V, Kstar = 250V. Default 200V
+        # for protocols without the constant.
+        v_min_default = int(getattr(self.reg_map, 'IV_SCAN_V_MIN', 200))
+
+        strings_per_mppt = max(self.string_channels // max(self.mppt_channels, 1), 1)
+        for mppt_idx in range(1, self.mppt_channels + 1):
+            # Current MPPT voltage in V. self._pv_v_nom is in 0.1V units.
+            try:
+                mppt_v_v = self._pv_v_nom[mppt_idx - 1] / 10.0
+            except (IndexError, AttributeError):
+                mppt_v_v = 400.0
+            # Voc = MPPT (MPP) voltage × 1.2 — typical crystalline Si ratio.
+            voc = mppt_v_v * 1.2
+            v_min = float(v_min_default)
+            if v_min >= voc:
+                # Safety: if V_min accidentally exceeds Voc (e.g. shaded
+                # panel dropped MPP below 200/250V), shrink V_min to 30%
+                # of Voc so the curve still has a meaningful range.
+                v_min = voc * 0.3
+            # Nominal Isc: scale per MPPT with tiny decay so each string
+            # curve looks slightly different.
+            isc = 11.0 - mppt_idx * 0.15
+            try:
+                v_info = get_iv_v_regs(mppt_idx)
+                v_data = get_iv_v(voc, v_min, v_info['count'])
+                self.store.setValues(fc, v_info['base'], v_data)
+            except (ValueError, KeyError, AttributeError, TypeError):
+                continue
+            for s in range(1, strings_per_mppt + 1):
+                try:
+                    i_info = get_iv_i_regs(mppt_idx, s)
+                    i_data = get_iv_i(isc * (1.0 - 0.05 * s), voc, v_min, i_info['count'])
+                    self.store.setValues(fc, i_info['base'], i_data)
+                except (ValueError, KeyError, AttributeError, TypeError):
+                    pass
+        # IV Scan Status register (0x600D)
+        iv_status_addr = getattr(self.reg_map, 'IV_SCAN_STATUS', 0x600D)
+        self.store.setValues(fc, iv_status_addr, [IVScanStatus.IDLE])
+
     def _get_sun_factor(self):
         """Get sun factor from shared environment."""
         return self.env.get_sun_fraction()
@@ -2387,24 +1186,118 @@ class GenericInverterSimulator:
         """Write values to the correct function code store."""
         if addr is None:
             return
-        fc = self.fc_code + 1 if self.fc_code == 4 else 3
+        fc = 4 if self.fc_code == 4 else 3  # FC03=hr, FC04=ir
         self.store.setValues(fc, addr, values)
 
     def _get_reg(self, addr, count=1):
         """Read values from the correct function code store."""
         if addr is None:
             return [0] * count
-        fc = self.fc_code + 1 if self.fc_code == 4 else 3
+        fc = 4 if self.fc_code == 4 else 3  # FC03=hr, FC04=ir
         return self.store.getValues(fc, addr, count=count)
 
     def _write_u32(self, low_addr, value):
-        """Write a U32 value to low and high word registers."""
+        """Write a U32 value respecting U32_WORD_ORDER from register module."""
         if low_addr is None:
             return
         val = int(value) & 0xFFFFFFFF
-        self._set_reg(low_addr, [val & 0xFFFF])
-        # Check for _HIGH attribute at low_addr+1
-        self._set_reg(low_addr + 1, [(val >> 16) & 0xFFFF])
+        lo_word = val & 0xFFFF
+        hi_word = (val >> 16) & 0xFFFF
+        if getattr(self._module, 'U32_WORD_ORDER', 'LH') == 'HL':
+            self._set_reg(low_addr, [hi_word])
+            self._set_reg(low_addr + 1, [lo_word])
+        else:
+            self._set_reg(low_addr, [lo_word])
+            self._set_reg(low_addr + 1, [hi_word])
+
+    def _smart_write(self, field_name, addr, value):
+        """DATA_TYPES를 보고 U16/U32/S32/FLOAT32에 맞춰 자동 쓰기.
+
+        field_name: RegisterMap 속성명 (DATA_TYPES 키)
+        addr: 시작 주소
+        value: 정수 값 (raw, scaled). FLOAT32 일 경우 스케일을 역적용해 float 으로 변환.
+
+        DATA_TYPES 가 None 또는 빈 값일 때(별칭 필드 포함)는 U16 으로 폴백한다.
+        """
+        if addr is None:
+            return
+        dtypes = getattr(self._module, 'DATA_TYPES', {}) or {}
+        dt_raw = dtypes.get(field_name)
+        # DATA_TYPES may be missing for alias fields (e.g. R_PHASE_VOLTAGE = L1_VOLTAGE,
+        # PV_POWER = PV1_INPUT_POWER). Map common alias names to a canonical
+        # target whose data type IS in DATA_TYPES.
+        if not dt_raw:
+            fname = field_name.upper()
+            # Power aliases — fall through to ACTIVE_POWER / PV1 / MPPT1 type
+            if fname in ('PV_POWER', 'DC_POWER'):
+                for t in ('PV1_POWER', 'PV1_INPUT_POWER', 'MPPT1_POWER',
+                          'ACTIVE_POWER', 'AC_POWER'):
+                    if dtypes.get(t):
+                        dt_raw = dtypes.get(t)
+                        break
+            elif fname in ('R_PHASE_VOLTAGE', 'S_PHASE_VOLTAGE', 'T_PHASE_VOLTAGE',
+                           'R_VOLTAGE', 'S_VOLTAGE', 'T_VOLTAGE'):
+                for t in ('L1_VOLTAGE', 'PHASE_A_VOLTAGE'):
+                    if dtypes.get(t):
+                        dt_raw = dtypes.get(t)
+                        break
+            elif fname in ('R_PHASE_CURRENT', 'S_PHASE_CURRENT', 'T_PHASE_CURRENT',
+                           'R_CURRENT', 'S_CURRENT', 'T_CURRENT'):
+                for t in ('L1_CURRENT', 'PHASE_A_CURRENT'):
+                    if dtypes.get(t):
+                        dt_raw = dtypes.get(t)
+                        break
+            else:
+                # Generic L1_* fallback for any voltage/current alias
+                for alias_target in ('L1_VOLTAGE', 'L1_CURRENT', 'L2_VOLTAGE', 'L2_CURRENT',
+                                      'L3_VOLTAGE', 'L3_CURRENT'):
+                    if dtypes.get(alias_target):
+                        dt_raw = dtypes.get(alias_target)
+                        break
+        dt = (dt_raw or 'U16').upper()
+        if dt == 'FLOAT32':
+            # Convert raw scaled int → physical float by applying the
+            # appropriate scale factor. Field name match is **most-specific
+            # first** so POWER_FACTOR and ENERGY don't accidentally pick the
+            # generic POWER scale.
+            fname = field_name.upper()
+            if 'POWER_FACTOR' in fname or 'PF' in fname:
+                scale = self.scale.get('power_factor', 0.001)
+            elif 'ENERGY' in fname or 'GENERATION' in fname:
+                # Cumulative energy values are already in kWh — no scaling.
+                scale = 1.0
+            elif 'FREQUENCY' in fname or 'FREQ' in fname:
+                scale = self.scale.get('frequency', 0.01)
+            elif 'VOLTAGE' in fname:
+                scale = self.scale.get('voltage', 0.1)
+            elif 'CURRENT' in fname:
+                scale = self.scale.get('current', 0.01)
+            elif 'POWER' in fname:
+                scale = self.scale.get('power', 0.1)
+            else:
+                scale = 1.0
+            try:
+                fval = float(value) * scale
+            except (TypeError, ValueError):
+                fval = 0.0
+            import struct as _struct
+            packed = _struct.pack('>f', fval)
+            hi, lo = _struct.unpack('>HH', packed)
+            if getattr(self._module, 'U32_WORD_ORDER', 'LH') == 'HL':
+                self._set_reg(addr, [hi])
+                self._set_reg(addr + 1, [lo])
+            else:
+                self._set_reg(addr, [lo])
+                self._set_reg(addr + 1, [hi])
+        elif dt in ('U32', 'S32'):
+            self._write_u32(addr, value)
+        elif dt == 'S16':
+            v = int(value)
+            if v < 0:
+                v = v + 65536
+            self._set_reg(addr, [v & 0xFFFF])
+        else:  # U16 (default)
+            self._set_reg(addr, [int(value) & 0xFFFF])
 
     def _update_registers(self):
         """Update all register values — called every ~1s by EquipmentSimulator."""
@@ -2450,14 +1343,16 @@ class GenericInverterSimulator:
             else:
                 # Scan RegisterMap for MPPTn_VOLTAGE/CURRENT/POWER
                 n = i + 1
-                v_addr = self._find_addr(f'MPPT{n}_VOLTAGE', f'PV{n}_VOLTAGE')
-                c_addr = self._find_addr(f'MPPT{n}_CURRENT', f'PV{n}_CURRENT')
-                p_addr = self._find_addr(f'MPPT{n}_POWER')
-                self._set_reg(v_addr, [mppt_v_raw])
-                self._set_reg(c_addr, [mppt_c_raw])
+                v_field = f'MPPT{n}_VOLTAGE'
+                c_field = f'MPPT{n}_CURRENT'
+                p_field = f'MPPT{n}_POWER'
+                v_addr = self._find_addr(v_field, f'PV{n}_VOLTAGE')
+                c_addr = self._find_addr(c_field, f'PV{n}_CURRENT')
+                p_addr = self._find_addr(p_field)
+                self._smart_write(v_field, v_addr, mppt_v_raw)
+                self._smart_write(c_field, c_addr, mppt_c_raw)
                 if p_addr is not None:
-                    self._set_reg(p_addr, [mppt_p_raw & 0xFFFF])
-                    self._set_reg(p_addr + 1, [(mppt_p_raw >> 16) & 0xFFFF])
+                    self._smart_write(p_field, p_addr, mppt_p_raw)
 
         # --- String data ---
         for i in range(self.string_channels):
@@ -2480,59 +1375,143 @@ class GenericInverterSimulator:
                     pass
             else:
                 n = i + 1
-                v_addr = self._find_addr(f'STRING{n}_VOLTAGE')
-                c_addr = self._find_addr(f'STRING{n}_CURRENT')
-                self._set_reg(v_addr, [str_v_raw])
-                self._set_reg(c_addr, [str_c_raw])
+                v_field = f'STRING{n}_VOLTAGE'
+                c_field = f'STRING{n}_CURRENT'
+                v_addr = self._find_addr(v_field)
+                c_addr = self._find_addr(c_field)
+                self._smart_write(v_field, v_addr, str_v_raw)
+                self._smart_write(c_field, c_addr, str_c_raw)
 
         # --- AC phase data ---
-        ac_voltage_raw = int(380.0 / self._s_voltage) if ac_power_w > 0 else 0
+        # Grid voltage is always present (even at night when inverter is in standby).
+        # Add tiny noise for realism. 380V three-phase nominal.
+        ac_voltage_v = 380.0 + random.uniform(-1.5, 1.5)
+        ac_voltage_raw = int(ac_voltage_v / self._s_voltage)
         ac_freq_raw = int(env.frequency / self._s_freq)
         ac_power_raw = int(ac_power_w / self._s_power)
         pv_power_raw = int(pv_total_w / self._s_power)
 
-        # Phase voltages (try multiple naming conventions)
-        for names in [('L1_VOLTAGE', 'R_PHASE_VOLTAGE', 'A_PHASE_VOLTAGE'),
-                      ('L2_VOLTAGE', 'S_PHASE_VOLTAGE', 'B_PHASE_VOLTAGE'),
-                      ('L3_VOLTAGE', 'T_PHASE_VOLTAGE', 'C_PHASE_VOLTAGE')]:
-            addr = self._find_addr(*names)
-            self._set_reg(addr, [ac_voltage_raw])
+        # H01_FIELD_MAP-driven write helper: writes the value to whatever address
+        # the register file says the RTU will read for this H01 field. Falls back
+        # to legacy _find_addr() with the supplied alias names when the mapping
+        # is missing (older files without H01_FIELD_MAP).
+        def _h01_write(h01_key, value, *fallback_aliases):
+            addr, attr = self._h01_addr(h01_key)
+            if addr is None:
+                addr = self._find_addr(*fallback_aliases) if fallback_aliases else None
+                attr = fallback_aliases[0] if fallback_aliases else h01_key.upper()
+            if addr is not None:
+                self._smart_write(attr, addr, value)
 
-        # Phase currents
+        # Phase voltages — always written (grid voltage exists 24/7).
+        _h01_write('r_voltage', ac_voltage_raw, 'R_PHASE_VOLTAGE', 'L1_VOLTAGE', 'A_PHASE_VOLTAGE')
+        _h01_write('s_voltage', ac_voltage_raw, 'S_PHASE_VOLTAGE', 'L2_VOLTAGE', 'B_PHASE_VOLTAGE')
+        _h01_write('t_voltage', ac_voltage_raw, 'T_PHASE_VOLTAGE', 'L3_VOLTAGE', 'C_PHASE_VOLTAGE')
+
+        # Phase currents (only when generating power)
         apparent_w = math.sqrt(ac_power_w**2) if ac_power_w > 0 else 0
         phase_current_raw = int(apparent_w / 3 / 380.0 / self._s_current) if apparent_w > 0 else 0
-        for names in [('L1_CURRENT', 'R_PHASE_CURRENT'),
-                      ('L2_CURRENT', 'S_PHASE_CURRENT'),
-                      ('L3_CURRENT', 'T_PHASE_CURRENT')]:
-            addr = self._find_addr(*names)
-            self._set_reg(addr, [phase_current_raw])
+        _h01_write('r_current', phase_current_raw, 'R_PHASE_CURRENT', 'L1_CURRENT')
+        _h01_write('s_current', phase_current_raw, 'S_PHASE_CURRENT', 'L2_CURRENT')
+        _h01_write('t_current', phase_current_raw, 'T_PHASE_CURRENT', 'L3_CURRENT')
 
-        # Frequency
-        addr = self._find_addr('FREQUENCY')
-        self._set_reg(addr, [ac_freq_raw])
+        # Frequency — always written
+        _h01_write('frequency', ac_freq_raw, 'FREQUENCY')
 
-        # AC Power (U32)
-        addr = self._find_addr('AC_POWER', 'ACTIVE_POWER')
-        if addr is not None:
-            self._write_u32(addr, ac_power_raw)
+        # AC Power
+        _h01_write('ac_power', ac_power_raw, 'AC_POWER', 'ACTIVE_POWER')
 
-        # PV Power (U32)
-        addr = self._find_addr('PV_POWER')
-        if addr is not None:
-            self._write_u32(addr, pv_power_raw)
+        # PV Power
+        _h01_write('pv_power', pv_power_raw, 'PV_POWER')
 
-        # Power factor
-        pf = self.power_factor_set / 1000.0
-        pf = max(0.85, min(1.0, abs(pf)))
-        pf_raw = int(pf * 1000)
-        addr = self._find_addr('POWER_FACTOR')
-        self._set_reg(addr, [pf_raw & 0xFFFF])
+        # Power factor / reactive power — compute from active power and setpoint.
+        # Two control modes (tracked via self.control_mode set in _check_control_changes):
+        #   'PF' : fixed PF setpoint → Q = P × tan(acos(|PF|)), signed by PF sign
+        #   'RP' : fixed reactive power % → Q = NOMINAL_POWER × q_pct/100,
+        #          actual PF = P / sqrt(P² + Q²), signed by Q sign
+        # Sign convention: reactive_power_set > 0 → inductive (Q>0), PF signed negative.
+        # When P=0 (night/off), Q=0 and PF defaults to the setpoint.
+        pf_setpoint = self.power_factor_set / 1000.0           # -1.0..1.0
+        q_pct = self.reactive_power_set / 10.0                 # -100..100 %
+        # Handle signed 16-bit wrap-around for negative setpoints.
+        if pf_setpoint > 32.767:
+            pf_setpoint -= 65.536
+        if q_pct > 3276.7:
+            q_pct -= 6553.6
 
-        # Cumulative energy
+        if self.control_mode == 'RP' and abs(q_pct) > 0.1:
+            # Q control mode: Q set directly, PF derived.
+            # q_pct is percent of rated apparent power (NOMINAL_POWER used as S_rated).
+            q_var = self.NOMINAL_POWER * q_pct / 100.0
+            if ac_power_w > 0:
+                s_va = math.sqrt(ac_power_w * ac_power_w + q_var * q_var)
+                pf_actual = ac_power_w / s_va if s_va > 0 else 1.0
+                # PF sign follows Q sign (lagging Q > 0 → leading PF convention negative).
+                if q_var < 0:
+                    pf_actual = -pf_actual
+            else:
+                pf_actual = 1.0
+                q_var = 0.0
+        else:
+            # PF control mode: PF fixed, Q derived from P.
+            pf_abs = max(0.0, min(1.0, abs(pf_setpoint)))
+            pf_actual = pf_setpoint if pf_setpoint != 0 else 1.0
+            if ac_power_w > 0 and pf_abs > 0 and pf_abs < 1.0:
+                # Q = P × tan(acos(PF))
+                q_var = ac_power_w * math.tan(math.acos(pf_abs))
+                if pf_setpoint < 0:
+                    q_var = -q_var
+            else:
+                q_var = 0.0
+
+        pf_raw = int(pf_actual * 1000)
+        # Clamp to S16 range for register write (-32768..32767)
+        pf_raw = max(-32768, min(32767, pf_raw))
+        _h01_write('power_factor', pf_raw & 0xFFFF, 'POWER_FACTOR')
+
+        # --- DER-AVM Real-time Monitoring (0x03E8~0x03FD, S32) ---
+        # Mirrors the H01 baseline values so the dashboard "Monitor" line
+        # (sourced from H05 control_result) stays consistent with H01 cards.
+        # Voltage, frequency, and PF are always present (grid stays up at night);
+        # currents and active power follow ac_power_w.
+        dea_pf = pf_raw                                       # 0.001
+        dea_freq = int(env.frequency * 10)                    # 0.1 Hz
+        dea_power = int(ac_power_w / 100)                     # 0.1 kW (× 10)
+        dea_voltage = int(380 * 10)                           # 0.1 V (always present)
+        # Apparent current = sqrt(P² + Q²) / (sqrt(3) × V) for 3-phase.
+        # Use S/3/380 per-phase approximation consistent with P path.
+        s_va = math.sqrt(ac_power_w * ac_power_w + q_var * q_var) if ac_power_w > 0 else 0
+        dea_current = int(s_va / 3 / 380 * 10) if s_va > 0 else 0  # 0.1 A per phase
+        dea_reactive = int(q_var)                             # 1 Var (signed)
+        for dea_name_aliases, dea_val in [
+            (('DEA_L1_CURRENT', 'DEA_L1_CURRENT_LOW'), dea_current),
+            (('DEA_L2_CURRENT', 'DEA_L2_CURRENT_LOW'), dea_current),
+            (('DEA_L3_CURRENT', 'DEA_L3_CURRENT_LOW'), dea_current),
+            (('DEA_L1_VOLTAGE', 'DEA_L1_VOLTAGE_LOW'), dea_voltage),
+            (('DEA_L2_VOLTAGE', 'DEA_L2_VOLTAGE_LOW'), dea_voltage),
+            (('DEA_L3_VOLTAGE', 'DEA_L3_VOLTAGE_LOW'), dea_voltage),
+            (('DEA_TOTAL_ACTIVE_POWER', 'DEA_TOTAL_ACTIVE_POWER_LOW',
+              'DEA_ACTIVE_POWER_LOW'), dea_power),
+            (('DEA_TOTAL_REACTIVE_POWER', 'DEA_TOTAL_REACTIVE_POWER_LOW',
+              'DEA_REACTIVE_POWER', 'DEA_REACTIVE_POWER_LOW'), dea_reactive),
+            (('DEA_POWER_FACTOR', 'DEA_POWER_FACTOR_LOW'), dea_pf),
+            (('DEA_FREQUENCY', 'DEA_FREQUENCY_LOW'), dea_freq),
+            (('DEA_STATUS_FLAG', 'DEA_STATUS_FLAG_LOW'), 1),
+        ]:
+            dea_addr = self._find_addr(*dea_name_aliases)
+            if dea_addr is not None:
+                self._write_u32(dea_addr, dea_val)
+
+        # Cumulative energy — written via H01_FIELD_MAP so per-protocol register
+        # naming differences (ACCUMULATEDPOWERGENERATION, PV1ENERGY_TOTAL_LOW, etc.)
+        # are honored automatically.
         total_kwh = int(self.total_energy)
-        addr = self._find_addr('CUMULATIVE_ENERGY', 'CUMULATIVE_ENERGY_LOW', 'TOTAL_ENERGY')
-        if addr is not None:
-            self._write_u32(addr, total_kwh)
+        cum_addr, cum_attr = self._h01_addr('cumulative_energy')
+        if cum_addr is None:
+            cum_addr = self._find_addr('CUMULATIVE_ENERGY', 'CUMULATIVE_ENERGY_LOW', 'TOTAL_ENERGY')
+            cum_attr = 'CUMULATIVE_ENERGY'
+        if cum_addr is not None:
+            self._smart_write(cum_attr, cum_addr, total_kwh)
 
         # Accumulate energy
         if ac_power_w > 0:
@@ -2548,9 +1527,22 @@ class GenericInverterSimulator:
                 mode_val = 1 if self.on_off == 1 else 3
             self._set_reg(addr, [mode_val])
 
-        # Error codes
+        # Error codes — only write if address does NOT collide with a measurement
+        # field. Some MM v2 generated files reuse the same register address for
+        # ERROR_CODE2 and L1_VOLTAGE / FREQUENCY etc.; writing 0 there would
+        # corrupt the measurement we already wrote above.
+        _measurement_addrs = set()
+        for h01_key in ('r_voltage', 's_voltage', 't_voltage',
+                        'r_current', 's_current', 't_current',
+                        'frequency', 'power_factor', 'ac_power', 'pv_power',
+                        'cumulative_energy'):
+            a, _ = self._h01_addr(h01_key)
+            if a is not None:
+                _measurement_addrs.add(a)
         for name in ('ERROR_CODE1', 'ERROR_CODE2', 'ERROR_CODE3'):
             addr = self._find_addr(name)
+            if addr is None or addr in _measurement_addrs:
+                continue
             self._set_reg(addr, [0])
 
         # Temperature — from environment
@@ -2609,6 +1601,26 @@ class GenericInverterSimulator:
             val = self._get_reg(addr)[0]
             if val != self.operation_mode:
                 self.operation_mode = val
+
+        # IV Scan command (0x600D): 1=Start → regenerate curve data from
+        # the current MPPT voltage, then immediately advance to FINISHED.
+        # Regeneration here (instead of only at startup) ensures Voc tracks
+        # live PV conditions: Voc = current MPPT voltage × 1.2.
+        iv_cmd_addr = getattr(self.reg_map, 'IV_SCAN_COMMAND', 0x600D)
+        iv_status_addr = getattr(self.reg_map, 'IV_SCAN_STATUS', 0x600D)
+        val = self._get_reg(iv_cmd_addr)
+        if val and val[0] == IVScanCommand.ACTIVE:
+            # Regenerate IV curve with up-to-date Voc = MPPT voltage × 1.2
+            self._init_iv_scan_data()
+            self.iv_scan_status = IVScanStatus.FINISHED
+            fc = 4 if self.fc_code == 4 else 3  # FC03=hr, FC04=ir
+            self.store.setValues(fc, iv_status_addr, [IVScanStatus.FINISHED])
+            self.logger.info(f"[{self.protocol_name}] IV Scan -> FINISHED")
+        elif val and val[0] == IVScanCommand.NON_ACTIVE and self.iv_scan_status == IVScanStatus.FINISHED:
+            # RTU clears the command after reading IV data → reset to IDLE for next scan.
+            self.iv_scan_status = IVScanStatus.IDLE
+            fc = 4 if self.fc_code == 4 else 3  # FC03=hr, FC04=ir
+            self.store.setValues(fc, iv_status_addr, [IVScanStatus.IDLE])
 
 
 # =============================================================================
@@ -2859,16 +1871,25 @@ class EquipmentSimulator:
             identity.ModelName = 'Multi-Device'
             identity.MajorMinorRevision = self.VERSION
 
-            StartSerialServer(
-                context=self.context,
-                identity=identity,
-                port=self.port,
-                baudrate=self.baudrate,
-                bytesize=8,
-                parity='N',
-                stopbits=1,
-                timeout=1
-            )
+            tcp_port = getattr(self, 'tcp_port', None)
+            if tcp_port:
+                self.logger.info(f"[TEST] Starting Modbus TCP server on 127.0.0.1:{tcp_port}")
+                StartTcpServer(
+                    context=self.context,
+                    identity=identity,
+                    address=('127.0.0.1', tcp_port),
+                )
+            else:
+                StartSerialServer(
+                    context=self.context,
+                    identity=identity,
+                    port=self.port,
+                    baudrate=self.baudrate,
+                    bytesize=8,
+                    parity='N',
+                    stopbits=1,
+                    timeout=1
+                )
         except KeyboardInterrupt:
             print("\n\nShutting down...")
         except Exception as e:
@@ -3074,20 +2095,8 @@ def _calc_isc_cap(voc, nominal_power_w, total_strings):
 
 
 def _create_inverter_by_protocol(protocol, logger, env=None):
-    """Create inverter simulator by protocol name"""
-    p = protocol.lower()
-    if p.startswith('solarize') or p == 'verterking':
-        return InverterSimulator(logger, env=env)
-    elif p.startswith('kstar'):
-        return KstarSimulator(logger, env=env)
-    elif p.startswith('huawei'):
-        return HuaweiSimulator(logger, env=env)
-    elif p.startswith('ekos'):
-        return EkosSimulator(logger, env=env)
-    elif p.startswith('sungrow'):
-        return SungrowSimulator(logger, env=env)
-    else:
-        return GenericInverterSimulator(protocol, logger, env=env)
+    """Create inverter simulator — 모든 프로토콜을 GenericInverterSimulator로 통합."""
+    return GenericInverterSimulator(protocol, logger, env=env)
 
 
 def _load_config_from_ini():
@@ -3168,17 +2177,12 @@ def _interactive_setup():
     print("=" * 70)
     print()
 
-    # COM port
-    port_input = input("  COM Port [COM10]: ").strip()
-    port = port_input if port_input else "COM10"
-
-    baud_input = input("  Baudrate [9600]: ").strip()
-    baudrate = int(baud_input) if baud_input else 9600
-
-    # Device count
+    # COM port / baudrate / device count — 고정값 자동 실행
+    port = "COM10"
+    baudrate = 9600
+    device_count = 5
+    print(f"  COM Port: {port}  Baudrate: {baudrate}  Devices: {device_count}")
     print()
-    count_input = input("  Number of devices [5]: ").strip()
-    device_count = int(count_input) if count_input else 5
 
     all_models = _load_device_models_ini()
     inv_models = all_models['inverter']
@@ -3284,6 +2288,8 @@ def main():
                         help='Baudrate (overrides config)')
     parser.add_argument('--config', type=str, default=None,
                         help='Load config JSON (backward compat, overrides INI)')
+    parser.add_argument('--tcp-port', type=int, default=None,
+                        help='Test mode: start Modbus TCP server on 127.0.0.1:PORT (bypasses serial)')
     # Legacy args for backward compatibility
     parser.add_argument('--inverter-id', type=int, default=None)
     parser.add_argument('--relay-id', type=int, default=None)
@@ -3379,13 +2385,13 @@ def main():
     if 'baudrate' not in config:
         config['baudrate'] = 9600
 
-    # COM 포트 확인/변경 (CLI --port 미지정 시)
+    # COM 포트: CLI --port 미지정 시 config 기본값(COM10) 사용
     if not args.port:
-        port_input = input(f"  COM Port [{config['port']}]: ").strip()
-        if port_input:
-            config['port'] = port_input
+        print(f"  COM Port: {config['port']}")
 
     simulator = EquipmentSimulator(config)
+    if args.tcp_port:
+        simulator.tcp_port = args.tcp_port
     simulator.start()
 
 

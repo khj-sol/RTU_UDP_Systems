@@ -16,24 +16,25 @@ class RegisterMap:
     # =========================================================================
     # Device Information
     # =========================================================================
-    THE_POWER_ON_DISPLAY_SELECT_NATIONAL_STANDARDSTATUS = 0x0000  # U16
     DEVICE_MODEL                             = 0x0BB8  # U16
     AC_OUTPUT_TYPE                           = 0x0BBB  # U16
-    REG_81S1                                 = 0x0BC4  # U16, scale Hz 0.01
+    PV_POWER                                 = 0x0BC4  # U16, scale Hz 0.01
+    ENERGY_LAST_MONTH                        = 0x0BC5  # U32, scale kWh 1
+    ENERGY_LAST_MONTH_HIGH                   = 0x0BC6
     DAILY_ENERGY                             = 0x0BC7  # U16, scale kWh 0.1
-    FREQUENCY                                = 0x0BC8  # U16, scale kWh 0.1
+    REG_81S2F_T                              = 0x0BC9  # U16
     FIRMWARE_VERSION                         = 0x0BCD  # U16
-    CA_LINE_VOLTAGE_C_PHASEVOLTAGE           = 0x0BDC  # U16, scale V 0.1
-    B_PHASE_CURRENT                          = 0x0BDE  # U16, scale A 0.1
-    APPARENT_POWER_VALUE                     = 0x0BF2  # S32
-    APPARENT_POWER_VALUE_HIGH                = 0x0BF3
+    ACTUAL_POWER_FACTORADJUSTMENT            = 0x0BEC  # S16
+    POWER_FACTOR                             = 0x0BED  # S16
     INVERTER_SERIAL_NUMBER_SN_1              = 0x0BF5  # U16
     INVERTER_SERIAL_NUMBER_SN_2              = 0x0BF6  # U16
     INVERTER_SERIAL_NUMBER_SN_3              = 0x0BF7  # U16
     INVERTER_SERIAL_NUMBER_SN_4              = 0x0BF8  # U16
     INVERTER_REATED_APPARENTPOWER            = 0x0C26  # U16, scale VA 10
-    TOTAL_ENERGY_DECIMAL_PART                = 0x0C2D  # U16, scale kWh 0.001
     AFCI_BOARD_MODEL                         = 0x0C4D  # U16
+    STANDARD_OPERATING_MODE_STATUS           = 0x0C52  # U16
+    OVERFREQUENCY_LOADSHEDDING_SPECIAL_FUNCTIONSETTINGS = 0x0C80  # U16
+    ONE_CLICK_RESET_ENABLE_COMMAND_STATUS    = 0x0C9C  # U16
     SN_NUMBER                                = 0x0C9E  # U16
     METER_APPARENT_POWER_A                   = 0x0CC9  # S32, scale A
     METER_APPARENT_POWER_A_HIGH              = 0x0CCA
@@ -43,6 +44,8 @@ class RegisterMap:
     METER_APPARENT_POWER_C_HIGH              = 0x0CCE
     METER_APPARENT_POWER                     = 0x0CCF  # S32
     METER_APPARENT_POWER_HIGH                = 0x0CD0
+    PVSTR13_VOLTAGE                          = 0x0D05  # U16, scale V 0.1
+    L2_VOLTAGE                               = 0x0E43  # U16
     REG_81_S1_FREQUENCY_BPHASE               = 0x0E4A  # U16, scale Hz 0.01
     REG_81_S2S_FREQUENCY_BPHASE              = 0x0E52  # U16, scale Hz 0.01
     REG_81_S1_FREQUENCY_CPHASE               = 0x0E5E  # U16, scale Hz 0.01
@@ -60,59 +63,50 @@ class RegisterMap:
     # =========================================================================
     # Monitoring Data
     # =========================================================================
-    ADDRESS                                  = 0x0001  # U16
+    TEMPERATURE                              = 0x0001  # U16
+    FREQUENCY                                = 0x0002  # U16
     REACTIVE_POWER                           = 0x0003  # U16
-    CUMULATIVE_ENERGY                        = 0x0055  # U16
+    G100_CONTROL_SWITCH                      = 0x0055  # U16
     HMI_MAJOR_VERSION                        = 0x0BBA  # U16
-    ACTIVE_POWER                             = 0x0BBD  # S32, scale W 1
-    ACTIVE_POWER_HIGH                        = 0x0BBE
-    PV_POWER                                 = 0x0BBF  # U32, scale W 1
-    PV_POWER_HIGH                            = 0x0BC0
+    MPPT3_CURRENT                            = 0x0BBD  # S32, scale W 1
+    MPPT3_CURRENT_HIGH                       = 0x0BBE
+    TOTAL_DC_OUTPUT_POWER                    = 0x0BBF  # U32, scale W 1
+    TOTAL_DC_OUTPUT_POWER_HIGH               = 0x0BC0
+    CUMULATIVE_ENERGY                        = 0x0BC1  # U32, scale kWh 1
+    CUMULATIVE_ENERGY_HIGH                   = 0x0BC2
     PV_VOLTAGE                               = 0x0BC6  # U16, scale Hz 0.01
     DC_VOLTAGE_1                             = 0x0BCE  # U16, scale V 0.1
     DC_CURRENT_1                             = 0x0BCF  # U16, scale A 0.1
-    DC_VOLTAGE_2                             = 0x0BD0  # U16, scale V 0.1
+    MPPT2_VOLTAGE                            = 0x0BD0  # U16, scale V 0.1
     DC_CURRENT_2                             = 0x0BD1  # U16, scale A 0.1
-    DC_VOLTAGE_3                             = 0x0BD2  # U16, scale V 0.1
+    MPPT3_VOLTAGE                            = 0x0BD2  # U16, scale V 0.1
+    ERROR_CODE2                              = 0x0BD3  # U16, scale A 0.1
+    ERROR_CODE3                              = 0x0BD4  # U16, scale V 0.1
     DC_CURRENT_4                             = 0x0BD5  # U16, scale A 0.1
+    ALARM_CODE_DATA                          = 0x0BD6  # U16
     L1_CURRENT                               = 0x0BDD  # U16, scale A 0.1
+    L2_CURRENT                               = 0x0BDE  # U16, scale A 0.1
     L3_CURRENT                               = 0x0BDF  # U16, scale A 0.1
-    TEMPERATURE                              = 0x0BE2  # S16, scale ℃ 0.1
-    POWER_FACTOR                             = 0x0BED  # S16
-    STANDARD                                 = 0x0BEE  # U16
-    REACTIVE_POWER_VALUE                     = 0x0BF0  # S32
-    REACTIVE_POWER_VALUE_HIGH                = 0x0BF1
-    INTERNAL_EPM_HARD_LIMITFOR_AU_2020_CODE  = 0x0C2C  # S16, scale W 100
-    REG_01_59_S1_TIME                        = 0x0C34  # U16
+    INVERTER_STATUS                          = 0x0BE4  # U16
+    FAULT_CODE_03                            = 0x0C1A  # U16
+    INTERNAL_EPM_SWITCH_EPM_SOFT_SWITCH_FOR_AU2020_CODE = 0x0C27  # U16
+    REG_07_81_S2F_FREQUENCY                  = 0x0C3F  # U16, scale Hz 0.01
     AC_POWER                                 = 0x0C4E  # U16
-    METER_TOTAL_ACTIVE_POWER                 = 0x0CBF  # S32, scale kW 0.001
-    METER_TOTAL_ACTIVE_POWER_HIGH            = 0x0CC0
-    PV_CURRENT                               = 0x0CE4  # S16, scale A 0.1
     PV1_CURRENT                              = 0x0CE5  # S16, scale A 0.1
     PV2_CURRENT                              = 0x0CE6  # S16, scale A 0.1
     PV3_CURRENT                              = 0x0CE7  # S16, scale A 0.1
     PV4_CURRENT                              = 0x0CE8  # S16, scale A 0.1
-    REG_59_S1_VOLTAGE_B_PHASE                = 0x0E42  # U16, scale V 0.1
-    REG_59_S2_VOLTAGE_B_PHASE                = 0x0E44  # U16, scale V 0.1
-    REG_27_S1_VOLTAGE_B_PHASE                = 0x0E46  # U16, scale V 0.1
-    REG_27_S2_VOLTAGE_B_PHASE                = 0x0E48  # U16, scale V 0.1
     L3_VOLTAGE                               = 0x0E4E  # U16, scale Hz 0.01
-    L2_VOLTAGE                               = 0x0E4F  # U16
-    REG_59_S1_VOLTAGE_C_PHASE                = 0x0E56  # U16, scale V 0.1
-    REG_59_S2_VOLTAGE_C_PHASE                = 0x0E58  # U16, scale V 0.1
-    REG_27_S1_VOLTAGE_C_PHASE                = 0x0E5A  # U16, scale V 0.1
-    REG_27_S2_VOLTAGE_C_PHASE                = 0x0E5C  # U16, scale V 0.1
+    REG_81_S2F_TIME_B_PHASE                  = 0x0E4F  # U16
+    REG_81_S2F_TIME_C_PHASE                  = 0x0E63  # U16
 
     # =========================================================================
     # Status & Temperature
     # =========================================================================
-    INVERTER_STATUS                          = 0x0BE4  # U16
+    STANDARD_WORKING_MODE                    = 0x0BE1  # U16
     DERATING_LIMIT_STATUSINFORMATION         = 0x0C17  # U16
-    G100_RUNNING_STATUS                      = 0x0C2F  # U16
-    STANDARD_OPERATING_MODE_STATUS           = 0x0C52  # U16
     EXTERNAL_PID_STATUS_HARDWARE_DEVICE      = 0x0C55  # U16
-    ONE_CLICK_RESET_ENABLE_COMMAND_STATUS    = 0x0C9C  # U16
-    ONE_CLICK_RESET_OPERATING_COMMAND_STATUS = 0x0C9D  # U16
+    SEE_APPENDIX_5                           = 0x0C95  # U16
     ACTIVE_POWER_CONTROLSTATUS               = 0x0E24  # U16
     REACTIVE_POWER_CONTROLSTATUS             = 0x0E25  # U16
     VOLTAGE_CONTROL_STATUS                   = 0x0E26  # U16
@@ -120,21 +114,17 @@ class RegisterMap:
     # =========================================================================
     # Alarm / Error Codes
     # =========================================================================
-    ERROR_CODE1                              = 0x00A5  # U16
-    ERROR_CODE2                              = 0x0BD3  # U16, scale A 0.1
-    ERROR_CODE3                              = 0x0BD4  # U16, scale V 0.1
-    ALARM_CODE_DATA                          = 0x0BD6  # U16
-    FAULT_CODE_01                            = 0x0C18  # U16
-    FAULT_CODE_02                            = 0x0C19  # U16
-    FAULT_CODE_03                            = 0x0C1A  # U16
+    CLEAR_G100_ALARM                         = 0x00A5  # U16
+    CA_LINE_VOLTAGE_C_PHASEVOLTAGE           = 0x0BDC  # U16, scale V 0.1
     FAULT_CODE_04                            = 0x0C1B  # U16
-    FAULT_CODE_05                            = 0x0C1C  # U16
-    ARC_FAULT_NUMBER_OFOCCURRENCES           = 0x0C30  # U16
-    AFCI_FAULTY_DATA_SETS                    = 0x0C4F  # U16
-    AFCI_BOARD_CT_MODULEHARDWARE_FAULT_CHECKRESULT = 0x0C50  # U16
     AFCI_BOARD_ARC_FAULTCHECK_RESULT         = 0x0C51  # U16
     G100_CLEAR_ALARM_TYPE_SELECT             = 0x0C5F  # U16
+    FSM_POWER_CHANGE_LIMITPERCENTAGE         = 0x0C81  # U16, scale % 0.01
+    DROOP_SETTINGS_FOR_FSM                   = 0x0C82  # U16, scale % 0.01
+    ELECTRIC_METER_OR_DUAL_485OPTIONAL_FUNCTION_SWITCH = 0x0C9B  # U16
     REMOTE_REQUEST_AFCIFAULT_SIGNATURE_DATA_SWITCH = 0x0CAC  # U16
+    TOTAL_CONSUMPTION_OFHOUSEHOLD_LOADS      = 0x0CB0  # S32
+    TOTAL_CONSUMPTION_OFHOUSEHOLD_LOADS_HIGH = 0x0CB1
     REG_1_0_01HZ_RANGE47_0_49_0HZDEFAULT48_0HZ_ACCURACY0_05HZ = 0x0D52  # U16, scale Hz 0.01
     REG_100_1HZ_RANGE50_2_52_0HZDEFAULT50_20HZ_ACCURACY0_01HZ = 0x0D55  # U16, scale Hz 0.01
     REG_0_DROOP_MODE1_STEP_MODEDEFAULT_0     = 0x0D56  # U16
@@ -173,7 +163,6 @@ class RegisterMap:
     QUERY_SEQUENCE_NUMBER_OFFAULT_WARNING_RECORDS = 0xA9F3  # U16
 
     # --- Standard handler compatibility aliases (H01 Body Type 4 required) ---
-    L2_CURRENT                               = B_PHASE_CURRENT
     T_PHASE_VOLTAGE                          = L3_VOLTAGE
     R_PHASE_CURRENT                          = L1_CURRENT
     S_PHASE_CURRENT                          = L2_CURRENT
@@ -189,17 +178,17 @@ class RegisterMap:
     INVERTER_MODE                            = INVERTER_STATUS
     R_PHASE_VOLTAGE                          = S_PHASE_VOLTAGE  # L1 없음 → 단상 대체
     TOTAL_ENERGY                             = CUMULATIVE_ENERGY
+    ERROR_CODE1                              = REACTIVE_POWER
     DER_POWER_FACTOR_SET                     = 0x07D0
     DER_ACTION_MODE                          = 0x07D1
     DER_REACTIVE_POWER_PCT                   = 0x07D2
     DER_ACTIVE_POWER_PCT                     = 0x07D3
     INVERTER_ON_OFF                          = 0x0834
+    MPPT_NUMBER                              = 0x1A4A  # default MPPT count register
+    MPPT1_VOLTAGE                            = PV_VOLTAGE
+    CUMULATIVE_ENERGY_LOW                    = CUMULATIVE_ENERGY
+    DER_AVM_DIGITAL_METERCONNECT_STATUS      = 0x1210
 
-
-
-    # IV Scan block layout
-    IV_TRACKER_BLOCK_SIZE             = 0x0100  # 256 regs per tracker
-    IV_SCAN_DATA_POINTS              = 64      # default data points
 
 
 class InverterMode:
@@ -257,7 +246,7 @@ class ControlMode:
 
 
 class ErrorCode1:
-    """Error Code Table1 (0x00A5) — Bit field"""
+    """Error Code Table1 (0x000A) — Bit field"""
     BITS = {
     }
 
@@ -271,7 +260,7 @@ class ErrorCode1:
 
 
 class ErrorCode2:
-    """Error Code Table2 (0x0BD3) — Bit field"""
+    """Error Code Table2 (0x00A5) — Bit field"""
     BITS = {
     }
 
@@ -285,7 +274,7 @@ class ErrorCode2:
 
 
 class ErrorCode3:
-    """Error Code Table3 (0x0BD4) — Bit field"""
+    """Error Code Table3 (0x0BD3) — Bit field"""
     BITS = {
     }
 
@@ -299,7 +288,7 @@ class ErrorCode3:
 
 
 class ErrorCode4:
-    """Error Code Table4 (0x0BD6) — Bit field"""
+    """Error Code Table4 (0x0BD4) — Bit field"""
     BITS = {
     }
 
@@ -313,7 +302,7 @@ class ErrorCode4:
 
 
 class ErrorCode5:
-    """Error Code Table5 (0x0C18) — Bit field"""
+    """Error Code Table5 (0x0BD5) — Bit field"""
     BITS = {
     }
 
@@ -327,7 +316,7 @@ class ErrorCode5:
 
 
 class ErrorCode6:
-    """Error Code Table6 (0x0C19) — Bit field"""
+    """Error Code Table6 (0x0BD6) — Bit field"""
     BITS = {
     }
 
@@ -341,7 +330,7 @@ class ErrorCode6:
 
 
 class ErrorCode7:
-    """Error Code Table7 (0x0C1A) — Bit field"""
+    """Error Code Table7 (0x0BDC) — Bit field"""
     BITS = {
     }
 
@@ -369,7 +358,7 @@ class ErrorCode8:
 
 
 class ErrorCode9:
-    """Error Code Table9 (0x0C1C) — Bit field"""
+    """Error Code Table9 (0x0C51) — Bit field"""
     BITS = {
     }
 
@@ -383,7 +372,7 @@ class ErrorCode9:
 
 
 class ErrorCode10:
-    """Error Code Table10 (0x0C30) — Bit field"""
+    """Error Code Table10 (0x0C5F) — Bit field"""
     BITS = {
     }
 
@@ -397,7 +386,7 @@ class ErrorCode10:
 
 
 class ErrorCode11:
-    """Error Code Table11 (0x0C4F) — Bit field"""
+    """Error Code Table11 (0x0C81) — Bit field"""
     BITS = {
     }
 
@@ -411,7 +400,7 @@ class ErrorCode11:
 
 
 class ErrorCode12:
-    """Error Code Table12 (0x0C50) — Bit field"""
+    """Error Code Table12 (0x0C82) — Bit field"""
     BITS = {
     }
 
@@ -425,7 +414,7 @@ class ErrorCode12:
 
 
 class ErrorCode13:
-    """Error Code Table13 (0x0C51) — Bit field"""
+    """Error Code Table13 (0x0C9B) — Bit field"""
     BITS = {
     }
 
@@ -439,7 +428,7 @@ class ErrorCode13:
 
 
 class ErrorCode14:
-    """Error Code Table14 (0x0C5F) — Bit field"""
+    """Error Code Table14 (0x0CAC) — Bit field"""
     BITS = {
     }
 
@@ -453,7 +442,7 @@ class ErrorCode14:
 
 
 class ErrorCode15:
-    """Error Code Table15 (0x0CAC) — Bit field"""
+    """Error Code Table15 (0x0CB0) — Bit field"""
     BITS = {
     }
 
@@ -978,6 +967,16 @@ class SolisStatusConverter:
     def to_inverter_mode(cls, raw):
         return raw
 
+    @classmethod
+    def to_solarize(cls, raw):
+        """RTU 호환 alias"""
+        return cls.to_inverter_mode(raw)
+
+    @classmethod
+    def to_h01(cls, raw):
+        """RTU 호환 alias"""
+        return cls.to_inverter_mode(raw)
+
 
 # Dynamic-loader alias required by modbus_handler.load_register_module
 StatusConverter = SolisStatusConverter
@@ -1103,79 +1102,75 @@ def generate_iv_current_data(isc, voc, v_min, data_points=64):
 
 
 DATA_TYPES = {
-    'THE_POWER_ON_DISPLAY_SELECT_NATIONAL_STANDARDSTATUS': 'U16',
-    'ADDRESS': 'U16',
+    'POWER_FACTOR': 'U16',
+    'TEMPERATURE': 'U16',
     'FREQUENCY': 'U16',
     'REACTIVE_POWER': 'U16',
-    'CUMULATIVE_ENERGY': 'U16',
-    'ERROR_CODE1': 'U16',
+    'G100_CONTROL_SWITCH': 'U16',
+    'CLEAR_G100_ALARM': 'U16',
     'DEVICE_MODEL': 'U16',
     'HMI_MAJOR_VERSION': 'U16',
     'AC_OUTPUT_TYPE': 'U16',
-    'ACTIVE_POWER': 'S32',
-    'PV_POWER': 'U32',
-    'PV_POWER_HIGH': 'U16',
-    'REG_81S1': 'U16',
+    'MPPT3_CURRENT': 'S32',
+    'MPPT3_CURRENT_HIGH': 'U16',
+    'TOTAL_DC_OUTPUT_POWER': 'U32',
+    'CUMULATIVE_ENERGY': 'U32',
+    'PV_POWER': 'U16',
+    'ENERGY_LAST_MONTH': 'U32',
     'PV_VOLTAGE': 'U16',
     'DAILY_ENERGY': 'U16',
+    'REG_81S2F_T': 'U16',
     'FIRMWARE_VERSION': 'U16',
     'DC_VOLTAGE_1': 'U16',
     'DC_CURRENT_1': 'U16',
-    'DC_VOLTAGE_2': 'U16',
+    'MPPT2_VOLTAGE': 'U16',
     'DC_CURRENT_2': 'U16',
-    'DC_VOLTAGE_3': 'U16',
+    'MPPT3_VOLTAGE': 'U16',
     'ERROR_CODE2': 'U16',
     'ERROR_CODE3': 'U16',
     'DC_CURRENT_4': 'U16',
     'ALARM_CODE_DATA': 'U16',
     'CA_LINE_VOLTAGE_C_PHASEVOLTAGE': 'U16',
     'L1_CURRENT': 'U16',
-    'B_PHASE_CURRENT': 'U16',
+    'L2_CURRENT': 'U16',
     'L3_CURRENT': 'U16',
-    'TEMPERATURE': 'S16',
+    'STANDARD_WORKING_MODE': 'U16',
     'INVERTER_STATUS': 'U16',
-    'POWER_FACTOR': 'S16',
-    'STANDARD': 'U16',
-    'REACTIVE_POWER_VALUE': 'S32',
-    'APPARENT_POWER_VALUE': 'S32',
+    'ACTUAL_POWER_FACTORADJUSTMENT': 'S16',
     'INVERTER_SERIAL_NUMBER_SN_1': 'U16',
     'INVERTER_SERIAL_NUMBER_SN_2': 'U16',
     'INVERTER_SERIAL_NUMBER_SN_3': 'U16',
     'INVERTER_SERIAL_NUMBER_SN_4': 'U16',
     'DERATING_LIMIT_STATUSINFORMATION': 'U16',
-    'FAULT_CODE_01': 'U16',
-    'FAULT_CODE_02': 'U16',
     'FAULT_CODE_03': 'U16',
     'FAULT_CODE_04': 'U16',
-    'FAULT_CODE_05': 'U16',
     'INVERTER_REATED_APPARENTPOWER': 'U16',
-    'INTERNAL_EPM_HARD_LIMITFOR_AU_2020_CODE': 'S16',
-    'TOTAL_ENERGY_DECIMAL_PART': 'U16',
-    'G100_RUNNING_STATUS': 'U16',
-    'ARC_FAULT_NUMBER_OFOCCURRENCES': 'U16',
-    'REG_01_59_S1_TIME': 'U16',
+    'INTERNAL_EPM_SWITCH_EPM_SOFT_SWITCH_FOR_AU2020_CODE': 'U16',
+    'REG_07_81_S2F_FREQUENCY': 'U16',
     'AFCI_BOARD_MODEL': 'U16',
     'AC_POWER': 'U16',
-    'AFCI_FAULTY_DATA_SETS': 'U16',
-    'AFCI_BOARD_CT_MODULEHARDWARE_FAULT_CHECKRESULT': 'U16',
     'AFCI_BOARD_ARC_FAULTCHECK_RESULT': 'U16',
     'STANDARD_OPERATING_MODE_STATUS': 'U16',
     'EXTERNAL_PID_STATUS_HARDWARE_DEVICE': 'U16',
     'G100_CLEAR_ALARM_TYPE_SELECT': 'U16',
+    'OVERFREQUENCY_LOADSHEDDING_SPECIAL_FUNCTIONSETTINGS': 'U16',
+    'FSM_POWER_CHANGE_LIMITPERCENTAGE': 'U16',
+    'DROOP_SETTINGS_FOR_FSM': 'U16',
+    'SEE_APPENDIX_5': 'U16',
+    'ELECTRIC_METER_OR_DUAL_485OPTIONAL_FUNCTION_SWITCH': 'U16',
     'ONE_CLICK_RESET_ENABLE_COMMAND_STATUS': 'U16',
-    'ONE_CLICK_RESET_OPERATING_COMMAND_STATUS': 'U16',
     'SN_NUMBER': 'U16',
     'REMOTE_REQUEST_AFCIFAULT_SIGNATURE_DATA_SWITCH': 'U16',
-    'METER_TOTAL_ACTIVE_POWER': 'S32',
+    'TOTAL_CONSUMPTION_OFHOUSEHOLD_LOADS': 'S32',
     'METER_APPARENT_POWER_A': 'S32',
     'METER_APPARENT_POWER_B': 'S32',
     'METER_APPARENT_POWER_C': 'S32',
     'METER_APPARENT_POWER': 'S32',
-    'PV_CURRENT': 'S16',
     'PV1_CURRENT': 'S16',
     'PV2_CURRENT': 'S16',
     'PV3_CURRENT': 'S16',
     'PV4_CURRENT': 'S16',
+    'PVSTR13_VOLTAGE': 'U16',
     'REG_1_0_01HZ_RANGE47_0_49_0HZDEFAULT48_0HZ_ACCURACY0_05HZ': 'U16',
     'REG_100_1HZ_RANGE50_2_52_0HZDEFAULT50_20HZ_ACCURACY0_01HZ': 'U16',
     'REG_0_DROOP_MODE1_STEP_MODEDEFAULT_0': 'U16',
@@ -1187,19 +1182,13 @@ DATA_TYPES = {
     'REACTIVE_POWER_CONTROLSTATUS': 'U16',
     'VOLTAGE_CONTROL_STATUS': 'U16',
     'ALARM_OPERATION': 'U16',
-    'REG_59_S1_VOLTAGE_B_PHASE': 'U16',
-    'REG_59_S2_VOLTAGE_B_PHASE': 'U16',
-    'REG_27_S1_VOLTAGE_B_PHASE': 'U16',
-    'REG_27_S2_VOLTAGE_B_PHASE': 'U16',
+    'L2_VOLTAGE': 'U16',
     'REG_81_S1_FREQUENCY_BPHASE': 'U16',
     'L3_VOLTAGE': 'U16',
-    'L2_VOLTAGE': 'U16',
+    'REG_81_S2F_TIME_B_PHASE': 'U16',
     'REG_81_S2S_FREQUENCY_BPHASE': 'U16',
-    'REG_59_S1_VOLTAGE_C_PHASE': 'U16',
-    'REG_59_S2_VOLTAGE_C_PHASE': 'U16',
-    'REG_27_S1_VOLTAGE_C_PHASE': 'U16',
-    'REG_27_S2_VOLTAGE_C_PHASE': 'U16',
     'REG_81_S1_FREQUENCY_CPHASE': 'U16',
+    'REG_81_S2F_TIME_C_PHASE': 'U16',
     'REG_81_S2S_FREQUENCY_CPHASE': 'U16',
     'NOMINAL_POWER': 'U32',
     'MANUFACTURER': 'U16',
@@ -1249,18 +1238,18 @@ STRING_CURRENT_MONITOR = False
 
 # RTU 배치 읽기 블록 — start/count/fc 지정으로 트랜잭션 최소화
 READ_BLOCKS = [
-    {'start': 0x0001, 'count':  10, 'fc': 3},
+    {'start': 0x0000, 'count':  11, 'fc': 3},
     {'start': 0x0055, 'count':   1, 'fc': 3},
     {'start': 0x00A5, 'count':   1, 'fc': 3},
     {'start': 0x0BBA, 'count':  56, 'fc': 3},
     {'start': 0x0C15, 'count':  75, 'fc': 3},
-    {'start': 0x0C9C, 'count':  37, 'fc': 3},
-    {'start': 0x0CE4, 'count':   5, 'fc': 3},
+    {'start': 0x0C81, 'count':  64, 'fc': 3},
+    {'start': 0x0CE3, 'count':   6, 'fc': 3},
     {'start': 0x0D0B, 'count':   1, 'fc': 3},
-    {'start': 0x0D52, 'count':   9, 'fc': 3},
+    {'start': 0x0D4B, 'count':  16, 'fc': 3},
     {'start': 0x0DBB, 'count':  33, 'fc': 3},
     {'start': 0x0DFD, 'count':   1, 'fc': 3},
-    {'start': 0x0E24, 'count':  57, 'fc': 3},
+    {'start': 0x0E24, 'count':  70, 'fc': 3},
     {'start': 0x838F, 'count':  27, 'fc': 3},
     {'start': 0x8EA0, 'count':   1, 'fc': 3},
     {'start': 0xA9F2, 'count':   2, 'fc': 3},
@@ -1273,21 +1262,21 @@ READ_BLOCKS = [
 DATA_PARSER = {
     'mode                ': 'INVERTER_MODE',
     'r_voltage           ': 'DEA_L1_VOLTAGE (0x03EE~0x03EF)',
-    's_voltage           ': 'DEA_L2_VOLTAGE (0x03F0~0x03F1); REG_59_S1_VOLTAGE_B_PHASE (0x0E42); REG_59_S2_VOLTAGE_B_PHASE (0x0E44); REG_27_S1_VOLTAGE_B_PHASE (0x0E46); REG_27_S2_VOLTAGE_B_PHASE (0x0E48); L2_VOLTAGE (0x0E4F); REG_59_S1_VOLTAGE_C_PHASE (0x0E56); REG_59_S2_VOLTAGE_C_PHASE (0x0E58); REG_27_S1_VOLTAGE_C_PHASE (0x0E5A); REG_27_S2_VOLTAGE_C_PHASE (0x0E5C)',
-    't_voltage           ': 'DEA_L3_VOLTAGE (0x03F2~0x03F3); L3_VOLTAGE (0x0E4E)',
-    'r_current           ': 'DEA_L1_CURRENT (0x03E8~0x03E9); L1_CURRENT (0x0BDD); REG_01_59_S1_TIME (0x0C34)',
-    's_current           ': 'DEA_L2_CURRENT (0x03EA~0x03EB)',
+    's_voltage           ': 'DEA_L2_VOLTAGE (0x03F0~0x03F1); L2_VOLTAGE (0x0E42); REG_81_S2F_TIME_B_PHASE (0x0E4F); REG_81_S2F_TIME_C_PHASE (0x0E63)',
+    't_voltage           ': 'DEA_L3_VOLTAGE (0x03F2~0x03F3); REG_07_81_S2F_FREQUENCY (0x0C3F); L3_VOLTAGE (0x0E4E)',
+    'r_current           ': 'DEA_L1_CURRENT (0x03E8~0x03E9); L1_CURRENT (0x0BDD)',
+    's_current           ': 'DEA_L2_CURRENT (0x03EA~0x03EB); L2_CURRENT (0x0BDE)',
     't_current           ': 'DEA_L3_CURRENT (0x03EC~0x03ED); L3_CURRENT (0x0BDF)',
-    'frequency           ': 'DEA_FREQUENCY (0x03FA~0x03FB); FREQUENCY (0x0002); INTERNAL_EPM_HARD_LIMITFOR_AU_2020_CODE (0x0C2C)',
-    'ac_power            ': 'DEA_TOTAL_ACTIVE_POWER (0x03F4~0x03F5); AC_POWER (0x0C4E); METER_TOTAL_ACTIVE_POWER (0x0CBF)',
-    'cumulative_energy   ': 'CUMULATIVE_ENERGY (0x0BC1); TOTAL_ENERGY_DECIMAL_PART (0x0C2D)',
-    'alarm1              ': 'ERROR_CODE1 (0x00A5)',
+    'frequency           ': 'DEA_FREQUENCY (0x03FA~0x03FB); FREQUENCY (0x0002); FAULT_CODE_03 (0x0C1A); INTERNAL_EPM_SWITCH_EPM_SOFT_SWITCH_FOR_AU2020_CODE (0x0C27)',
+    'ac_power            ': 'DEA_TOTAL_ACTIVE_POWER (0x03F4~0x03F5); AC_POWER (0x0C4E)',
+    'cumulative_energy   ': 'CUMULATIVE_ENERGY (0x0BC1); G100_CONTROL_SWITCH (0x0055)',
+    'alarm1              ': 'FAULT_CODE_04 (0x0C1B)',
     'mppt1_voltage'        : 'PV_VOLTAGE',
     'mppt1_current'        : 'DC_CURRENT_1',
     'mppt2_voltage'        : 'MPPT2_VOLTAGE',
     'mppt2_current'        : 'PV2_CURRENT',
     'mppt3_voltage'        : 'HMI_MAJOR_VERSION',
-    'mppt3_current'        : 'ACTIVE_POWER',
-    'mppt4_voltage'        : 'MPPT4_VOLTAGE',
-    'mppt4_current'        : 'PV4_CURRENT',
+    'mppt3_current'        : 'MPPT3_CURRENT',
+    'mppt4_voltage'        : 'ERROR_CODE3',
+    'mppt4_current'        : 'DC_CURRENT_4',
 }

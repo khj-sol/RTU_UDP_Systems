@@ -47,17 +47,37 @@ const fmtTime = ts => {
   return d.toLocaleString('ko-KR');
 };
 const statusColor = s => s === 'online' ? 'bg-green-500' : s === 'offline' ? 'bg-red-500' : 'bg-yellow-500';
+// Model number → display name (matches common/*_registers.py and device_models.ini)
+// Naming rule: {Manufacturer}_{kW}_{phase}
 const MODEL_NAMES = {
-  1: 'Solarize 50K',
-  2: 'Huawei 50K',
-  3: 'Kstar 60K',
-  4: 'Sungrow',
+  1:  'Solarize_50_3',
+  2:  'Huawei_50_3',
+  3:  'Kstar_60_3',
+  4:  'Sungrow_50_3',
+  5:  'Ekos_10_3',
+  6:  'Senergy_50_3',
+  7:  'Sofar_50_3',
+  8:  'Solis_50_3',
+  9:  'Growatt_30_3',
+  10: 'CPS_50_3',
+  11: 'Sunways_30_3',
+  12: 'ABB_50_3',
+  13: 'Goodwe_50_3',
 };
 const MODEL_COLORS = {
-  1: 'bg-blue-500',
-  2: 'bg-orange-500',
-  3: 'bg-purple-500',
-  4: 'bg-teal-600',
+  1:  'bg-blue-500',
+  2:  'bg-orange-500',
+  3:  'bg-purple-500',
+  4:  'bg-teal-600',
+  5:  'bg-green-500',
+  6:  'bg-cyan-500',
+  7:  'bg-yellow-500',
+  8:  'bg-red-500',
+  9:  'bg-lime-500',
+  10: 'bg-indigo-500',
+  11: 'bg-pink-500',
+  12: 'bg-amber-600',
+  13: 'bg-rose-500',
 };
 const MODEL_NAME_MANUFACTURERS = [{
   match: /huawei|sun2000|huaweinew/i,
@@ -335,10 +355,11 @@ function OverviewTab({
   const online = activeRtus.filter(r => r.status === 'online').length;
   const totalSolar = activeRtus.reduce((s, r) => s + (r.total_solar_power || 0), 0);
   const totalGrid = activeRtus.reduce((s, r) => s + (r.total_grid_power || 0), 0);
-  const hasGrid = totalGrid > 0;
-  const gridDisplay = hasGrid ? totalGrid : totalSolar;
-  const gridLabel = hasGrid ? "Total Grid Power" : "Total Grid Power (=Solar)";
-  const gridColor = hasGrid ? "text-blue-400" : "text-yellow-400";
+  // Total Grid Power is shown only when at least one RTU has a power meter
+  // or protection relay device (DEVICE_POWER_METER=3 / DEVICE_PROTECTION_RELAY=4).
+  // Without any grid measurement device the value is meaningless, so the card
+  // is hidden entirely instead of falling back to the solar total.
+  const hasGridDevice = activeRtus.some(r => r.has_grid_device);
   const [infoRtu, setInfoRtu] = useState(null);
   const [infoData, setInfoData] = useState(null);
   const showRtuInfo = async (r) => {
@@ -392,11 +413,11 @@ function OverviewTab({
     className: "text-gray-400 text-sm"
   }, "Total Solar Power"), /*#__PURE__*/React.createElement("div", {
     className: "text-3xl font-bold text-yellow-400"
-  }, fmt(totalSolar / 1000, 2), " kW")), /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("div", {
+  }, fmt(totalSolar / 1000, 2), " kW")), hasGridDevice && /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("div", {
     className: "text-gray-400 text-sm"
-  }, gridLabel), /*#__PURE__*/React.createElement("div", {
-    className: "text-3xl font-bold " + gridColor
-  }, fmt(gridDisplay / 1000, 2), " kW"))), /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("table", {
+  }, "Total Grid Power"), /*#__PURE__*/React.createElement("div", {
+    className: "text-3xl font-bold text-blue-400"
+  }, fmt(totalGrid / 1000, 2), " kW"))), /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("table", {
     className: "w-full text-sm"
   }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", {
     className: "text-gray-400 border-b border-gray-700"
@@ -413,7 +434,7 @@ function OverviewTab({
     className: "text-left"
   }, "Last Seen"), /*#__PURE__*/React.createElement("th", {
     className: "text-left"
-  }, "Devices"), /*#__PURE__*/React.createElement("th", {
+  }, "ON/OFF"), /*#__PURE__*/React.createElement("th", {
     className: "text-left"
   }, "Power"), /*#__PURE__*/React.createElement("th", {
     className: "text-center",
@@ -439,7 +460,10 @@ function OverviewTab({
     onClick: () => onSelectRtu(r.rtu_id)
   }, getDisplayIp(r), getDisplayPort(r) ? ":" : "", getDisplayPort(r)), /*#__PURE__*/React.createElement("td", {
     className: "text-center text-gray-400"
-  }, r.avg_interval > 0 ? Math.round(r.avg_interval / 60) + '\uBD84' : '-'), /*#__PURE__*/React.createElement("td", null, fmtTime(r.last_seen)), /*#__PURE__*/React.createElement("td", null, r.device_count || 0), /*#__PURE__*/React.createElement("td", null, fmt((r.total_solar_power || 0) / 1000, 2), " kW"), /*#__PURE__*/React.createElement("td", {
+  }, r.avg_interval > 0 ? Math.round(r.avg_interval / 60) + '\uBD84' : '-'), /*#__PURE__*/React.createElement("td", null, fmtTime(r.last_seen)), /*#__PURE__*/React.createElement("td", null,
+    /*#__PURE__*/React.createElement("span", { className: "text-green-400" }, r.devices_on || 0),
+    /*#__PURE__*/React.createElement("span", { className: "text-gray-500" }, "/"),
+    /*#__PURE__*/React.createElement("span", { className: (r.devices_off || 0) > 0 ? "text-red-400" : "text-gray-500" }, r.devices_off || 0)), /*#__PURE__*/React.createElement("td", null, fmt((r.total_solar_power || 0) / 1000, 2), " kW"), /*#__PURE__*/React.createElement("td", {
     className: "text-center"
   }, /*#__PURE__*/React.createElement("button", {
     className: "text-gray-500 hover:text-red-400 text-xs px-1",
@@ -762,7 +786,10 @@ function ControlTab({
     fetcher(`/rtus/${rtuId}/devices`).then(d => {
       const devs = pd(d);
       setDevices(devs);
-      const invs = devs.filter(dd => dd.device_type === 1);
+      // Sort by device_number so the initial default picks INV#1 (not
+      // whichever inverter happens to be first in the API response).
+      const invs = devs.filter(dd => dd.device_type === 1)
+        .sort((a, b) => (a.device_number || 0) - (b.device_number || 0));
       if (invs.length > 0) {
         setSelectedDevs(new Set([invs[0].device_number]));
         if (!deviceNum) setDeviceNum(String(invs[0].device_number));
@@ -771,6 +798,15 @@ function ControlTab({
       }
     }).catch(() => {});
   }, [rtuId]);
+
+  // Keep the IV Scan target dropdown (deviceNum) in sync with the first
+  // inverter selected via the checkboxes. If the user checks INV#1, IV Scan
+  // should target INV#1 even though it has its own single-target dropdown.
+  useEffect(() => {
+    if (selectedDevs.size === 0) return;
+    const first = [...selectedDevs].sort((a, b) => a - b)[0];
+    setDeviceNum(String(first));
+  }, [selectedDevs]);
 
   // Load control values from DB ONCE when RTU changes (not on selectedDevs change)
   const lastSendTime = useRef(0);
@@ -840,12 +876,20 @@ function ControlTab({
     }
     return `${tag} ${e.detail}`;
   };
-  // Only show control-related events in Response Log (not duplicating Events tab)
+  // Control Response Log shows ONLY user-initiated power-control round-trips
+  // (Active Power / PF / Q / ON-OFF / Init Reset / IV Scan / RTU Info).
+  // These system / metadata events go ONLY to the Events tab, not here:
+  //   - rtu_event       (RTU First Connection, port open, etc.)
+  //   - inverter_model  (per-inverter model name / serial metadata — now
+  //                      only emitted on user click, but user requested
+  //                      that it be visible in Events tab instead of
+  //                      cluttering the Control Response Log)
   const RESPONSE_LOG_TYPES = new Set([
-    'h04_response', 'H03_SENT', 'inverter_model', 'rtu_info',
+    'h04_response', 'H03_SENT',
     'control_check', 'control_result',
     'iv_scan_success', 'iv_scan_data', 'iv_scan_complete',
-    'rtu_event',
+    'rtu_info', 'inverter_model',
+    'modbus_test_result',
   ]);
   // Deduplicate: track last logged event per type to suppress repeats
   const lastLoggedRef = useRef({});
@@ -1079,7 +1123,7 @@ function ControlTab({
       setDevices(pd(d));
     }).catch(() => {});
   };
-  const sendControl = async (endpoint, body) => {
+  const sendControl = async (endpoint, body, opts = {}) => {
     const ENDPOINT_NAMES = {on_off:'On/Off',active_power:'Active Power',power_factor:'Power Factor',reactive_power:'Reactive Power',rtu_info:'RTU Info',model_info:'INV Model',reboot:'Reboot',iv_scan:'IV Scan'};
     const name = ENDPOINT_NAMES[endpoint] || endpoint;
     try {
@@ -1092,9 +1136,11 @@ function ControlTab({
       if (endpoint === 'power_factor' && body.value !== undefined) setPowerFactor(body.value);
       if (endpoint === 'reactive_power' && body.value !== undefined) setReactivePower(body.value);
       if (endpoint === 'on_off' && body.value !== undefined) setOnOff(body.value);
-      setTimeout(refreshDevices, 1000);
-      setTimeout(refreshDevices, 3000);
-      setTimeout(refreshDevices, 5000);
+      // Skip redundant polling when sending to multiple devices — the final
+      // refreshDevices at the end of sendToSelected handles it once.
+      if (!opts.skipRefresh) {
+        setTimeout(refreshDevices, 1500);
+      }
     } catch (e) {
       addLog(`<span class="text-red-400">✗ ${name} Error: ${e.message}</span>`);
     }
@@ -1102,12 +1148,19 @@ function ControlTab({
   const sendToSelected = async (endpoint, makeBody) => {
     const devNums = [...selectedDevs].sort((a, b) => a - b);
     if (devNums.length === 0) { addLog('No inverters selected'); return; }
+    const multi = devNums.length > 1;
     for (const dn of devNums) {
-      await sendControl(endpoint, makeBody(dn));
-      if (devNums.length > 1) await new Promise(r => setTimeout(r, 100));
+      // Skip per-command refreshDevices polling when sending to many devices —
+      // 3x polls per inverter (11 inv → 33 fetches) would thrash the UI and
+      // interfere with WebSocket event processing, dropping control responses.
+      await sendControl(endpoint, makeBody(dn), { skipRefresh: multi });
+      if (multi) await new Promise(r => setTimeout(r, 250));
     }
+    // Single final refresh after all commands complete
+    if (multi) setTimeout(refreshDevices, 1500);
   };
-  const inverters = devices.filter(d => d.device_type === 1);
+  const inverters = devices.filter(d => d.device_type === 1)
+    .sort((a, b) => (a.device_number || 0) - (b.device_number || 0));
   const allSelected = inverters.length > 0 && inverters.every(d => selectedDevs.has(d.device_number));
   const toggleDev = (num) => {
     setSelectedDevs(prev => { const s = new Set(prev); s.has(num) ? s.delete(num) : s.add(num); return s; });
@@ -1324,7 +1377,12 @@ function HistoryTab({
   const [devices, setDevices] = useState([]);
   const [deviceNum, setDeviceNum] = useState('');
   const [deviceType, setDeviceType] = useState('inverter');
-  const [limit, setLimit] = useState(100);
+  // Time-range filter state. Default 1 hour back from now. Options:
+  //   '1h','6h','1d','7d','30d' = preset rolling windows ending now
+  //   'custom' = use fromDt/toDt manually entered datetimes
+  const [timeRange, setTimeRange] = useState('1h');
+  const [fromDt, setFromDt] = useState('');
+  const [toDt, setToDt] = useState('');
   const [data, setData] = useState([]);
   const [clearTs, setClearTs] = useState(() => sessionStorage.getItem('history_clear_ts') || '');
   useEffect(() => {
@@ -1340,20 +1398,48 @@ function HistoryTab({
     fetcher(`/rtus/${rtuId}/devices`).then(d => {
       const devs = pd(d);
       setDevices(devs);
-      if (devs.length > 0 && !deviceNum) {
-        setDeviceNum(String(devs[0].device_number));
-        setDeviceType(devs[0].device_type === 1 ? 'inverter' : devs[0].device_type === 5 ? 'weather' : 'relay');
+      // Sort numerically so the default pick is the lowest device number
+      // (e.g. INV#1 instead of whichever device the API happened to list first).
+      const sorted = devs.slice().sort((a, b) => (a.device_number || 0) - (b.device_number || 0));
+      if (sorted.length > 0 && !deviceNum) {
+        setDeviceNum(String(sorted[0].device_number));
+        setDeviceType(sorted[0].device_type === 1 ? 'inverter' : sorted[0].device_type === 5 ? 'weather' : 'relay');
       }
     }).catch(() => {});
   }, [rtuId]);
+  // KST timestamp formatter — matches DB column format `YYYY-MM-DD HH:MM:SS`.
+  const fmtKstTs = (date) => {
+    const k = new Date(date.getTime() + 9 * 3600 * 1000);
+    return k.toISOString().replace('T', ' ').substring(0, 19);
+  };
+  // datetime-local input value (YYYY-MM-DDTHH:MM in local tz) → KST DB string
+  const dtLocalToKst = (s) => s ? s.replace('T', ' ') + (s.length === 16 ? ':00' : '') : '';
   const loadData = () => {
     if (!rtuId || !deviceNum) return;
-    const fromParam = clearTs ? `&from_ts=${encodeURIComponent(clearTs)}` : '';
-    fetcher(`/data/${deviceType}?rtu_id=${rtuId}&device_num=${deviceNum}&limit=${limit}${fromParam}`).then(d => setData(Array.isArray(d?.data) ? d.data : Array.isArray(d) ? d : [])).catch(() => setData([]));
+    let from_ts = '';
+    let to_ts = '';
+    if (timeRange === 'custom') {
+      from_ts = dtLocalToKst(fromDt);
+      to_ts = dtLocalToKst(toDt);
+    } else {
+      const ms = {
+        '1h': 1*3600e3, '6h': 6*3600e3,
+        '1d': 24*3600e3, '7d': 7*24*3600e3, '30d': 30*24*3600e3,
+      }[timeRange] || 3600e3;
+      const now = new Date();
+      from_ts = fmtKstTs(new Date(now.getTime() - ms));
+      to_ts = fmtKstTs(now);
+    }
+    // Honor the Clear button: never load data older than the clear timestamp.
+    if (clearTs && (!from_ts || from_ts < clearTs)) from_ts = clearTs;
+    const params = [`rtu_id=${rtuId}`, `device_num=${deviceNum}`, `limit=10000`];
+    if (from_ts) params.push(`from_ts=${encodeURIComponent(from_ts)}`);
+    if (to_ts) params.push(`to_ts=${encodeURIComponent(to_ts)}`);
+    fetcher(`/data/${deviceType}?${params.join('&')}`).then(d => setData(Array.isArray(d?.data) ? d.data : Array.isArray(d) ? d : [])).catch(() => setData([]));
   };
   useEffect(() => {
     loadData();
-  }, [rtuId, deviceNum, deviceType, limit, clearTs]);
+  }, [rtuId, deviceNum, deviceType, timeRange, fromDt, toDt, clearTs]);
   const rev = useMemo(() => data.slice().reverse(), [data]);
   const powerSeries = useMemo(() => deviceType === 'inverter' ? [{
     name: 'PV Power',
@@ -1509,19 +1595,39 @@ function HistoryTab({
     }
   }, /*#__PURE__*/React.createElement("option", {
     value: ""
-  }, "-- Device --"), devices.map(d => /*#__PURE__*/React.createElement("option", {
+  }, "-- Device --"), devices.slice().sort((a, b) => (a.device_number || 0) - (b.device_number || 0)).map(d => /*#__PURE__*/React.createElement("option", {
     key: d.device_number,
     value: d.device_number
   }, "#", d.device_number, " (", d.device_type === 1 ? MODEL_NAMES[d.model] || 'Inverter' : d.device_type === 5 ? 'Weather' : 'Relay', ")")))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
     className: "text-gray-400 text-xs block mb-1"
-  }, "Limit"), /*#__PURE__*/React.createElement("select", {
+  }, "Time Range"), /*#__PURE__*/React.createElement("select", {
     className: "bg-gray-700 rounded px-3 py-2",
-    value: limit,
-    onChange: e => setLimit(Number(e.target.value))
-  }, [50, 100, 200, 500].map(n => /*#__PURE__*/React.createElement("option", {
-    key: n,
-    value: n
-  }, n)))), /*#__PURE__*/React.createElement("button", {
+    value: timeRange,
+    onChange: e => setTimeRange(e.target.value)
+  }, [
+    {v:'1h',  l:'Last 1 hour'},
+    {v:'6h',  l:'Last 6 hours'},
+    {v:'1d',  l:'Last 1 day'},
+    {v:'7d',  l:'Last 7 days'},
+    {v:'30d', l:'Last 30 days'},
+    {v:'custom', l:'Custom range'},
+  ].map(o => /*#__PURE__*/React.createElement("option", {
+    key: o.v, value: o.v
+  }, o.l)))), timeRange === 'custom' && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    className: "text-gray-400 text-xs block mb-1"
+  }, "From"), /*#__PURE__*/React.createElement("input", {
+    type: "datetime-local",
+    className: "bg-gray-700 rounded px-3 py-2",
+    value: fromDt,
+    onChange: e => setFromDt(e.target.value)
+  })), timeRange === 'custom' && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    className: "text-gray-400 text-xs block mb-1"
+  }, "To"), /*#__PURE__*/React.createElement("input", {
+    type: "datetime-local",
+    className: "bg-gray-700 rounded px-3 py-2",
+    value: toDt,
+    onChange: e => setToDt(e.target.value)
+  })), /*#__PURE__*/React.createElement("button", {
     onClick: loadData,
     className: "bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded"
   }, "Refresh"), data.length > 0 && /*#__PURE__*/React.createElement("button", {
@@ -1777,61 +1883,62 @@ function FirmwareTab({
   useEffect(() => {
     loadFiles();
   }, []);
-  const upload = async () => {
-    if (!fileRef.current || !fileRef.current.files[0]) return;
-    const fd = new FormData();
-    fd.append('file', fileRef.current.files[0]);
-    setStatus('Uploading...');
-    try {
-      const r = await fetch(API + '/firmware/upload', {
-        method: 'POST',
-        body: fd
-      });
-      const j = await r.json();
-      setStatus('Upload: ' + JSON.stringify(j));
-      loadFiles();
-    } catch (e) {
-      setStatus('Error: ' + e.message);
-    }
-  };
+  // Single-step update: if a local file is picked, upload it first then
+  // dispatch to the selected RTU. If a server library file is picked from
+  // the dropdown, dispatch directly. The previous separate "Upload Firmware"
+  // panel was redundant — users always followed Upload with Send Update.
   const update = async () => {
-    if (!rtuId || !selFile) return;
-    setStatus('Sending update...');
+    if (!rtuId) { setStatus('Pick an RTU first.'); return; }
+    let filename = selFile;
+    const localFile = fileRef.current && fileRef.current.files[0];
+    if (localFile) {
+      // Upload the locally picked file first.
+      setStatus(`Uploading ${localFile.name}...`);
+      try {
+        const fd = new FormData();
+        fd.append('file', localFile);
+        const r = await fetch(API + '/firmware/upload', { method: 'POST', body: fd });
+        const j = await r.json();
+        if (!r.ok) { setStatus('Upload failed: ' + JSON.stringify(j)); return; }
+        filename = j.filename || localFile.name;
+        await loadFiles();
+      } catch (e) {
+        setStatus('Upload error: ' + e.message);
+        return;
+      }
+    }
+    if (!filename) { setStatus('Pick a firmware file (local or library).'); return; }
+    setStatus(`Sending ${filename} to RTU ${rtuId}...`);
     try {
       const r = await post('/firmware/update', {
         rtu_id: Number(rtuId),
-        filename: selFile
+        filename: filename
       });
       setStatus('Update: ' + JSON.stringify(r));
     } catch (e) {
       setStatus('Error: ' + e.message);
     }
   };
-  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-    className: "grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4"
-  }, /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("div", {
+  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(Card, {
+    className: "mb-4"
+  }, /*#__PURE__*/React.createElement("div", {
     className: "text-gray-400 text-sm mb-2"
-  }, "Upload Firmware"), /*#__PURE__*/React.createElement("input", {
-    type: "file",
-    ref: fileRef,
-    className: "text-sm mb-2"
-  }), /*#__PURE__*/React.createElement("button", {
-    onClick: upload,
-    className: "bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded text-sm"
-  }, "Upload")), /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("div", {
-    className: "text-gray-400 text-sm mb-2"
-  }, "Send Update"), /*#__PURE__*/React.createElement("div", {
-    className: "flex gap-2 flex-wrap"
-  }, /*#__PURE__*/React.createElement("select", {
+  }, "Send Firmware Update"), /*#__PURE__*/React.createElement("div", {
+    className: "flex gap-3 flex-wrap items-end"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    className: "text-gray-500 text-xs block mb-1"
+  }, "RTU"), /*#__PURE__*/React.createElement("select", {
     className: "bg-gray-700 rounded px-3 py-2 text-sm",
     value: rtuId,
     onChange: e => setRtuId(e.target.value)
   }, /*#__PURE__*/React.createElement("option", {
     value: ""
-  }, "-- RTU --"), rtus.map(r => /*#__PURE__*/React.createElement("option", {
+  }, "-- RTU --"), rtus.filter(r => r.rtu_type !== 'RIP').map(r => /*#__PURE__*/React.createElement("option", {
     key: r.rtu_id,
     value: r.rtu_id
-  }, r.rtu_id))), /*#__PURE__*/React.createElement("select", {
+  }, r.rtu_id)))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    className: "text-gray-500 text-xs block mb-1"
+  }, "Library File"), /*#__PURE__*/React.createElement("select", {
     className: "bg-gray-700 rounded px-3 py-2 text-sm",
     value: selFile,
     onChange: e => setSelFile(e.target.value)
@@ -1840,10 +1947,17 @@ function FirmwareTab({
   }, "-- File --"), files.map(f => /*#__PURE__*/React.createElement("option", {
     key: f.filename,
     value: f.filename
-  }, f.filename))), /*#__PURE__*/React.createElement("button", {
+  }, f.filename)))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    className: "text-gray-500 text-xs block mb-1"
+  }, "or Upload Local File"), /*#__PURE__*/React.createElement("input", {
+    type: "file",
+    ref: fileRef,
+    accept: ".tar.gz,.tgz,.zip",
+    className: "text-sm bg-gray-700 rounded px-2 py-1.5"
+  })), /*#__PURE__*/React.createElement("button", {
     onClick: update,
-    className: "bg-green-600 hover:bg-green-500 px-4 py-2 rounded text-sm"
-  }, "Update")))), status && /*#__PURE__*/React.createElement(Card, {
+    className: "bg-green-600 hover:bg-green-500 px-5 py-2 rounded text-sm font-medium"
+  }, "Update"))), status && /*#__PURE__*/React.createElement(Card, {
     className: "mb-4"
   }, /*#__PURE__*/React.createElement("div", {
     className: "text-sm font-mono"
@@ -1885,10 +1999,15 @@ function ConfigTab({
   const [pushFiles, setPushFiles] = useState([]);
   const [pushLoading, setPushLoading] = useState(false);
   const [pushResult, setPushResult] = useState(null);
+<<<<<<< HEAD
   const [groupedFromApi, setGroupedFromApi] = useState(null);
   const [localMode, setLocalMode] = useState(() => localStorage.getItem('rtu_config_local_mode') === 'true');
   const normalizedRtuIp = sanitizeRtuHost(rtuIp);
   const effectiveIp = localMode ? 'localhost' : normalizedRtuIp;
+=======
+  // localMode state removed — effectiveIp is now computed directly from
+  // the RTU IP input: empty or localhost → local, otherwise → SSH push.
+>>>>>>> 9837d06791ee1e2c66fd4a43108878afbb4ff0a1
 
   // Load saved RTU SSH IP from localStorage (NAT 환경에서 UDP source IP와 다를 수 있음)
   useEffect(() => {
@@ -1907,6 +2026,7 @@ function ConfigTab({
     }
   }, [selectedRtu, rtus]);
   useEffect(() => {
+<<<<<<< HEAD
     if (!normalizedRtuIp) return;
     if (!isValidRtuHost(normalizedRtuIp)) return;
     localStorage.setItem('rtu_ssh_ip', normalizedRtuIp);
@@ -1921,6 +2041,11 @@ function ConfigTab({
   useEffect(() => {
     localStorage.setItem('rtu_config_local_mode', String(localMode));
   }, [localMode]);
+=======
+    if (rtuIp) localStorage.setItem('rtu_ssh_ip', rtuIp);
+  }, [rtuIp]);
+  // localMode useEffect removed — no more localStorage toggle.
+>>>>>>> 9837d06791ee1e2c66fd4a43108878afbb4ff0a1
 
   // Auto-load files on tab entry
   useEffect(() => { loadFiles(); }, []);
@@ -1985,7 +2110,8 @@ function ConfigTab({
     }
   };
 
-  // Push to RTU: effectiveIp 기준 (Local=시뮬레이터, Remote=SSH)
+  // Push to RTU: uses rtuIp if filled, otherwise localhost (local sim)
+  const effectiveIp = rtuIp.trim() || 'localhost';
   const openPushPanel = async () => {
     setPushPanel(true);
     setPushResult(null);
@@ -2020,6 +2146,7 @@ function ConfigTab({
     setPushLoading(false);
   };
 
+<<<<<<< HEAD
   // Group files by directory (supports both "/home/pi/config/x.ini" and "config/x.ini")
   const grouped = {
     config: [],
@@ -2052,11 +2179,45 @@ function ConfigTab({
       grouped[k] = Array.from(new Set(grouped[k]));
     }
   }
+=======
+  // Open any local file via browser file picker (for files outside project)
+  const openFileRef = useRef(null);
+  const openLocalFile = () => {
+    if (openFileRef.current) openFileRef.current.click();
+  };
+  const handleLocalFileOpen = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      setContent(reader.result);
+      setSelPath('[local] ' + file.name);
+      setStatus(`Opened: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`);
+    };
+    reader.readAsText(file);
+    e.target.value = '';  // reset so same file can be re-opened
+  };
+
+  // Group files by directory
+  const grouped = {};
+  files.forEach(f => {
+    const parts = f.split('/');
+    const dir = parts.slice(0, -2).length ? parts[parts.length - 2] : '';
+    if (!grouped[dir]) grouped[dir] = [];
+    grouped[dir].push(f);
+  });
+>>>>>>> 9837d06791ee1e2c66fd4a43108878afbb4ff0a1
 
   return /*#__PURE__*/React.createElement("div", null,
+    /*#__PURE__*/React.createElement("input", {
+      type: "file", ref: openFileRef, style: { display: 'none' },
+      accept: ".py,.ini,.json,.txt,.cfg,.yaml,.yml,.md,.csv",
+      onChange: handleLocalFileOpen
+    }),
     /*#__PURE__*/React.createElement("div", {
       className: "flex gap-3 mb-2 items-center flex-wrap"
     },
+<<<<<<< HEAD
       /*#__PURE__*/React.createElement("span", { className: "text-gray-400 text-sm" }, "RTU IP:"),
       /*#__PURE__*/React.createElement("input", {
         className: localMode ? "bg-gray-700 rounded px-3 py-1.5 text-sm w-40 opacity-40 cursor-not-allowed" : "bg-gray-700 rounded px-3 py-1.5 text-sm w-40",
@@ -2070,18 +2231,32 @@ function ConfigTab({
         className: localMode ? "bg-orange-600 hover:bg-orange-500 px-3 py-1.5 rounded text-sm font-semibold" : "bg-gray-600 hover:bg-gray-500 px-3 py-1.5 rounded text-sm font-semibold",
         title: localMode ? "\uB85C\uCEEC \ubaa8\uB4DC: PC \ub85c\ucec8 \ud30c\uc77c \uc9c1\uc811 \uc77d\uae30" : "\uc6d0\uaca9 \ubaa8\uB4DC: SSH\ub85c RTU\uc5d0 \uc811\uc18d"
       }, localMode ? "\uD83C\uDFE0 Local" : "\uD83C\uDF10 Remote")
+=======
+      /*#__PURE__*/React.createElement("span", { className: "text-gray-400 text-sm" }, "RTU:"),
+      /*#__PURE__*/React.createElement("select", {
+        className: "bg-gray-700 rounded px-3 py-1.5 text-sm",
+        value: rtuIp,
+        onChange: e => setRtuIp(e.target.value)
+      },
+        /*#__PURE__*/React.createElement("option", { value: "" }, "-- Push \uB300\uC0C1 RTU --"),
+        /*#__PURE__*/React.createElement("option", { value: "localhost" }, "localhost (\uB85C\uCEEC \uC2DC\uBBAC\uB808\uC774\uD130)"),
+        rtus.filter(r => r.status === 'online' && r.rtu_type !== 'RIP').map(r => /*#__PURE__*/React.createElement("option", {
+          key: r.rtu_id,
+          value: (r.ip || '').split(':')[0] || r.ip || ''
+        }, r.rtu_id, " (", (r.ip || '').split(':')[0] || '-', ")"))
+      )
+>>>>>>> 9837d06791ee1e2c66fd4a43108878afbb4ff0a1
     ),
     /*#__PURE__*/React.createElement("div", {
       className: "flex gap-3 mb-4 items-center flex-wrap"
     },
       /*#__PURE__*/React.createElement("button", {
-        onClick: loadFiles,
-        disabled: loading,
-        className: "bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded text-sm disabled:opacity-50"
-      }, "\uD83D\uDCC2 Open Files"),
+        onClick: openLocalFile,
+        className: "bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded text-sm"
+      }, "\uD83D\uDCC2 Open File"),
       /*#__PURE__*/React.createElement("button", {
         onClick: saveFile,
-        disabled: !selPath,
+        disabled: !selPath || selPath.startsWith('[local]'),
         className: "bg-green-600 hover:bg-green-500 px-4 py-2 rounded text-sm disabled:opacity-50"
       }, "\uD83D\uDCBE Save"),
       /*#__PURE__*/React.createElement("button", {
@@ -2100,11 +2275,15 @@ function ConfigTab({
       },
         /*#__PURE__*/React.createElement("span", {
           className: "text-sm font-bold text-teal-400"
-        }, "\uD83D\uDCE4 PC \u2192 RTU \uc804\uc1a1 \ubaa9\ub85d  (", localMode ? "\uD83C\uDFE0 Local" : "\uD83C\uDF10 Remote: " + rtuIp, ")"),
+        }, "\uD83D\uDCE4 PC \u2192 RTU \uc804\uc1a1 \ubaa9\ub85d  (", effectiveIp === 'localhost' ? "\uD83C\uDFE0 Local" : "\uD83C\uDF10 " + effectiveIp, ")"),
         /*#__PURE__*/React.createElement("div", { className: "flex gap-2" },
           !pushResult && /*#__PURE__*/React.createElement("button", {
             onClick: doPushToRtu,
+<<<<<<< HEAD
             disabled: pushLoading || (!localMode && !isValidRtuHost(effectiveIp)) || pushFiles.length === 0,
+=======
+            disabled: pushLoading || pushFiles.length === 0,
+>>>>>>> 9837d06791ee1e2c66fd4a43108878afbb4ff0a1
             className: "bg-teal-600 hover:bg-teal-500 px-3 py-1 rounded text-xs disabled:opacity-50"
           }, pushLoading ? "\uc804\uc1a1 \uc911..." : "\uc804\uc1a1 & \uc7ac\uc2dc\uc791"),
           /*#__PURE__*/React.createElement("button", {
@@ -2197,17 +2376,55 @@ function StatsTab() {
     const iv = setInterval(load, 5000);
     return () => clearInterval(iv);
   }, []);
-  const fmtUptime = s => { if (s == null) return '--'; const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), sec = Math.floor(s%60); return `${h}h ${String(m).padStart(2,'0')}m ${String(sec).padStart(2,'0')}s`; };
-  const items = [['H01 Received', stats.h01_received], ['H02 Sent', stats.h02_sent], ['H03 Sent', stats.h03_sent], ['H04 Received', stats.h04_received], ['H05 Received', stats.h05_received], ['IV Scan Data', stats.iv_scan_count ?? 0], ['RTU Count', stats.rtu_count], ['Uptime', fmtUptime(stats.uptime)], ['Active Connections', stats.active_connections], ['Total Packets', stats.total_packets]];
-  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-    className: "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4"
-  }, items.map(([label, val]) => /*#__PURE__*/React.createElement(Card, {
-    key: label
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "text-gray-400 text-xs"
-  }, label), /*#__PURE__*/React.createElement("div", {
-    className: "text-2xl font-bold mt-1"
-  }, val != null ? val : '--')))), stats.per_rtu && /*#__PURE__*/React.createElement(Card, {
+  const fmtUptime = s => { if (s == null) return '--'; const d = Math.floor(s/86400), h = Math.floor((s%86400)/3600), m = Math.floor((s%3600)/60), sec = Math.floor(s%60); return d > 0 ? `${d}d ${h}h ${String(m).padStart(2,'0')}m` : `${h}h ${String(m).padStart(2,'0')}m ${String(sec).padStart(2,'0')}s`; };
+  const pktItems = [
+    ['H01 Received', stats.h01_received], ['H02 Sent', stats.h02_sent],
+    ['H03 Sent', stats.h03_sent], ['H04 Received', stats.h04_received],
+    ['H05 Received', stats.h05_received], ['Total Packets', stats.total_packets],
+    ['RTU Count', stats.rtu_count], ['WS Clients', stats.ws_clients],
+    ['Uptime', fmtUptime(stats.uptime)], ['IV Scans', stats.iv_scan_count ?? 0],
+  ];
+  const cpuColor = (stats.cpu_percent||0) > 80 ? 'text-red-400' : (stats.cpu_percent||0) > 50 ? 'text-yellow-400' : 'text-green-400';
+  const memColor = (stats.mem_percent||0) > 85 ? 'text-red-400' : (stats.mem_percent||0) > 60 ? 'text-yellow-400' : 'text-green-400';
+  const diskColor = (stats.disk_percent||0) > 90 ? 'text-red-400' : (stats.disk_percent||0) > 70 ? 'text-yellow-400' : 'text-green-400';
+  const srvItems = [
+    ['CPU (System)', stats.cpu_percent != null ? `${stats.cpu_percent}%` : '--', cpuColor],
+    ['RAM (System)', stats.mem_percent != null ? `${stats.mem_used_mb}/${stats.mem_total_mb} MB (${stats.mem_percent}%)` : '--', memColor],
+    ['RAM (Server)', stats.proc_mem_mb != null ? `${stats.proc_mem_mb} MB` : '--', ''],
+    ['Disk', stats.disk_free_gb != null ? `${stats.disk_free_gb}/${stats.disk_total_gb} GB (${stats.disk_percent}%)` : '--', diskColor],
+    ['DB Size', stats.db_size_mb != null ? `${stats.db_size_mb} MB` : '--', ''],
+  ];
+  const dbTables = stats.db_tables || {};
+  return /*#__PURE__*/React.createElement("div", null,
+    /*#__PURE__*/React.createElement("div", { className: "text-gray-400 text-sm mb-2 font-semibold" }, "Server Resources"),
+    /*#__PURE__*/React.createElement("div", {
+      className: "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-6"
+    }, srvItems.map(([label, val, color]) => /*#__PURE__*/React.createElement(Card, {
+      key: label
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "text-gray-400 text-xs"
+    }, label), /*#__PURE__*/React.createElement("div", {
+      className: "text-lg font-bold mt-1 " + (color || '')
+    }, val)))),
+    Object.keys(dbTables).length > 0 && /*#__PURE__*/React.createElement(Card, {
+      className: "mb-6"
+    }, /*#__PURE__*/React.createElement("div", { className: "text-gray-400 text-sm mb-2" }, "DB Table Rows"),
+    /*#__PURE__*/React.createElement("div", { className: "grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-1 text-sm" },
+      Object.entries(dbTables).map(([t, c]) => /*#__PURE__*/React.createElement("div", { key: t, className: "flex justify-between" },
+        /*#__PURE__*/React.createElement("span", { className: "text-gray-400 font-mono" }, t),
+        /*#__PURE__*/React.createElement("span", { className: c > 100000 ? "text-yellow-400 font-bold" : "" }, (c||0).toLocaleString())
+      ))
+    )),
+    /*#__PURE__*/React.createElement("div", { className: "text-gray-400 text-sm mb-2 font-semibold" }, "UDP Protocol Counters"),
+    /*#__PURE__*/React.createElement("div", {
+      className: "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-6"
+    }, pktItems.map(([label, val]) => /*#__PURE__*/React.createElement(Card, {
+      key: label
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "text-gray-400 text-xs"
+    }, label), /*#__PURE__*/React.createElement("div", {
+      className: "text-2xl font-bold mt-1"
+    }, val != null ? val : '--')))), stats.per_rtu && /*#__PURE__*/React.createElement(Card, {
     className: "mt-4"
   }, /*#__PURE__*/React.createElement("div", {
     className: "text-gray-400 text-sm mb-2"
@@ -2346,9 +2563,435 @@ function H1LogTab({packets, rtus, onClear}) {
   );
 }
 
+// ==== MODBUS TEST TAB ====
+function ModbusTestTab({ rtus, selectedRtu }) {
+  const [rtuId, setRtuId] = useState(selectedRtu || '');
+  useEffect(() => { if (selectedRtu) setRtuId(selectedRtu); }, [selectedRtu]);
+  const [devices, setDevices] = useState([]);
+  const [slaveId, setSlaveId] = useState(1);
+  const [customSlave, setCustomSlave] = useState(false);
+  const [fc, setFc] = useState(3);
+  const [addr, setAddr] = useState('0x0000');
+  const [count, setCount] = useState(10);
+  const [dataType, setDataType] = useState('U16');
+  const [scale, setScale] = useState('1');
+  const [writeVal, setWriteVal] = useState('0');
+  const [writeVals, setWriteVals] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState(null);
+  const [logs, setLogs] = useState([]);
+  const logRef = useRef(null);
+
+  // Load devices when RTU changes
+  useEffect(() => {
+    if (!rtuId) { setDevices([]); return; }
+    fetcher(`/rtus/${rtuId}/devices`).then(d => {
+      const devs = d?.devices ? Object.values(d.devices).map(v => ({
+        device_type: v.device_type, device_number: v.device_number, ...v.data
+      })) : Array.isArray(d) ? d : [];
+      const invs = devs.filter(dd => dd.device_type === 1)
+        .sort((a, b) => (a.device_number || 0) - (b.device_number || 0));
+      setDevices(invs);
+      if (invs.length > 0 && !customSlave) setSlaveId(invs[0].device_number || 1);
+    }).catch(() => {});
+  }, [rtuId]);
+
+  const addLog = (msg) => {
+    setLogs(p => [...p.slice(-99), { time: new Date().toLocaleTimeString(), msg }]);
+    setTimeout(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, 50);
+  };
+
+  const parseAddr = (s) => {
+    s = s.trim();
+    return s.startsWith('0x') || s.startsWith('0X') ? parseInt(s, 16) : parseInt(s, 10);
+  };
+
+  const execute = async () => {
+    const a = parseAddr(addr);
+    if (isNaN(a) || a < 0 || a > 0xFFFF) { addLog('Invalid address'); return; }
+    setLoading(true);
+    setResult(null);
+    const body = { rtu_id: parseInt(rtuId), slave_id: slaveId, function_code: fc, register_address: a };
+    if (fc === 3 || fc === 4) {
+      body.count = count;
+    } else if (fc === 6) {
+      body.count = 1;
+      body.values = [parseInt(writeVal) & 0xFFFF];
+    } else if (fc === 16) {
+      body.values = writeVals.split(',').map(v => parseInt(v.trim()) & 0xFFFF).filter(v => !isNaN(v));
+      body.count = body.values.length;
+    }
+    try {
+      const op = fc <= 4 ? 'READ' : 'WRITE';
+      addLog(`> FC${String(fc).padStart(2,'0')} ${op} slave=${slaveId} addr=0x${a.toString(16).toUpperCase().padStart(4,'0')} count=${body.count || count}`);
+      const sendResult = await post('/control/modbus_test', body);
+      if (sendResult?.tx_packet) addLog(`  TX: [${sendResult.tx_packet}]`);
+      // Poll for result (RTU responds via H05, takes ~1-3s)
+      let tries = 0;
+      const poll = setInterval(async () => {
+        tries++;
+        try {
+          const r = await fetcher(`/modbus_test/result/${rtuId}`);
+          if (r?.result && r.result.address === a && r.result.fc === fc) {
+            clearInterval(poll);
+            setResult(r.result);
+            setLoading(false);
+            const rc = r.result.result_code;
+            if (rc === 0) {
+              const regs = r.result.registers || [];
+              addLog(`< OK ${regs.length} registers: [${regs.map(v => '0x'+v.toString(16).toUpperCase().padStart(4,'0')).join(' ')}]`);
+              if (r.result.raw_hex) addLog(`  RX: [${r.result.raw_hex}]`);
+            } else {
+              addLog(`< ${rc === -1 ? 'TIMEOUT' : 'ERROR'} (rc=${rc})`);
+            }
+          }
+        } catch (e) {}
+        if (tries >= 10) { clearInterval(poll); setLoading(false); addLog('< No response (timeout)'); }
+      }, 500);
+    } catch (e) {
+      addLog(`Error: ${e.message}`);
+      setLoading(false);
+    }
+  };
+
+  const isRead = fc === 3 || fc === 4;
+  const isWrite = fc === 6 || fc === 16;
+
+  return /*#__PURE__*/React.createElement("div", null,
+    // RTU + Inverter selector row
+    /*#__PURE__*/React.createElement("div", { className: "flex gap-3 mb-3 items-center flex-wrap" },
+      /*#__PURE__*/React.createElement("label", { className: "text-sm text-gray-400" }, "RTU:"),
+      /*#__PURE__*/React.createElement("select", {
+        value: rtuId, onChange: e => setRtuId(e.target.value),
+        className: "bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-sm"
+      }, /*#__PURE__*/React.createElement("option", { value: "" }, "-- Select RTU --"),
+        rtus.map(r => /*#__PURE__*/React.createElement("option", { key: r.rtu_id, value: r.rtu_id },
+          `RTU ${r.rtu_id} (${r.ip || '?'})`))),
+
+      /*#__PURE__*/React.createElement("label", { className: "text-sm text-gray-400" }, "Inverter:"),
+      !customSlave && /*#__PURE__*/React.createElement("select", {
+        value: slaveId, onChange: e => setSlaveId(parseInt(e.target.value)),
+        className: "bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-sm"
+      }, devices.length === 0
+        ? /*#__PURE__*/React.createElement("option", { value: 1 }, "No inverters")
+        : devices.map(d => /*#__PURE__*/React.createElement("option", {
+            key: d.device_number, value: d.device_number
+          }, `INV#${d.device_number} (slave=${d.device_number})`))),
+      customSlave && /*#__PURE__*/React.createElement("input", {
+        type: "number", min: 1, max: 247, value: slaveId,
+        onChange: e => setSlaveId(parseInt(e.target.value) || 1),
+        className: "bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-sm w-20"
+      }),
+      /*#__PURE__*/React.createElement("label", { className: "text-xs text-gray-500 flex items-center gap-1" },
+        /*#__PURE__*/React.createElement("input", {
+          type: "checkbox", checked: customSlave,
+          onChange: e => setCustomSlave(e.target.checked)
+        }), "Manual slave ID")
+    ),
+
+    // Modbus command row
+    /*#__PURE__*/React.createElement("div", { className: "flex gap-3 mb-3 items-end flex-wrap" },
+      /*#__PURE__*/React.createElement("div", null,
+        /*#__PURE__*/React.createElement("div", { className: "text-xs text-gray-500 mb-1" }, "Function Code"),
+        /*#__PURE__*/React.createElement("select", {
+          value: fc, onChange: e => setFc(parseInt(e.target.value)),
+          className: "bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-sm"
+        },
+          /*#__PURE__*/React.createElement("option", { value: 3 }, "FC03 Read Holding"),
+          /*#__PURE__*/React.createElement("option", { value: 4 }, "FC04 Read Input"),
+          /*#__PURE__*/React.createElement("option", { value: 6 }, "FC06 Write Single"),
+          /*#__PURE__*/React.createElement("option", { value: 16 }, "FC16 Write Multiple"))),
+
+      /*#__PURE__*/React.createElement("div", null,
+        /*#__PURE__*/React.createElement("div", { className: "text-xs text-gray-500 mb-1" }, "Address (hex/dec)"),
+        /*#__PURE__*/React.createElement("input", {
+          type: "text", value: addr, onChange: e => setAddr(e.target.value),
+          className: "bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-sm w-28",
+          placeholder: "0x1000"
+        })),
+
+      isRead && /*#__PURE__*/React.createElement("div", null,
+        /*#__PURE__*/React.createElement("div", { className: "text-xs text-gray-500 mb-1" }, "Count"),
+        /*#__PURE__*/React.createElement("input", {
+          type: "number", min: 1, max: 125, value: count,
+          onChange: e => setCount(parseInt(e.target.value) || 1),
+          className: "bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-sm w-20"
+        })),
+
+      /*#__PURE__*/React.createElement("div", null,
+        /*#__PURE__*/React.createElement("div", { className: "text-xs text-gray-500 mb-1" }, "Data Type"),
+        /*#__PURE__*/React.createElement("select", {
+          value: dataType, onChange: e => setDataType(e.target.value),
+          className: "bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-sm"
+        },
+          ['U16', 'S16', 'U32', 'S32', 'STRING'].map(t =>
+            /*#__PURE__*/React.createElement("option", { key: t, value: t }, t)))),
+
+      /*#__PURE__*/React.createElement("div", null,
+        /*#__PURE__*/React.createElement("div", { className: "text-xs text-gray-500 mb-1" }, "Scale"),
+        /*#__PURE__*/React.createElement("input", {
+          type: "text", value: scale, onChange: e => setScale(e.target.value),
+          className: "bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-sm w-20",
+          placeholder: "0.1"
+        })),
+
+      fc === 6 && /*#__PURE__*/React.createElement("div", null,
+        /*#__PURE__*/React.createElement("div", { className: "text-xs text-gray-500 mb-1" }, "Value (U16)"),
+        /*#__PURE__*/React.createElement("input", {
+          type: "number", min: 0, max: 65535, value: writeVal,
+          onChange: e => setWriteVal(e.target.value),
+          className: "bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-sm w-24"
+        })),
+
+      fc === 16 && /*#__PURE__*/React.createElement("div", null,
+        /*#__PURE__*/React.createElement("div", { className: "text-xs text-gray-500 mb-1" }, "Values (comma-sep)"),
+        /*#__PURE__*/React.createElement("input", {
+          type: "text", value: writeVals, onChange: e => setWriteVals(e.target.value),
+          className: "bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-sm w-48",
+          placeholder: "100, 200, 300"
+        })),
+
+      /*#__PURE__*/React.createElement("button", {
+        onClick: execute, disabled: loading || !rtuId,
+        className: `${isWrite ? 'bg-orange-600 hover:bg-orange-500' : 'bg-blue-600 hover:bg-blue-500'} px-5 py-1.5 rounded text-sm font-medium disabled:opacity-50`
+      }, loading ? 'Waiting...' : isWrite ? 'Write' : 'Read')
+    ),
+
+    // Result table
+    result && result.result_code === 0 && result.registers && /*#__PURE__*/React.createElement(Card, null,
+      /*#__PURE__*/React.createElement("div", { className: "text-sm font-medium mb-2 text-green-400" },
+        `FC${String(result.fc).padStart(2,'0')} Response — ${result.registers.length} registers from slave ${result.slave_id}`,
+        `  [${dataType} × ${scale}]`),
+      /*#__PURE__*/React.createElement("div", { className: "overflow-auto", style: { maxHeight: '400px' } },
+        /*#__PURE__*/React.createElement("table", { className: "w-full text-sm font-mono" },
+          /*#__PURE__*/React.createElement("thead", null,
+            /*#__PURE__*/React.createElement("tr", { className: "text-gray-400 border-b border-gray-700" },
+              ['Addr', 'Hex', 'Raw', 'Parsed', 'ASCII'].map(h =>
+                /*#__PURE__*/React.createElement("th", { key: h, className: "text-left px-2 py-1" }, h)))),
+          /*#__PURE__*/React.createElement("tbody", null,
+            (() => {
+              const regs = result.registers;
+              const sc = parseFloat(scale) || 1;
+              const rows = [];
+              const is32 = dataType === 'U32' || dataType === 'S32';
+              const isStr = dataType === 'STRING';
+              const step = is32 ? 2 : 1;
+              for (let i = 0; i < regs.length; i += step) {
+                const regAddr = result.address + i;
+                const v = regs[i];
+                let raw, parsed, hex, ascii;
+                if (is32 && i + 1 < regs.length) {
+                  const u32 = ((regs[i] & 0xFFFF) << 16) | (regs[i+1] & 0xFFFF);
+                  hex = `0x${u32.toString(16).toUpperCase().padStart(8, '0')}`;
+                  if (dataType === 'S32') {
+                    raw = u32 >= 0x80000000 ? u32 - 0x100000000 : u32;
+                  } else {
+                    raw = u32;
+                  }
+                  parsed = (raw * sc).toFixed(sc < 1 ? Math.max(1, -Math.floor(Math.log10(sc))) : 0);
+                  const c1 = (regs[i]>>8)&0xFF, c2 = regs[i]&0xFF, c3 = (regs[i+1]>>8)&0xFF, c4 = regs[i+1]&0xFF;
+                  ascii = [c1,c2,c3,c4].map(c => c>=32&&c<127?String.fromCharCode(c):'.').join('');
+                } else if (isStr) {
+                  hex = `0x${v.toString(16).toUpperCase().padStart(4,'0')}`;
+                  const c1 = (v>>8)&0xFF, c2 = v&0xFF;
+                  ascii = (c1>=32&&c1<127?String.fromCharCode(c1):'.')+(c2>=32&&c2<127?String.fromCharCode(c2):'.');
+                  raw = v;
+                  parsed = ascii;
+                } else {
+                  hex = `0x${v.toString(16).toUpperCase().padStart(4,'0')}`;
+                  if (dataType === 'S16') {
+                    raw = v >= 0x8000 ? v - 0x10000 : v;
+                  } else {
+                    raw = v;
+                  }
+                  parsed = (raw * sc).toFixed(sc < 1 ? Math.max(1, -Math.floor(Math.log10(sc))) : 0);
+                  const c1 = (v>>8)&0xFF, c2 = v&0xFF;
+                  ascii = (c1>=32&&c1<127?String.fromCharCode(c1):'.')+(c2>=32&&c2<127?String.fromCharCode(c2):'.');
+                }
+                rows.push(/*#__PURE__*/React.createElement("tr", {
+                  key: i, className: "border-b border-gray-800 hover:bg-gray-800"
+                },
+                  /*#__PURE__*/React.createElement("td", { className: "px-2 py-0.5 text-gray-400" },
+                    `0x${regAddr.toString(16).toUpperCase().padStart(4,'0')}${is32 ? '-'+(regAddr+1).toString(16).toUpperCase().padStart(4,'0') : ''}`),
+                  /*#__PURE__*/React.createElement("td", { className: "px-2 py-0.5 text-yellow-300" }, hex),
+                  /*#__PURE__*/React.createElement("td", { className: "px-2 py-0.5" }, raw),
+                  /*#__PURE__*/React.createElement("td", { className: "px-2 py-0.5 text-cyan-300 font-bold" }, parsed),
+                  /*#__PURE__*/React.createElement("td", { className: "px-2 py-0.5 text-gray-500" }, ascii)));
+              }
+              return rows;
+            })())))),
+
+    result && result.result_code !== 0 && /*#__PURE__*/React.createElement(Card, null,
+      /*#__PURE__*/React.createElement("div", { className: "text-red-400 text-sm" },
+        `Error: ${result.result_code === -1 ? 'TIMEOUT — No response from inverter' : 'Modbus communication error'}`)),
+
+    // Log
+    /*#__PURE__*/React.createElement("div", {
+      ref: logRef,
+      className: "mt-3 bg-gray-900 border border-gray-700 rounded p-3 text-xs font-mono overflow-auto",
+      style: { maxHeight: '200px' }
+    }, logs.length === 0
+      ? /*#__PURE__*/React.createElement("span", { className: "text-gray-500" }, "Modbus test log...")
+      : logs.map((l, i) => /*#__PURE__*/React.createElement("div", { key: i, className: "mb-0.5" },
+          /*#__PURE__*/React.createElement("span", { className: "text-gray-500" }, l.time, " "),
+          /*#__PURE__*/React.createElement("span", {
+            className: l.msg.startsWith('>') ? 'text-blue-400' : l.msg.startsWith('<') ? 'text-green-400' : l.msg.startsWith('  TX:') || l.msg.startsWith('  RX:') ? 'text-gray-500 text-[10px]' : 'text-red-400'
+          }, l.msg))))
+  );
+}
+
+// ==== MODEL MAKER TAB ====
+function ModelMakerTab() {
+  const [running, setRunning] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [status, setStatus] = useState('');
+  const [aiMode, setAiMode] = useState(() => {
+    const saved = localStorage.getItem('mm2_ai_mode');
+    return saved === null ? true : saved === 'true';  // default ON
+  });
+  const [aiKey, setAiKey] = useState('');
+  const [aiModel, setAiModel] = useState('claude-sonnet-4-6');
+  const [aiHasKey, setAiHasKey] = useState(false);
+  const [aiMasked, setAiMasked] = useState('');
+  const [aiSaving, setAiSaving] = useState(false);
+  const MM2_PORT = 8082;
+  // Use reverse proxy through dashboard port (same origin) so DDNS/NAT
+  // access works without forwarding port 8082.
+  const mm2Url = `${API}/mm2-app/`;
+
+  const checkStatus = async () => {
+    try {
+      const d = await fetcher('/mm2/status');
+      setRunning(d.running);
+    } catch (e) { setRunning(false); }
+  };
+  useEffect(() => { checkStatus(); const iv = setInterval(checkStatus, 5000); return () => clearInterval(iv); }, []);
+
+  // Load AI settings
+  useEffect(() => {
+    fetcher('/mm2/ai-settings').then(d => {
+      setAiHasKey(d.has_key);
+      setAiMasked(d.masked_key || '');
+      setAiModel(d.model || 'claude-sonnet-4-6');
+    }).catch(() => {});
+  }, []);
+  useEffect(() => { localStorage.setItem('mm2_ai_mode', String(aiMode)); }, [aiMode]);
+
+  const saveAiKey = async () => {
+    if (!aiKey.trim()) return;
+    setAiSaving(true);
+    try {
+      await post('/mm2/ai-settings', { api_key: aiKey, model: aiModel });
+      setAiHasKey(true);
+      setAiMasked('*'.repeat(Math.max(0, aiKey.length - 8)) + aiKey.slice(-8));
+      setAiKey('');
+      setStatus('API key saved');
+    } catch (e) { setStatus('Save failed: ' + e.message); }
+    setAiSaving(false);
+  };
+
+  const startMM2 = async () => {
+    setLoading(true);
+    setStatus('Starting Model Maker v2...');
+    try {
+      const d = await post('/mm2/start', {});
+      setStatus(d.status === 'started' ? `Started (PID ${d.pid})` : d.status === 'already_running' ? 'Already running' : `Failed: ${d.status}`);
+      await checkStatus();
+    } catch (e) { setStatus('Error: ' + e.message); }
+    setLoading(false);
+  };
+
+  const stopMM2 = async () => {
+    setLoading(true);
+    try {
+      const d = await post('/mm2/stop', {});
+      setStatus('Stopped');
+      await checkStatus();
+    } catch (e) { setStatus('Error: ' + e.message); }
+    setLoading(false);
+  };
+
+  return /*#__PURE__*/React.createElement("div", null,
+    /*#__PURE__*/React.createElement("div", { className: "flex gap-3 mb-3 items-center flex-wrap" },
+      /*#__PURE__*/React.createElement("span", { className: "text-sm" },
+        "Model Maker Web v2 ",
+        /*#__PURE__*/React.createElement("span", {
+          className: running ? "text-green-400 font-bold" : "text-red-400 font-bold"
+        }, running ? "Running" : "Stopped"),
+        running && /*#__PURE__*/React.createElement("span", { className: "text-gray-400 ml-2" }, `(port ${MM2_PORT})`)
+      ),
+      !running && /*#__PURE__*/React.createElement("button", {
+        onClick: startMM2, disabled: loading,
+        className: "bg-green-600 hover:bg-green-500 px-4 py-2 rounded text-sm disabled:opacity-50"
+      }, loading ? "Starting..." : "Start"),
+      running && /*#__PURE__*/React.createElement("button", {
+        onClick: stopMM2, disabled: loading,
+        className: "bg-red-600 hover:bg-red-500 px-4 py-2 rounded text-sm disabled:opacity-50"
+      }, "Stop"),
+      running && /*#__PURE__*/React.createElement("a", {
+        href: mm2Url, target: "_blank", rel: "noopener",
+        className: "bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded text-sm"
+      }, "Open in New Tab"),
+      /*#__PURE__*/React.createElement("button", {
+        onClick: () => setAiMode(m => !m),
+        className: aiMode
+          ? "bg-purple-600 hover:bg-purple-500 px-4 py-2 rounded text-sm font-semibold"
+          : "bg-gray-600 hover:bg-gray-500 px-4 py-2 rounded text-sm"
+      }, aiMode ? "\uD83E\uDD16 AI Mode ON" : "\uD83E\uDD16 AI Mode"),
+      status && /*#__PURE__*/React.createElement("span", { className: "text-xs text-yellow-400" }, status)
+    ),
+    aiMode && !aiHasKey && /*#__PURE__*/React.createElement("div", { className: "flex gap-3 mb-4 items-center flex-wrap" },
+      /*#__PURE__*/React.createElement("select", {
+        className: "bg-gray-700 rounded px-2 py-1.5 text-xs",
+        value: aiModel,
+        onChange: e => setAiModel(e.target.value)
+      },
+        ['claude-sonnet-4-6', 'claude-opus-4-6', 'claude-haiku-4-5-20251001'].map(m =>
+          /*#__PURE__*/React.createElement("option", { key: m, value: m }, m))
+      ),
+      /*#__PURE__*/React.createElement("span", { className: "text-red-400 text-xs" },
+        "\u26A0 API Key \uBBF8\uC124\uC815"),
+      /*#__PURE__*/React.createElement("input", {
+        type: "password",
+        className: "bg-gray-700 rounded px-2 py-1.5 text-xs w-64",
+        placeholder: "sk-ant-api03-...",
+        value: aiKey,
+        onChange: e => setAiKey(e.target.value)
+      }),
+      /*#__PURE__*/React.createElement("button", {
+        onClick: saveAiKey,
+        disabled: !aiKey.trim() || aiSaving,
+        className: "bg-purple-600 hover:bg-purple-500 px-3 py-1.5 rounded text-xs disabled:opacity-50"
+      }, aiSaving ? "Saving..." : "Save Key")
+    ),
+    // Always show iframe for Stage 1/2/3 — AI mode passes ?ai_mode=1
+    // so the MM2 frontend can send use_ai:true to stage1/run
+    running && /*#__PURE__*/React.createElement("div", {
+      className: "border border-gray-700 rounded overflow-hidden",
+      style: { height: 'calc(100vh - 180px)' }
+    },
+      /*#__PURE__*/React.createElement("iframe", {
+        src: mm2Url + (aiMode && aiHasKey ? '?ai_mode=1' : ''),
+        className: "w-full h-full border-0",
+        title: "Model Maker Web v2",
+        key: aiMode ? 'ai' : 'rule'  // re-mount iframe on mode change
+      })
+    ),
+    !running && /*#__PURE__*/React.createElement(Card, null,
+      /*#__PURE__*/React.createElement("div", { className: "text-center text-gray-400 py-8" },
+        /*#__PURE__*/React.createElement("div", { className: "text-lg mb-2" }, "Model Maker Web v2"),
+        /*#__PURE__*/React.createElement("div", { className: "text-sm mb-4" }, "PDF \u2192 Stage1 \u2192 Stage2 \u2192 Stage3 \u2192 *_registers.py"),
+        /*#__PURE__*/React.createElement("div", { className: "text-xs text-gray-500" }, "Start \uBC84\uD2BC\uC744 \uB20C\uB7EC Model Maker \uC11C\uBC84\uB97C \uC2E4\uD589\uD558\uC138\uC694")
+      )
+    )
+  );
+}
+
 // ==== MAIN APP ====
 function App() {
-  const TABS = ['Overview', 'Devices', 'Control', 'History', 'Events', 'Firmware', 'Config', 'Stats', 'H1 Log'];
+  const TABS = ['Overview', 'Devices', 'Control', 'History', 'Events', 'Firmware', 'Config', 'Stats', 'H1 Log', 'Model Maker', 'Modbus Test'];
+  const [mmEnabled, setMmEnabled] = useState(false);
+  const [mtEnabled, setMtEnabled] = useState(false);
   const [tab, setTab] = useState('Overview');
   const [rtus, setRtus] = useState([]);
   const [selectedRtu, setSelectedRtu] = useState('');
@@ -2357,6 +3000,11 @@ function App() {
 
   useEffect(() => {
     fetcher('/health').then(d => { if (d?.version) setServerVersion('v' + d.version); }).catch(() => {});
+    // Check modelmaker/modbustest flags from ai_settings.ini
+    fetcher('/mm2/ai-settings').then(d => {
+      setMmEnabled(!!d?.modelmaker_enabled);
+      setMtEnabled(!!d?.modbustest_enabled);
+    }).catch(() => {});
   }, []);
 
   // Load RTUs
@@ -2376,7 +3024,10 @@ function App() {
       setWsUpdateCounter(c => c + 1);
     }
     if (msg.type === 'event') {
-      setWsEvents(p => [...p.slice(-99), {
+      // Buffer up to 499 prior events + 1 new. Bulk control (11 inverters ×
+      // 4 events = 44) fits easily with headroom for concurrent H01/H05
+      // background traffic.
+      setWsEvents(p => [...p.slice(-499), {
         time: new Date().toLocaleTimeString(),
         rtu_id: msg.rtu_id,
         event_type: msg.event_type,
@@ -2419,13 +3070,18 @@ function App() {
   }, (() => {
     const selRtuObj = rtus.find(r => String(r.rtu_id) === String(selectedRtu));
     const isRIP = selRtuObj && selRtuObj.rtu_type === 'RIP';
-    const disabledTabs = isRIP ? ['Firmware', 'Config'] : [];
-    return TABS.map(t => /*#__PURE__*/React.createElement("button", {
-      key: t,
-      onClick: () => { if (!disabledTabs.includes(t)) setTab(t); },
-      className: `px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${disabledTabs.includes(t) ? 'border-transparent text-gray-600 cursor-not-allowed' : tab === t ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500'}`,
-      title: disabledTabs.includes(t) ? 'RI Power RTU는 지원하지 않습니다' : ''
-    }, t));
+    const hiddenTabs = isRIP ? ['Firmware', 'Config'] : [];
+    return TABS.filter(t => !hiddenTabs.includes(t)).map(t => {
+      const isDisabled = (t === 'Model Maker' && !mmEnabled) || (t === 'Modbus Test' && !mtEnabled);
+      const disabledHint = t === 'Model Maker' ? 'modelmaker=NO' : t === 'Modbus Test' ? 'modbustest=NO' : '';
+      return /*#__PURE__*/React.createElement("button", {
+        key: t,
+        onClick: isDisabled ? undefined : () => setTab(t),
+        disabled: isDisabled,
+        className: `px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${isDisabled ? 'border-transparent text-gray-600 cursor-not-allowed opacity-50' : tab === t ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500'}`,
+        title: isDisabled ? `Disabled (config/ai_settings.ini: ${disabledHint})` : ''
+      }, t);
+    });
   })())), /*#__PURE__*/React.createElement("main", {
     className: "max-w-7xl mx-auto p-4"
   }, tab === 'Overview' && /*#__PURE__*/React.createElement(OverviewTab, {
@@ -2456,7 +3112,8 @@ function App() {
     packets: rawPackets,
     rtus: rtus,
     onClear: () => setRawPackets([])
-  })));
+  }), tab === 'Model Maker' && /*#__PURE__*/React.createElement(ModelMakerTab, null),
+  tab === 'Modbus Test' && /*#__PURE__*/React.createElement(ModbusTestTab, { rtus: rtus, selectedRtu: selectedRtu })));
 }
 ReactDOM.createRoot(document.getElementById('root')).render(/*#__PURE__*/React.createElement(App, null));
 

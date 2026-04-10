@@ -16,42 +16,40 @@ class RegisterMap:
     # =========================================================================
     # Device Information
     # =========================================================================
-    POWER_FACTOR                             = 0x0000  # U16
     ERROR_CODE3                              = 0x000F  # U16
-    PV_POWER                                 = 0x0010  # U16
-    INVERTER_RELAY_ABNORMAL                  = 0x0011  # U16
-    OUTPUT_DC_SENSOR_FAILED                  = 0x0012  # U16
-    TEMPERATURE                              = 0x0013  # U16
-    FAN_LOCK                                 = 0x0017  # U16
-    FREQUENCY                                = 0x001F  # U16
     DAILY_ENERGY                             = 0x1027  # U32
     DAILY_ENERGY_HIGH                        = 0x1028
     DEVICE_MODEL                             = 0x1A00  # U16
     DEVICE_SERIAL_NUMBER                     = 0x1A10  # U16
     FIRMWARE_VERSION                         = 0x1A1C  # U16
-    RATED_VOLTAGE                            = 0x1A44  # U16, scale V 0.1
-    RATED_FREQUENCY                          = 0x1A45  # U16, scale Hz 0.01
+    MPPT_NUMBER                              = 0x1A3B  # U16
     NOMINAL_POWER                            = 0x1A46  # U16
     GRID_PHASE_NUMBER                        = 0x1A48  # U16
 
     # =========================================================================
     # Monitoring Data
     # =========================================================================
-    START_BIT                                = 0x0001  # U16
-    PV_STRING_COUNT                          = 0x0002  # U16
+    POWER_FACTOR                             = 0x0000  # U16
+    TEMPERATURE                              = 0x0001  # U16
+    FREQUENCY                                = 0x0002  # U16
     REACTIVE_POWER                           = 0x0003  # U16
-    GRID_AC_UNDER_FREQUENCY                  = 0x0004  # U16
-    PV_DC_OVER_VOLTAGE                       = 0x0005  # U16
-    PV_DC_UNDER_VOLTAGE                      = 0x000B  # U16
-    L1_VOLTAGE                               = 0x000C  # U16
+    LEAKAGE_CURRENT_ABNORMAL                 = 0x0007  # U16
+    L1_VOLTAGE                               = 0x0009  # U16
+    PV_POWER                                 = 0x000B  # U16
+    PV_IRRADIATION_WEAK                      = 0x000C  # U16
+    L2_VOLTAGE                               = 0x000D  # U16
+    WRITE_MULTIPLE_REGISTERS                 = 0x0010  # U16
+    INVERTER_RELAY_ABNORMAL                  = 0x0011  # U16
+    L3_CURRENT                               = 0x0014  # U16
     SYSTEM_TYPE_ERROR                        = 0x0016  # U16
-    L2_VOLTAGE                               = 0x0019  # U16
+    FAN_LOCK                                 = 0x0017  # U16
+    BUS_UNDER_VOLTAGE                        = 0x0018  # U16
+    BUS_OVER_VOLTAGE                         = 0x0019  # U16
     EEPROM_ERROR                             = 0x001C  # U16
+    CONSISTENT_WARNING                       = 0x001D  # U16
     L3_VOLTAGE                               = 0x001E  # U16
-    FUNCTION_CODE                            = 0x0083  # U16
     L1_CURRENT                               = 0x1002  # U16, scale A 0.01
     L2_CURRENT                               = 0x1007  # U16, scale A 0.01
-    L3_CURRENT                               = 0x100C  # U16, scale A 0.01
     PV_VOLTAGE                               = 0x1010  # U16, scale V 0.1
     PV1_CURRENT                              = 0x1011  # U16, scale A 0.01
     MPPT1_POWER                              = 0x1012  # U32, scale W 0.1
@@ -72,18 +70,21 @@ class RegisterMap:
     PV4_CURRENT                              = 0x103F  # U16, scale A 0.01
     MPPT4_POWER                              = 0x1040  # U32, scale W 0.1
     MPPT4_POWER_HIGH                         = 0x1041
+    MONTH_2_ENERGY                           = 0xE002  # U16
 
     # =========================================================================
     # Status & Temperature
     # =========================================================================
     INVERTER_MODE                            = 0x101D  # U16
+    MONTH_1_ENERGY                           = 0xE000  # U16, scale KWh
 
     # =========================================================================
     # Alarm / Error Codes
     # =========================================================================
-    GRID_TYPE_UNKNOWN                        = 0x000D  # U16
-    ERROR_CODE1                              = 0x101E  # U32
-    ERROR_CODE1_HIGH                         = 0x101F
+    PV_STRING_ABNORMAL                       = 0x000A  # STRINGING
+    ERROR_CODE2                              = 0x101E  # U32
+    ERROR_CODE2_HIGH                         = 0x101F
+    NOT_DEFINED                              = 0xFFFF  # U16
 
     # R/S/T Phase Aliases
     R_VOLTAGE                                = L1_VOLTAGE
@@ -103,22 +104,21 @@ class RegisterMap:
 
     # --- MPPT alias (modbus_handler: MPPT{N}_ 형식) ---
     MPPT1_CURRENT                            = PV1_CURRENT
+    PV_STRING_COUNT                          = 4
 
     # --- RTU modbus_handler / simulator 필수 alias ---
     INNER_TEMP                               = TEMPERATURE
     TOTAL_ENERGY                             = CUMULATIVE_ENERGY
-    ERROR_CODE2                              = ERROR_CODE1
+    ERROR_CODE1                              = L2_VOLTAGE
     DER_POWER_FACTOR_SET                     = 0x07D0
     DER_ACTION_MODE                          = 0x07D1
     DER_REACTIVE_POWER_PCT                   = 0x07D2
     DER_ACTIVE_POWER_PCT                     = 0x07D3
     INVERTER_ON_OFF                          = 0x0834
+    MPPT1_VOLTAGE                            = PV_VOLTAGE
+    CUMULATIVE_ENERGY_LOW                    = CUMULATIVE_ENERGY
+    DER_AVM_DIGITAL_METERCONNECT_STATUS      = 0x1210
 
-
-
-    # IV Scan block layout
-    IV_TRACKER_BLOCK_SIZE             = 0x0100  # 256 regs per tracker
-    IV_SCAN_DATA_POINTS              = 64      # default data points
 
 
 class InverterMode:
@@ -176,7 +176,7 @@ class ControlMode:
 
 
 class ErrorCode1:
-    """Error Code Table1 (0x000D) — Bit field"""
+    """Error Code Table1 (0x0005) — Bit field"""
     BITS = {
     }
 
@@ -190,7 +190,35 @@ class ErrorCode1:
 
 
 class ErrorCode2:
-    """Error Code Table2 (0x101E) — Bit field"""
+    """Error Code Table2 (0x000A) — Bit field"""
+    BITS = {
+    }
+
+    @classmethod
+    def decode(cls, value):
+        return [f"E{b}:{d}" for b, d in cls.BITS.items() if value & (1 << b)]
+
+    @classmethod
+    def to_string(cls, value):
+        return ", ".join(cls.decode(value)) if value else "OK"
+
+
+class ErrorCode3:
+    """Error Code Table3 (0x101E) — Bit field"""
+    BITS = {
+    }
+
+    @classmethod
+    def decode(cls, value):
+        return [f"E{b}:{d}" for b, d in cls.BITS.items() if value & (1 << b)]
+
+    @classmethod
+    def to_string(cls, value):
+        return ", ".join(cls.decode(value)) if value else "OK"
+
+
+class ErrorCode4:
+    """Error Code Table4 (0xFFFF) — Bit field"""
     BITS = {
     }
 
@@ -210,6 +238,16 @@ class CpsStatusConverter:
     @classmethod
     def to_inverter_mode(cls, raw):
         return raw
+
+    @classmethod
+    def to_solarize(cls, raw):
+        """RTU 호환 alias"""
+        return cls.to_inverter_mode(raw)
+
+    @classmethod
+    def to_h01(cls, raw):
+        """RTU 호환 alias"""
+        return cls.to_inverter_mode(raw)
 
 
 # Dynamic-loader alias required by modbus_handler.load_register_module
@@ -337,29 +375,28 @@ def generate_iv_current_data(isc, voc, v_min, data_points=64):
 
 DATA_TYPES = {
     'POWER_FACTOR': 'U16',
-    'START_BIT': 'U16',
-    'PV_STRING_COUNT': 'U16',
-    'REACTIVE_POWER': 'U16',
-    'GRID_AC_UNDER_FREQUENCY': 'U16',
-    'PV_DC_OVER_VOLTAGE': 'U16',
-    'PV_DC_UNDER_VOLTAGE': 'U16',
-    'L1_VOLTAGE': 'U16',
-    'GRID_TYPE_UNKNOWN': 'U16',
-    'ERROR_CODE3': 'U16',
-    'PV_POWER': 'U16',
-    'INVERTER_RELAY_ABNORMAL': 'U16',
-    'OUTPUT_DC_SENSOR_FAILED': 'U16',
     'TEMPERATURE': 'U16',
+    'FREQUENCY': 'U16',
+    'REACTIVE_POWER': 'U16',
+    'L2_VOLTAGE': 'U16',
+    'LEAKAGE_CURRENT_ABNORMAL': 'U16',
+    'L1_VOLTAGE': 'U16',
+    'PV_STRING_ABNORMAL': 'STRINGING',
+    'PV_POWER': 'U16',
+    'PV_IRRADIATION_WEAK': 'U16',
+    'ERROR_CODE3': 'U16',
+    'WRITE_MULTIPLE_REGISTERS': 'U16',
+    'INVERTER_RELAY_ABNORMAL': 'U16',
+    'L3_CURRENT': 'U16',
     'SYSTEM_TYPE_ERROR': 'U16',
     'FAN_LOCK': 'U16',
-    'L2_VOLTAGE': 'U16',
+    'BUS_UNDER_VOLTAGE': 'U16',
+    'BUS_OVER_VOLTAGE': 'U16',
     'EEPROM_ERROR': 'U16',
+    'CONSISTENT_WARNING': 'U16',
     'L3_VOLTAGE': 'U16',
-    'FREQUENCY': 'U16',
-    'FUNCTION_CODE': 'U16',
     'L1_CURRENT': 'U16',
     'L2_CURRENT': 'U16',
-    'L3_CURRENT': 'U16',
     'PV_VOLTAGE': 'U16',
     'PV1_CURRENT': 'U16',
     'MPPT1_POWER': 'U32',
@@ -370,7 +407,7 @@ DATA_TYPES = {
     'PV3_CURRENT': 'U16',
     'MPPT3_POWER': 'U32',
     'INVERTER_MODE': 'U16',
-    'ERROR_CODE1': 'U32',
+    'ERROR_CODE2': 'U32',
     'CUMULATIVE_ENERGY': 'U32',
     'DAILY_ENERGY': 'U32',
     'AC_POWER': 'U32',
@@ -380,10 +417,12 @@ DATA_TYPES = {
     'DEVICE_MODEL': 'U16',
     'DEVICE_SERIAL_NUMBER': 'U16',
     'FIRMWARE_VERSION': 'U16',
-    'RATED_VOLTAGE': 'U16',
-    'RATED_FREQUENCY': 'U16',
+    'MPPT_NUMBER': 'U16',
     'NOMINAL_POWER': 'U16',
     'GRID_PHASE_NUMBER': 'U16',
+    'MONTH_1_ENERGY': 'U16',
+    'MONTH_2_ENERGY': 'U16',
+    'NOT_DEFINED': 'U16',
 }
 
 FLOAT32_FIELDS: set = set()
@@ -398,9 +437,11 @@ STRING_CURRENT_MONITOR = False
 
 # RTU 배치 읽기 블록 — start/count/fc 지정으로 트랜잭션 최소화
 READ_BLOCKS = [
-    {'start': 0x0001, 'count':  30, 'fc': 3},
+    {'start': 0x0000, 'count':  32, 'fc': 3},
     {'start': 0x0083, 'count':  14, 'fc': 3},
     {'start': 0x1001, 'count':  65, 'fc': 3},
+    {'start': 0xE000, 'count':   3, 'fc': 3},
+    {'start': 0xFFFF, 'count':   1, 'fc': 3},
 ]
 
 
@@ -409,22 +450,22 @@ READ_BLOCKS = [
 # modbus_handler._read_inverter_data_dynamic()이 이 매핑을 사용한다.
 DATA_PARSER = {
     'mode                ': 'INVERTER_MODE',
-    'r_voltage           ': 'DEA_L1_VOLTAGE (0x03EE~0x03EF); GRID_AC_UNDER_FREQUENCY (0x0004); L1_VOLTAGE (0x000C)',
-    's_voltage           ': 'DEA_L2_VOLTAGE (0x03F0~0x03F1); PV_DC_OVER_VOLTAGE (0x0005); L2_VOLTAGE (0x0019); GRID_TYPE_UNKNOWN (0x000D)',
-    't_voltage           ': 'DEA_L3_VOLTAGE (0x03F2~0x03F3); SYSTEM_TYPE_ERROR (0x0016); L3_VOLTAGE (0x001E)',
+    'r_voltage           ': 'DEA_L1_VOLTAGE (0x03EE~0x03EF); L1_VOLTAGE (0x0009); PV_IRRADIATION_WEAK (0x000C)',
+    's_voltage           ': 'DEA_L2_VOLTAGE (0x03F0~0x03F1); L2_VOLTAGE (0x000D); BUS_OVER_VOLTAGE (0x0019)',
+    't_voltage           ': 'DEA_L3_VOLTAGE (0x03F2~0x03F3); SYSTEM_TYPE_ERROR (0x0016); L3_VOLTAGE (0x001E); ERROR_CODE2 (0x101E)',
     'r_current           ': 'DEA_L1_CURRENT (0x03E8~0x03E9); L1_CURRENT (0x1002)',
     's_current           ': 'DEA_L2_CURRENT (0x03EA~0x03EB); L2_CURRENT (0x1007)',
-    't_current           ': 'DEA_L3_CURRENT (0x03EC~0x03ED); L3_CURRENT (0x100C)',
-    'frequency           ': 'DEA_FREQUENCY (0x03FA~0x03FB); PV_STRING_COUNT (0x0002)',
-    'ac_power            ': 'DEA_TOTAL_ACTIVE_POWER (0x03F4~0x03F5); AC_POWER (0x1037)',
+    't_current           ': 'DEA_L3_CURRENT (0x03EC~0x03ED); L3_CURRENT (0x0014)',
+    'frequency           ': 'DEA_FREQUENCY (0x03FA~0x03FB); FREQUENCY (0x0002); LEAKAGE_CURRENT_ABNORMAL (0x0007)',
+    'ac_power            ': 'DEA_TOTAL_ACTIVE_POWER (0x03F4~0x03F5); INVERTER_RELAY_ABNORMAL (0x0011); AC_POWER (0x1037)',
     'cumulative_energy   ': 'CUMULATIVE_ENERGY (0x1021); EEPROM_ERROR (0x001C)',
-    'alarm1              ': 'ERROR_CODE1 (0x101E)',
+    'alarm1              ': 'ERROR_CODE2 (0x101E); PV_STRING_ABNORMAL (0x000A)',
     'mppt1_voltage'        : 'PV_VOLTAGE',
     'mppt1_current'        : 'PV1_CURRENT',
     'mppt2_voltage'        : 'PV2_VOLTAGE',
     'mppt2_current'        : 'PV2_CURRENT',
     'mppt3_voltage'        : 'PV3_VOLTAGE',
     'mppt3_current'        : 'PV3_CURRENT',
-    'mppt4_voltage'        : 'FUNCTION_CODE',
+    'mppt4_voltage'        : 'PV4_VOLTAGE',
     'mppt4_current'        : 'PV4_CURRENT',
 }

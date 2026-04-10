@@ -37,6 +37,18 @@ from .rules import (
 
 # ─── PDF 추출 ─────────────────────────────────────────────────────────────────
 
+# openpyxl이 거부하는 ASCII 제어문자 (Excel ILLEGAL_CHARACTERS_RE)
+_ILLEGAL_XLS_CHARS = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f]')
+
+
+def _sanitize_pdf_text(s: str) -> str:
+    """PDF 텍스트에서 Excel이 거부하는 제어문자 제거.
+    \\t \\n \\r 만 보존, 나머지 0x00~0x1F는 공백으로."""
+    if not s:
+        return s
+    return _ILLEGAL_XLS_CHARS.sub(' ', s)
+
+
 def extract_pdf_text_and_tables(pdf_path: str, log=None) -> List[dict]:
     """PyMuPDF로 PDF 페이지별 텍스트+테이블 추출.
     log: 진행 상황 콜백 (선택). find_tables()는 스레드 타임아웃(5s/페이지)으로 행 방지.
@@ -53,7 +65,7 @@ def extract_pdf_text_and_tables(pdf_path: str, log=None) -> List[dict]:
         log(f'  PDF 열기 완료: {total}페이지')
     try:
         for i, page in enumerate(doc):
-            text = page.get_text()
+            text = _sanitize_pdf_text(page.get_text())
             tables = []
             # find_tables()는 복잡한 PDF에서 무한 대기할 수 있음 → 5초 타임아웃
             try:
@@ -62,7 +74,13 @@ def extract_pdf_text_and_tables(pdf_path: str, log=None) -> List[dict]:
                     tab_list = future.result(timeout=5)
                 for tab in tab_list:
                     try:
-                        tables.append(tab.extract())
+                        raw = tab.extract()
+                        # Sanitize cells (Excel illegal control chars)
+                        clean = [
+                            [_sanitize_pdf_text(c) if isinstance(c, str) else c
+                             for c in row] for row in raw
+                        ]
+                        tables.append(clean)
                     except Exception:
                         pass
             except concurrent.futures.TimeoutError:
@@ -341,26 +359,63 @@ def _parse_register_row(row: list, col_map: dict) -> Optional[RegisterRow]:
     # V2: 주소 컬럼 인덱스 (col_map 또는 fallback에서 설정된 것)
     actual_addr_idx = col_map.get('addr')
 
+    # Deye 등 일부 PDF 표에는 Device type filter 컬럼 ('String', 'Hybird', 'MI')
+    # 이 있어 이름으로 오인되는 경우가 많음. 이런 값은 이름 후보에서 제외.
+    _TYPE_FILTER_WORDS = {
+        'string', 'hybird', 'hybrid', 'mi', 'microinverter',
+        'string inverter', 'storage', 'ess', 'all',
+        # Modbus function code 값
+        'r', 'rw', 'r/w', 'ro', 'w', 'wo',
+        # 기타 단일 약어
+        'r ', 'w ',
+    }
+
+    def _is_valid_name_cell(c: str) -> bool:
+        if not c:
+            return False
+        cl = c.strip().lower()
+        if not cl:
+            return False
+        if cl in _TYPE_FILTER_WORDS:
+            return False
+        # 너무 짧은 셀 (3자 미만) — SN/FW 만 예외
+        if len(cl) < 3 and cl.upper() not in ('SN', 'FW', 'PN'):
+            return False
+        # 순수 숫자 (행번호)
+        if re.match(r'^\d{1,5}$', cl):
+            return False
+        # 주소 패턴
+        if _ADDR_RE.fullmatch(cl):
+            return False
+        return True
+
     name = ''
     name_idx = col_map.get('name')
     if name_idx is not None and name_idx < len(row):
-        name = str(row[name_idx]).strip()
+        cand = str(row[name_idx]).strip()
+        if _is_valid_name_cell(cand):
+            name = cand
     if not name:
-        name = ''
+        # name 컬럼이 없거나 type filter 값이면 다른 셀 검사
+        # 가장 긴 유효 셀을 이름으로 (의미 있는 definition 선호)
+        best = ''
         for i, cell in enumerate(row):
             if i == actual_addr_idx:
                 continue
             c = str(cell).strip()
-            if not c or (len(c) <= 2 and c.upper() not in ('SN', 'FW', 'PN')):
-                continue
-            # V2: 숫자만 있는 셀은 행번호 — 이름이 아님
-            if re.match(r'^\d{1,5}$', c):
+            if not _is_valid_name_cell(c):
                 continue
             # 0x 주소 패턴도 건너뛰기
             if _ADDR_RE.fullmatch(c):
                 continue
-            name = c
-            break
+            # 타입 키워드 (U16, S32 등) 제외
+            if _TYPE_RE.fullmatch(c):
+                continue
+            # 가장 긴 셀 선호 — Deye 처럼 짧은 필터 셀 ('String') 대신
+            # '电网电압 A\nGrid voltage A' 같은 긴 의미 셀 선택
+            if len(c) > len(best):
+                best = c
+        name = best
     if not name:
         return None
 
@@ -558,7 +613,9 @@ def _is_valid_register_name(name: str) -> bool:
                            'curve', 'device abnormal'):
         return False
     # V2: 너무 짧은 이름 (3자 이하인데 키워드가 아닌 것)
-    if len(stripped) <= 3 and not any(k in stripped_lower for k in
+    # CJK(한글/한자/일본어) 문자는 글자당 의미가 크므로 길이 필터에서 제외
+    has_cjk = any('\u3040' <= ch <= '\u9fff' or '\uac00' <= ch <= '\ud7a3' for ch in stripped)
+    if not has_cjk and len(stripped) <= 3 and not any(k in stripped_lower for k in
             ['sn', 'pf', 'pv', 'dc', 'ac', 'bus', 'ia', 'ib', 'ic', 'ua', 'ub', 'uc']):
         return False
     return True
@@ -577,10 +634,29 @@ def extract_registers_from_tables(tables: List[List[list]],
             continue
         fc = fc_list[t_idx] if fc_list and t_idx < len(fc_list) else ''
         table = _clean_table(table)
+        # 첫 행이 데이터 행인지 검사 (0x.. 주소 OR 1~5자리 10진수)
+        # 1-2자리 주소(00~99)는 Input Reg continuation 테이블(Growatt p22 등)에서 흔함.
+        # 단, 이전 표에서 col_map 을 얻었을 때만 1-2자리 허용 (오인 방지).
         first_has_addr = any(
             str(c).strip().startswith('0x') or str(c).strip().startswith('0X') or
             (re.match(r'^\d{3,5}$', str(c).strip()) and 0 <= int(str(c).strip()) <= 65535)
             for c in table[0] if c)
+        # 1-2자리 주소 continuation 표 감지: prev_col_map 있고, 첫 행의 첫 셀이
+        # 0~99 숫자이고, 다음 행도 증가하는 숫자 패턴이면 데이터 행으로 간주
+        if not first_has_addr and prev_col_map and len(table) >= 2:
+            def _is_small_num(s):
+                s = str(s or '').strip()
+                return s.isdigit() and 0 <= int(s) <= 99
+            if _is_small_num(table[0][0]) and _is_small_num(table[1][0]):
+                # 두 행의 첫 셀이 연속 증가하면 continuation data 행
+                try:
+                    n0 = int(str(table[0][0]).strip())
+                    n1 = int(str(table[1][0]).strip())
+                    if 0 < n1 - n0 <= 3:
+                        first_has_addr = True
+                except (ValueError, IndexError):
+                    pass
+
         if first_has_addr:
             data_rows = table
             col_map = _detect_table_columns([], data_rows)
@@ -1199,6 +1275,163 @@ def _detect_definition_type(values: dict) -> Optional[str]:
     return None
 
 
+# Phase A: H01 auto-assignment negative keywords
+# 설정/보호/트립/지연/임계치 레지스터는 측정 필드(h01)로 절대 매칭되면 안 됨
+_H01_NEGATIVE_KEYWORDS = (
+    # 고장/알람/보호
+    'fault', 'failure', 'abnormal', 'trip', 'protection', 'protect',
+    # 설정/제한/임계치
+    'limit', 'threshold', 'setpoint', 'set point', 'setting',
+    'de-rate', 'derate', 'de_rate', 'de rate', 'reference',
+    # 시간/램프/지연
+    'ramp', 'delay', 'duration', 'timeout',
+    ' time ',  # "time" alone causes false hits ("runtime" is ok, "X time" is bad)
+    # 통신/시스템
+    'reserved', 'discovery', 'function code', 'register number',
+    'reset', 'clear', 'command', 'calibration', 'factory',
+    # 구성/옵션
+    'model', 'enable', 'disable', 'polarity', 'slope',
+    # 최대/최소/고/저 (측정 아닌 기준값)
+    ' max ', ' min ', 'maximum', 'minimum', 'high1', 'high2', 'high3',
+    'low1', 'low2', 'low3',
+)
+
+
+def _has_h01_negative_keyword(defn: str, comment: str = '') -> bool:
+    """측정 필드로 매칭되면 안 되는 설정/트립/임계치/보호 레지스터인지."""
+    if not defn:
+        return True
+    # 단어 경계 기반 검사용 패딩
+    dl = ' ' + defn.lower().replace('_', ' ').replace('-', ' ') + ' '
+    cl = ' ' + (comment or '').lower().replace('_', ' ').replace('-', ' ') + ' '
+    for kw in _H01_NEGATIVE_KEYWORDS:
+        if kw in dl or kw in cl:
+            return True
+    return False
+
+
+# Phase B: H01 필드별 필수 의미 키워드 — 모든 필드는 이 중 하나가 정의에 있어야 함
+_H01_REQUIRED_KEYWORDS = {
+    'r_voltage': ['volt', '전압', 'vac', 'van', 'uab', 'u_ab', 'phase a', 'l1_', 'l1 ', 'ph_a'],
+    's_voltage': ['volt', '전압', 'vac', 'vbn', 'ubc', 'u_bc', 'phase b', 'l2_', 'l2 ', 'ph_b'],
+    't_voltage': ['volt', '전압', 'vac', 'vcn', 'uca', 'u_ca', 'phase c', 'l3_', 'l3 ', 'ph_c'],
+    'r_current': ['curr', '전류', 'iac', 'amp', 'phase a', 'l1_', 'l1 ', 'ia_', ' ia ', 'aph_a'],
+    's_current': ['curr', '전류', 'iac', 'amp', 'phase b', 'l2_', 'l2 ', 'ib_', ' ib ', 'aph_b'],
+    't_current': ['curr', '전류', 'iac', 'amp', 'phase c', 'l3_', 'l3 ', 'ic_', ' ic ', 'aph_c'],
+    'frequency': ['freq', ' hz', 'hz ', 'fac ', ' fac', '주파', 'ecpnom'],
+    'ac_power':  ['power', 'watt', ' pac', 'active', '전력', 'w_', ' w '],
+    'pv_power':  ['pv power', 'dc power', 'solar power', 'dcw', 'dc_w',
+                  '태양전지 전력', 'pv전력', 'total dc', 'input power', 'ppv'],
+    'cumulative_energy': ['total energy', 'energy total', 'lifetime', 'cumulative',
+                          ' wh', 'wh ', ' kwh', 'kwh ', 'accumulated', '누적', '적산',
+                          'eac', 'einv', 'generate'],
+    'daily_energy': ['daily', 'today', 'day energy', '일발전', '금일', 'day generate'],
+    'inner_temp': ['temp', 'tmp', '온도', 'heat sink', 'heatsink', 'cabinet'],
+    'power_factor': ['power factor', 'cos phi', 'cosphi', '역률', ' pf ', 'ph_f'],
+    # mode / status / inverter_status 는 모두 같은 의미 — 동일 키워드 공유
+    'mode':      ['mode', 'state', 'status', '상태', 'operating', 'running',
+                  'work', 'device', 'st_vnd', ' st ', 'inverter'],
+    'alarm1':    ['alarm', 'error', 'fault', 'warning', '알람', '에러', '고장',
+                  'trip', 'event'],
+    'alarm2':    ['alarm', 'error', 'fault', 'warning', '알람', '에러', '고장',
+                  'trip', 'event'],
+    'alarm3':    ['alarm', 'error', 'fault', 'warning', '알람', '에러', '고장',
+                  'trip', 'event'],
+    'status':    ['mode', 'state', 'status', '상태', 'operating', 'running',
+                  'work', 'device', 'st_vnd', ' st ', 'inverter'],
+    'inverter_status': ['mode', 'state', 'status', '상태', 'operating', 'running',
+                        'work', 'device', 'inverter'],
+}
+
+
+# Phase-specific 필드는 타입 + phase 식별자 둘 다 필요
+# 예: s_current → 'curr' 만으로는 부족, 'l2'/'phase b'/'ib' 등 phase 식별자도 필수
+# 선간전압 (AB/BC/CA/VAB/VBC/VCA) 은 R/S/T 상전압과 구분 — line 키워드 금지
+_PHASE_SPECIFIC_REQUIRED = {
+    'r_voltage': {
+        'type': ['volt', '전압', 'vac', 'uab', 'vab'],
+        'phase': [' l1 ', ' r ', 'phase a', ' ph a', ' a phase', 'van',
+                  ' u1 ', ' v1 ', ' ua ', ' u a ', 'aphv', 'vpha',
+                  '1상', 'r상', 'a상', ' voltage a',
+                  # V2: 선간전압 (A-B 간) 도 r_voltage 후보로 허용 —
+                  # 우선순위는 build_h01_match_table 에서 처리
+                  ' ab ', 'uab', 'vab', 'u_ab', 'v_ab', 'phase ab', 'a-b', 'a_b'],
+        # 진짜 차단할 것: DC/bus/battery 전압
+        'neg': ['bus voltage', 'dc voltage', 'pv voltage', 'battery'],
+    },
+    's_voltage': {
+        'type': ['volt', '전압', 'vac', 'ubc', 'vbc'],
+        'phase': [' l2 ', ' s ', 'phase b', ' ph b', ' b phase', 'vbn',
+                  ' u2 ', ' v2 ', ' ub ', ' u b ', 'bphv', 'vphb',
+                  '2상', 's상', 'b상', ' voltage b',
+                  ' bc ', 'ubc', 'vbc', 'u_bc', 'v_bc', 'phase bc', 'b-c', 'b_c'],
+        'neg': ['bus voltage', 'dc voltage', 'pv voltage', 'battery'],
+    },
+    't_voltage': {
+        'type': ['volt', '전압', 'vac', 'uca', 'vca'],
+        'phase': [' l3 ', ' t ', 'phase c', ' ph c', ' c phase', 'vcn',
+                  ' u3 ', ' v3 ', ' uc ', ' u c ', 'cphv', 'vphc',
+                  '3상', 't상', 'c상', ' voltage c',
+                  ' ca ', 'uca', 'vca', 'u_ca', 'v_ca', 'phase ca', 'c-a', 'c_a'],
+        'neg': ['bus voltage', 'dc voltage', 'pv voltage', 'battery'],
+    },
+    'r_current': {
+        'type': ['curr', '전류', 'iac', 'amp'],
+        'phase': [' l1 ', ' r ', 'phase a', ' ph a', ' a phase',
+                  ' i1 ', ' ia ', ' ia', 'ia_', 'iph a', 'aph a',
+                  '1상', 'r상', 'a상'],
+    },
+    's_current': {
+        'type': ['curr', '전류', 'iac', 'amp'],
+        'phase': [' l2 ', ' s ', 'phase b', ' ph b', ' b phase',
+                  ' i2 ', ' ib ', ' ib', 'ib_', 'iph b', 'aph b',
+                  '2상', 's상', 'b상'],
+    },
+    't_current': {
+        'type': ['curr', '전류', 'iac', 'amp'],
+        'phase': [' l3 ', ' t ', 'phase c', ' ph c', ' c phase',
+                  ' i3 ', ' ic ', ' ic', 'ic_', 'iph c', 'aph c',
+                  '3상', 't상', 'c상'],
+    },
+}
+
+
+def _h01_semantic_valid(h01_field: str, reg_name_or_defn: str) -> bool:
+    """H01 필드와 레지스터 이름이 의미상 호환되는지.
+    예: alarm1 → DAILY_ENERGY 는 False (에너지는 알람 아님).
+    Phase 특정 필드(r/s/t_voltage/current)는 타입 + phase ID 둘 다 필요."""
+    if not h01_field or not reg_name_or_defn:
+        return False
+
+    # 특수 표식 — 항상 유효
+    # HANDLER: Stage 1 이 handler 계산을 지시한 경우 (pv_voltage/pv_current/pv_power)
+    # DEA_*: Solarize DER-AVM 가상 주소 (fallback 유효)
+    name_str = str(reg_name_or_defn).strip()
+    if name_str.upper() == 'HANDLER' or name_str.upper().startswith('DEA_'):
+        return True
+
+    name_lower = ' ' + name_str.lower().replace('_', ' ') + ' '
+
+    # Phase-specific: 타입 키워드 AND phase 식별자 모두 필요
+    # + negative 키워드 (선간전압 등) 는 거부
+    phase_req = _PHASE_SPECIFIC_REQUIRED.get(h01_field)
+    if phase_req:
+        neg = phase_req.get('neg', [])
+        if any(n in name_lower for n in neg):
+            return False
+        has_type = any(t in name_lower for t in phase_req['type'])
+        if not has_type:
+            return False
+        has_phase = any(p in name_lower for p in phase_req['phase'])
+        return has_phase
+
+    # 그 외 필드: 단순 키워드 매칭
+    required = _H01_REQUIRED_KEYWORDS.get(h01_field)
+    if not required:
+        return True  # 제약 없는 필드
+    return any(kw in name_lower for kw in required)
+
+
 def assign_h01_field(reg: RegisterRow, synonym_db: dict,
                      ref_patterns: dict = None) -> str:
     """레지스터에 대응하는 H01 필드명 추정 (V2)"""
@@ -1207,6 +1440,12 @@ def assign_h01_field(reg: RegisterRow, synonym_db: dict,
 
     # V2: INFO/ALARM 카테고리는 H01 모니터링 필드가 아님 — 특정 키워드만 매칭
     comment_lower = (getattr(reg, 'comment', '') or '').lower()
+
+    # Phase A: 측정 필드 매칭 차단 — 설정/트립/임계치 레지스터
+    # 단, ALARM 카테고리는 alarm1/2/3 매칭이 필요하므로 이 체크 생략
+    if category not in ('ALARM',) and _has_h01_negative_keyword(
+            reg.definition, getattr(reg, 'comment', '')):
+        return ''
 
     if category == 'INFO':
         # INFO에서 H01과 겹치는 필드만 매핑
@@ -1242,6 +1481,22 @@ def assign_h01_field(reg: RegisterRow, synonym_db: dict,
     # V2: STATUS 카테고리 — inverter_status 매핑
     if category == 'STATUS':
         defn_nospace_s = defn_lower.replace(' ', '')
+        # 부정 키워드: 인버터 운전 상태가 아닌 것들
+        # (DryContact, BMS, PID, SVG, charge, function bits, dispatch 등)
+        _STATUS_NEG = ['drycontact', 'dry contact', 'bms', 'svg', 'apf',
+                       'function status', 'functionstatus',
+                       'pid&spd', 'pid spd', 'pid status',
+                       'state of charge', 'stateofcharge', 'soc',
+                       'shadow mode', 'shadowmode',
+                       'battery mode', 'batterymode',
+                       'dispatch', 'output control',
+                       'string', 'pv string',
+                       'access status', 'accessstatus',
+                       'connection status', 'connectionstatus',
+                       'ramp rate', 'volt-var', 'volt var']
+        if any(k in defn_lower for k in _STATUS_NEG) or \
+           any(k in defn_nospace_s for k in [k.replace(' ', '') for k in _STATUS_NEG]):
+            return ''
         if any(k in defn_lower for k in ['inverter mode', 'work mode', 'work state',
                                           'operating mode', 'operational mode',
                                           'operation state',
@@ -1254,8 +1509,8 @@ def assign_h01_field(reg: RegisterRow, synonym_db: dict,
                                           'device status', 'system status']) or \
            any(k in defn_nospace_s for k in ['workmode', 'invworkmode', 'runningmode',
                                               'workingmodes', 'workingmode',
-                                              'sysstatemode', 'currentstatus',
-                                              'operatingstatus']) or \
+                                              'sysstatemode',
+                                              'operatingstatus', 'devicestatus']) or \
            defn_lower.strip() in ('state', 'running', 'st'):
             return 'inverter_status'
         return ''
@@ -1283,17 +1538,53 @@ def assign_h01_field(reg: RegisterRow, synonym_db: dict,
                 return f'string{n}_current'
 
     # 0-1) Central type: 번호 없는 DC/PV/Input voltage/current → mppt1
+    # 단, 끝에 숫자가 오면 Central type 아님 (DC_VOLTAGE_43 같은 PDF 오염 방지
+    # + DC voltage 3 같은 multi-MPPT 는 이미 detect_channel_number 에서 잡혔어야 함)
     defn_ns = defn_lower.replace('_', ' ')
-    if re.search(r'\b(i dc|dc)\s*(voltage)', defn_ns) or \
-       re.search(r'\b(pv|input)\s+(voltage)\b', defn_ns) or \
-       re.search(r'dc전압', defn_ns):
-        if 'fault' not in defn_lower and 'high' not in defn_lower and 'low' not in defn_lower:
-            return 'mppt1_voltage'
-    if re.search(r'\b(i dc|dc)\s*(current)', defn_ns) or \
-       re.search(r'\b(pv|input)\s+(current)\b', defn_ns) or \
-       re.search(r'dc전류', defn_ns):
-        if 'fault' not in defn_lower:
-            return 'mppt1_current'
+    has_trailing_num = bool(re.search(r'\d+\s*$', defn_lower))
+    if not has_trailing_num:
+        if re.search(r'\b(i dc|dc)\s*(voltage)', defn_ns) or \
+           re.search(r'\b(pv|input)\s+(voltage)\b', defn_ns) or \
+           re.search(r'dc전압', defn_ns):
+            if 'fault' not in defn_lower and 'high' not in defn_lower and 'low' not in defn_lower:
+                return 'mppt1_voltage'
+        if re.search(r'\b(i dc|dc)\s*(current)', defn_ns) or \
+           re.search(r'\b(pv|input)\s+(current)\b', defn_ns) or \
+           re.search(r'dc전류', defn_ns):
+            if 'fault' not in defn_lower:
+                return 'mppt1_current'
+
+    # 0-2) SMA EDMx 형식: "System voltage: Line conductor LN at PCC"
+    #      "System current: Line conductor LN at PCC"
+    #      한 줄에 'line conductor l1/l2/l3' + 'voltage'/'current' 구분
+    if 'line conductor l' in defn_ns or 'line conductor:' in defn_ns:
+        if 'voltage' in defn_ns or 'volt' in defn_ns:
+            if 'l1' in defn_ns and 'l2' not in defn_ns and 'l3' not in defn_ns:
+                return 'r_voltage'
+            if 'l2' in defn_ns and 'l1' not in defn_ns and 'l3' not in defn_ns:
+                return 's_voltage'
+            if 'l3' in defn_ns and 'l1' not in defn_ns and 'l2' not in defn_ns:
+                return 't_voltage'
+        if 'current' in defn_ns:
+            if 'l1' in defn_ns and 'l2' not in defn_ns and 'l3' not in defn_ns:
+                return 'r_current'
+            if 'l2' in defn_ns and 'l1' not in defn_ns and 'l3' not in defn_ns:
+                return 's_current'
+            if 'l3' in defn_ns and 'l1' not in defn_ns and 'l2' not in defn_ns:
+                return 't_current'
+
+    # 0-3) SMA EDMx: "Active power of system at PCC", "Grid frequency at PCC",
+    #      "Displacement power factor at PCC", "Total energy fed in on all line"
+    if 'pcc' in defn_ns:
+        if 'active power' in defn_ns and 'reactive' not in defn_ns and 'limit' not in defn_ns and 'setpoint' not in defn_ns:
+            return 'ac_power'
+        if 'grid frequency' in defn_ns or 'frequency' in defn_ns:
+            return 'frequency'
+        if 'power factor' in defn_ns:
+            return 'power_factor'
+    if 'total energy fed in' in defn_ns or 'energy fed in on all' in defn_ns:
+        if 'current day' not in defn_ns and 'today' not in defn_ns and 'daily' not in defn_ns:
+            return 'cumulative_energy'
 
     # 1) V2: pv_power / energy 키워드 (synonym/ref보다 먼저 — 정확한 키워드 우선)
     if any(k in defn_lower for k in ['total dc power', 'total pv power', 'dc power',
@@ -1304,6 +1595,13 @@ def assign_h01_field(reg: RegisterRow, synonym_db: dict,
                                       'i dc power', 'i_dc_power',
                                       '태양전지 전력', '태양전지전력']) or \
        re.search(r'\bpac\b', defn_lower):
+        return 'pv_power'
+    # Growatt: 'Ppv H' / 'Ppv L' / 'Ppv_H' / 'Ppv_L' (총 PV 전력 U32 high/low — 채널번호 없음)
+    # Ppv1/Ppv2 등 채널 번호 있는 것은 위 MPPT 분기에서 이미 처리됨
+    if re.match(r'^ppv[\s_]*[hl]\b', defn_lower):
+        return 'pv_power'
+    # Ppv (단독, 채널번호도 H/L도 없음) → 총 pv_power
+    if defn_lower.strip() == 'ppv':
         return 'pv_power'
     defn_nospace = defn_lower.replace(' ', '')
     # cumulative_energy LOW (소수부/Wh/Low Byte) — comment도 체크
@@ -1357,10 +1655,12 @@ def assign_h01_field(reg: RegisterRow, synonym_db: dict,
             if h01:
                 return h01
 
-    # 4) 퍼지 매칭
-    fuzzy = match_synonym_fuzzy(reg.definition, synonym_db)
+    # 4) 퍼지 매칭 (Phase B: 기본 0.7 유지, 의미 검증 추가)
+    fuzzy = match_synonym_fuzzy(reg.definition, synonym_db, threshold=0.75)
     if fuzzy and fuzzy.get('h01_field'):
-        return fuzzy['h01_field']
+        # 의미 검증: fuzzy 결과가 실제로 그 field의 의미에 맞는지 확인
+        if _h01_semantic_valid(fuzzy['h01_field'], reg.definition):
+            return fuzzy['h01_field']
 
     return ''
 
@@ -1377,8 +1677,254 @@ _IV_STRING_CURRENT_RE = re.compile(
 # Kstar 형식: PV1 Voltage Point 1, PV1 Current Point 1
 _PV_VOLTAGE_POINT_RE = re.compile(r'PV(\d+)\s+Voltage\s+Point\s+(\d+)', re.I)
 _PV_CURRENT_POINT_RE = re.compile(r'PV(\d+)\s+Current\s+Point\s+(\d+)', re.I)
+# Solis 형식: IV_PV Voltage1, IV_PV Current1 (32 V/I 페어 단일 버퍼)
+# 정규화 후 IV_PV_VOLTAGE1 / IV_PV_CURRENT1 형태도 매칭
+_SOLIS_IV_VOLTAGE_RE = re.compile(r'IV[_\s]*PV[_\s]*Voltage\s*(\d+)', re.I)
+_SOLIS_IV_CURRENT_RE = re.compile(r'IV[_\s]*PV[_\s]*Current\s*(\d+)', re.I)
 # "occupying NNNN registers" 패턴
 _IV_TOTAL_REGS_RE = re.compile(r'occupying\s+(\d+)\s+registers', re.I)
+
+
+# AC 전압/전류 후보 수집 — 상전압(phase) vs 선간전압(line) 분류
+# 사용자 요구: 둘 다 있으면 선간전압 우선
+_AC_PHASE_VOLT_PATS = [
+    # L1/L2/L3 표준 (Sungrow/Senergy/Solarize 등)
+    (re.compile(r'\bL([123])[_\s]*VOLTAGE\b', re.I), lambda m: int(m.group(1))),
+    (re.compile(r'\bL_?([123])[_\s]*VOLT', re.I), lambda m: int(m.group(1))),
+    # Vxn (Van/Vbn/Vcn) — 상-중성점간 전압
+    (re.compile(r'\bV([abc])N\b', re.I), lambda m: 'abc'.index(m.group(1).lower()) + 1),
+    # Phase A/B/C voltage (또는 reverse: voltage phase A)
+    (re.compile(r'\bphase[_\s]*([abc])[_\s]*volt', re.I),
+     lambda m: 'abc'.index(m.group(1).lower()) + 1),
+    (re.compile(r'\bvoltage[_\s]+([abc])\b', re.I),
+     lambda m: 'abc'.index(m.group(1).lower()) + 1),
+    # Vac1/Vac2/Vac3 (Goodwe/Growatt 단상 출력)
+    (re.compile(r'\bVac[_\s]*([123])\b', re.I), lambda m: int(m.group(1))),
+    # Ux/V_x (Huawei) — Ua, Ub, Uc 단독 (X N 없는 형식) — 너무 짧아 false positive 위험
+    # 'U a' / 'V a' 형태만 허용
+    (re.compile(r'\bU[_\s]([abc])\b', re.I),
+     lambda m: 'abc'.index(m.group(1).lower()) + 1),
+    # R/S/T phase voltage
+    (re.compile(r'\bR[_\s]*PHASE[_\s]*VOLT', re.I), lambda m: 1),
+    (re.compile(r'\bS[_\s]*PHASE[_\s]*VOLT', re.I), lambda m: 2),
+    (re.compile(r'\bT[_\s]*PHASE[_\s]*VOLT', re.I), lambda m: 3),
+    # Sunways: "Grid A phasevoltage" (공백 없음)
+    (re.compile(r'\bgrid[_\s]+([abc])[_\s]*phase[_\s]*volt', re.I),
+     lambda m: 'abc'.index(m.group(1).lower()) + 1),
+    # 'A_PHASE_VOLTAGE' / 'B_PHASE_VOLTAGE' / 'C_PHASE_VOLTAGE'
+    (re.compile(r'\b([abc])[_\s]*phase[_\s]*volt', re.I),
+     lambda m: 'abc'.index(m.group(1).lower()) + 1),
+    # SMA EDMx: "Line conductor LN at PCC" — already 'l1/l2/l3'
+]
+_AC_LINE_VOLT_PATS = [
+    # Uab/Vab/Ubc/Vbc/Uca/Vca — 선간전압
+    (re.compile(r'\b[UV]([abc])([abc])\b', re.I),
+     lambda m: {'ab': 1, 'bc': 2, 'ca': 3}.get(m.group(1).lower() + m.group(2).lower())),
+    (re.compile(r'\b[UV]_([abc])([abc])\b', re.I),
+     lambda m: {'ab': 1, 'bc': 2, 'ca': 3}.get(m.group(1).lower() + m.group(2).lower())),
+    # Phase AB / A-B / Line AB
+    (re.compile(r'\b(?:phase|line)[_\s]*([abc])[-_]?([abc])\b', re.I),
+     lambda m: {'ab': 1, 'bc': 2, 'ca': 3}.get(m.group(1).lower() + m.group(2).lower())),
+    # Grid voltage AB / Line voltage AB / Voltage AB
+    (re.compile(r'(?:grid|line)?[_\s]*voltage[_\s]+([abc])([abc])\b', re.I),
+     lambda m: {'ab': 1, 'bc': 2, 'ca': 3}.get(m.group(1).lower() + m.group(2).lower())),
+    # L1-L2 / L2-L3 / L3-L1
+    (re.compile(r'\bL1[-_]L2\b', re.I), lambda m: 1),
+    (re.compile(r'\bL2[-_]L3\b', re.I), lambda m: 2),
+    (re.compile(r'\bL3[-_]L1\b', re.I), lambda m: 3),
+]
+_AC_PHASE_CURR_PATS = [
+    (re.compile(r'\bL([123])[_\s]*CURRENT\b', re.I), lambda m: int(m.group(1))),
+    (re.compile(r'\bL_?([123])[_\s]*CURR', re.I), lambda m: int(m.group(1))),
+    (re.compile(r'\bI([abc])\b', re.I), lambda m: 'abc'.index(m.group(1).lower()) + 1),
+    (re.compile(r'\bI_([abc])\b', re.I), lambda m: 'abc'.index(m.group(1).lower()) + 1),
+    (re.compile(r'\bphase[_\s]*([abc])[_\s]*curr', re.I),
+     lambda m: 'abc'.index(m.group(1).lower()) + 1),
+    (re.compile(r'\bcurrent[_\s]+([abc])\b', re.I),
+     lambda m: 'abc'.index(m.group(1).lower()) + 1),
+    (re.compile(r'\bIac[_\s]*([123])\b', re.I), lambda m: int(m.group(1))),
+    (re.compile(r'\bR[_\s]*PHASE[_\s]*CURR', re.I), lambda m: 1),
+    (re.compile(r'\bS[_\s]*PHASE[_\s]*CURR', re.I), lambda m: 2),
+    (re.compile(r'\bT[_\s]*PHASE[_\s]*CURR', re.I), lambda m: 3),
+    # Sunways: "Grid A phasecurrent" (공백 없음)
+    (re.compile(r'\bgrid[_\s]+([abc])[_\s]*phase[_\s]*curr', re.I),
+     lambda m: 'abc'.index(m.group(1).lower()) + 1),
+    # 'A_PHASE_CURRENT' / 'B_PHASE_CURRENT' / 'C_PHASE_CURRENT'
+    (re.compile(r'\b([abc])[_\s]*phase[_\s]*curr', re.I),
+     lambda m: 'abc'.index(m.group(1).lower()) + 1),
+]
+
+
+def _classify_ac_reg(definition: str, pats):
+    """definition 에서 phase 번호 (1/2/3) 추출. 매칭 안되면 None"""
+    for pat, conv in pats:
+        m = pat.search(definition)
+        if m:
+            try:
+                n = conv(m)
+                if n in (1, 2, 3):
+                    return n
+            except (ValueError, IndexError, AttributeError):
+                continue
+    return None
+
+
+def _collect_ac_voltage_candidates(registers: list) -> dict:
+    """AC 전압 레지스터를 상전압/선간전압으로 분류.
+
+    Returns:
+      {
+        'phase':  {1: [reg, ...], 2: [...], 3: [...]},
+        'line':   {1: [reg, ...], 2: [...], 3: [...]},
+      }
+    """
+    result = {'phase': {1: [], 2: [], 3: []}, 'line': {1: [], 2: [], 3: []}}
+    for reg in registers:
+        defn = reg.definition or ''
+        dl = defn.lower()
+        # DC/bus/battery 제외
+        if any(k in dl for k in ('bus voltage', 'dc voltage', 'pv voltage',
+                                  'battery', 'mppt', 'string', 'fault', 'set',
+                                  'limit', 'threshold')):
+            continue
+        # 1) 선간전압 우선 검사
+        n = _classify_ac_reg(defn, _AC_LINE_VOLT_PATS)
+        if n:
+            result['line'][n].append(reg)
+            continue
+        # 2) 상전압 검사
+        n = _classify_ac_reg(defn, _AC_PHASE_VOLT_PATS)
+        if n:
+            result['phase'][n].append(reg)
+    return result
+
+
+def _collect_ac_current_candidates(registers: list) -> dict:
+    """AC 전류 레지스터를 phase 번호(1/2/3) 별로 분류.
+    Returns: {1: [reg, ...], 2: [...], 3: [...]}
+    """
+    result = {1: [], 2: [], 3: []}
+    for reg in registers:
+        defn = reg.definition or ''
+        dl = defn.lower()
+        if any(k in dl for k in ('dc current', 'pv current', 'battery',
+                                  'mppt', 'string', 'fault', 'set',
+                                  'limit', 'threshold', 'leak', 'ground')):
+            continue
+        n = _classify_ac_reg(defn, _AC_PHASE_CURR_PATS)
+        if n:
+            result[n].append(reg)
+    return result
+
+
+def _pick_phase_voltage(candidates: dict, phase_n: int):
+    """phase_n 의 전압 후보 중 1개 선택. 선간전압 우선, 없으면 상전압.
+    Returns: (reg, source_type) where source_type in ('line', 'phase') or (None, None)
+    """
+    line_list = candidates.get('line', {}).get(phase_n, [])
+    phase_list = candidates.get('phase', {}).get(phase_n, [])
+    if line_list:
+        return (line_list[0], 'line')
+    if phase_list:
+        return (phase_list[0], 'phase')
+    return (None, None)
+
+
+def _pick_phase_current(candidates: dict, phase_n: int):
+    """phase_n 의 전류 후보 중 1개 선택."""
+    lst = candidates.get(phase_n, [])
+    if lst:
+        return (lst[0], 'phase')
+    return (None, None)
+
+
+def _detect_phase_type(pages: list, registers: list) -> str:
+    """PDF 텍스트 + 레지스터 이름을 종합해 인버터 전원 타입 판단.
+
+    Returns: 'single' | 'two' | 'three' | 'both' | 'unknown'
+      - single: 단상 (1-phase / 2-wire) — R(L1) 만 필요
+      - two:    2상 (split-phase, 미국 단상 2선식+중성선) — R,S (L1,L2) 필요
+      - three:  삼상 — R,S,T (L1,L2,L3) 모두 필요
+      - both:   단상/삼상 공통 프로토콜 (런타임 구분, 예: Deye SUN)
+      - unknown: 판단 불가
+    """
+    # 1) PDF 전체 텍스트 수집
+    full_text = ''
+    if pages:
+        for p in pages:
+            full_text += p.get('text', '') + '\n'
+    ft_lower = full_text.lower()
+
+    # 2) 키워드 카운트
+    three_kw_count = (
+        ft_lower.count('three-phase') + ft_lower.count('three phase') +
+        ft_lower.count('3-phase') + ft_lower.count('3 phase') +
+        full_text.count('三相')
+    )
+    two_kw_count = (
+        ft_lower.count('split-phase') + ft_lower.count('split phase') +
+        ft_lower.count('2-phase') + ft_lower.count('two-phase') +
+        ft_lower.count('two phase') + ft_lower.count('three-wire') +
+        ft_lower.count('3-wire') + full_text.count('2相') +
+        full_text.count('両相')
+    )
+    single_kw_count = (
+        ft_lower.count('single-phase') + ft_lower.count('single phase') +
+        ft_lower.count('1-phase') + ft_lower.count('two-wire') +
+        ft_lower.count('2-wire') +
+        full_text.count('단상') + full_text.count('单相') +
+        full_text.count('両線') + full_text.count('两线')
+    )
+
+    # 3) 레지스터 기반 휴리스틱
+    reg_names = [str(getattr(r, 'definition', '') or '').lower() for r in registers]
+    reg_text = ' | '.join(reg_names)
+
+    has_l1 = bool(re.search(r'\bl1[_\s]*(volt|curr)|l_1[_\s]*(volt|curr)|'
+                             r'van|ua\b|u_a|phase[_\s]*a|a[_\s]*phase|'
+                             r'voltage[_\s]*a\b|grid[_\s]*voltage[_\s]*a\b|'
+                             r'r[_\s]*phase|vac1|vac_r|iac1|iac_r', reg_text))
+    has_l2 = bool(re.search(r'\bl2[_\s]*(volt|curr)|l_2[_\s]*(volt|curr)|'
+                             r'vbn|ub\b|u_b|phase[_\s]*b|b[_\s]*phase|'
+                             r'voltage[_\s]*b\b|grid[_\s]*voltage[_\s]*b\b|'
+                             r's[_\s]*phase|vac2|vac_s|iac2|iac_s', reg_text))
+    has_l3 = bool(re.search(r'\bl3[_\s]*(volt|curr)|l_3[_\s]*(volt|curr)|'
+                             r'vcn|uc\b|u_c|phase[_\s]*c|c[_\s]*phase|'
+                             r'voltage[_\s]*c\b|grid[_\s]*voltage[_\s]*c\b|'
+                             r't[_\s]*phase|vac3|vac_t|iac3|iac_t', reg_text))
+
+    reg_three = has_l1 and has_l2 and has_l3
+    reg_two = has_l1 and has_l2 and not has_l3
+    reg_single = has_l1 and not has_l2 and not has_l3
+
+    # 4) 종합 판단 (우선순위: 키워드 2+ > 레지스터 > 키워드 1)
+    # 'both': PDF 에 single + three 모두 언급된 공통 프로토콜
+    if three_kw_count > 0 and single_kw_count > 0:
+        return 'both'
+
+    # 명확한 삼상 (레지스터 + 키워드)
+    if reg_three:
+        return 'three'
+    if three_kw_count > 0:
+        return 'three'
+
+    # 2상 (split-phase)
+    if reg_two and two_kw_count > 0:
+        return 'two'
+    if two_kw_count > 0:
+        return 'two'
+    if reg_two:
+        return 'two'
+
+    # 단상
+    if reg_single and single_kw_count > 0:
+        return 'single'
+    if single_kw_count > 0:
+        return 'single'
+    if reg_single:
+        return 'single'
+
+    return 'unknown'
 
 
 def detect_iv_from_pdf(registers: List[RegisterRow], pages: list = None) -> dict:
@@ -1481,6 +2027,39 @@ def detect_iv_from_pdf(registers: List[RegisterRow], pages: list = None) -> dict
         if m2:
             result['total_iv_regs'] = int(m2.group(1))
 
+    # 2-C) Solis 형식: IV_PV Voltage1~32 / IV_PV Current1~32 (단일 버퍼)
+    # 4 프레임 × 32 V/I 페어 = 128 points 를 FC06 으로 string 선택해 읽음
+    solis_v_map = {}  # {idx: voltage_addr}
+    solis_c_map = {}  # {idx: current_addr}
+    for reg in registers:
+        addr = reg.address if isinstance(reg.address, int) else parse_address(reg.address)
+        if addr is None:
+            continue
+        defn = reg.definition or ''
+        m = _SOLIS_IV_VOLTAGE_RE.search(defn)
+        if m:
+            solis_v_map[int(m.group(1))] = addr
+            continue
+        m = _SOLIS_IV_CURRENT_RE.search(defn)
+        if m:
+            solis_c_map[int(m.group(1))] = addr
+
+    if solis_v_map and solis_c_map:
+        result['format'] = 'solis'
+        result['supported'] = True
+        # Protocol note: 128 points per string via 4 frames × 32 pairs
+        result['data_points'] = 128
+        # 단일 가상 tracker (실제 string 은 FC06 으로 선택)
+        v_first = min(solis_v_map.keys())
+        c_first = min(solis_c_map.keys())
+        result['trackers'].append({
+            'tracker_num': 1,
+            'voltage_addr': solis_v_map[v_first],
+            'strings': [{'string_num': 1, 'current_addr': solis_c_map[c_first]}],
+        })
+        result['total_iv_regs'] = len(solis_v_map) + len(solis_c_map)
+        return result
+
     if pv_map:
         result['format'] = 'kstar'
         # data_points = max_point (PV1 Voltage Point 100 → 100)
@@ -1521,14 +2100,95 @@ _UNIT_SCALE_MAP = {
 
 
 def build_h01_match_table(categorized: dict, meta: dict) -> List[dict]:
-    """V2: H01 Body 전체 필드 매칭 상태 + 단위/타입 검증"""
+    """V2: H01 Body 전체 필드 매칭 상태 + 단위/타입 검증
+
+    Phase-aware r/s/t 매핑:
+      - 3상: r=L1, s=L2, t=L3 (선간전압 우선, 없으면 상전압)
+      - 2상: r=L1, s=L2, t=r (alias)
+      - 단상: r=L1, s=t=r (alias)
+      - both/unknown: 3상 시도 → 부족한 phase 는 r alias
+    """
     rows = []
     max_mppt = meta.get('max_mppt', 0)
     max_string = meta.get('max_string', 0)
+    phase_type = meta.get('phase_type', 'unknown')
 
-    # 1) DER 겹침 (9개) — 항상 O
+    # 0) Phase-aware r/s/t 후보 수집 + 매칭 결정
+    all_cats_for_phase = (categorized.get('MONITORING', []) +
+                          categorized.get('INFO', []) +
+                          categorized.get('STATUS', []))
+    v_cands = _collect_ac_voltage_candidates(all_cats_for_phase)
+    i_cands = _collect_ac_current_candidates(all_cats_for_phase)
+
+    # phase_picks[field] = (reg, source_str, note)
+    # source_str: 'PDF_LINE'/'PDF_PHASE'/'PDF_ALIAS_R'
+    phase_picks: dict = {}
+
+    def _make_phase_pick(metric: str, n: int, kind: str, candidates):
+        """metric='voltage'/'current', kind='line'/'phase', n=1/2/3"""
+        if metric == 'voltage':
+            reg, src = _pick_phase_voltage(candidates, n)
+        else:
+            reg, src = _pick_phase_current(candidates, n)
+        if reg is None:
+            return None
+        return (reg, 'PDF_LINE' if src == 'line' else 'PDF_PHASE')
+
+    def _resolve_phase_field(field_name: str, n: int, candidates, metric: str):
+        """단일 phase 매칭 시도. picks dict 에 결과 저장."""
+        result = _make_phase_pick(metric, n, '', candidates)
+        if result:
+            phase_picks[field_name] = (result[0], result[1], '')
+
+    # 3상/both/unknown: r/s/t 모두 시도
+    if phase_type in ('three', 'both', 'unknown'):
+        _resolve_phase_field('r_voltage', 1, v_cands, 'voltage')
+        _resolve_phase_field('s_voltage', 2, v_cands, 'voltage')
+        _resolve_phase_field('t_voltage', 3, v_cands, 'voltage')
+        _resolve_phase_field('r_current', 1, i_cands, 'current')
+        _resolve_phase_field('s_current', 2, i_cands, 'current')
+        _resolve_phase_field('t_current', 3, i_cands, 'current')
+    elif phase_type == 'two':
+        # r=L1, s=L2, t=r alias
+        _resolve_phase_field('r_voltage', 1, v_cands, 'voltage')
+        _resolve_phase_field('s_voltage', 2, v_cands, 'voltage')
+        _resolve_phase_field('r_current', 1, i_cands, 'current')
+        _resolve_phase_field('s_current', 2, i_cands, 'current')
+    elif phase_type == 'single':
+        # r 만, s/t=r alias
+        _resolve_phase_field('r_voltage', 1, v_cands, 'voltage')
+        _resolve_phase_field('r_current', 1, i_cands, 'current')
+
+    # alias 처리: 누락된 s/t 를 r 에 alias
+    for field, src_field in [('s_voltage', 'r_voltage'), ('t_voltage', 'r_voltage'),
+                              ('s_current', 'r_current'), ('t_current', 'r_current')]:
+        if field not in phase_picks and src_field in phase_picks:
+            src_reg, _src_kind, _ = phase_picks[src_field]
+            phase_picks[field] = (src_reg, 'PDF_ALIAS_R',
+                                   f'{phase_type} phase — {src_field} alias')
+
+    # 1) DER 겹침 (9개) — phase_picks 에 PDF 매칭 있으면 PDF row, 없으면 DER row
+    _PHASE_FIELDS = {'r_voltage', 's_voltage', 't_voltage',
+                     'r_current', 's_current', 't_current'}
     for h01_field, der_info in H01_DER_OVERLAP_FIELDS.items():
         expected_unit = H01_BASE_UNITS.get(h01_field, '')
+        # phase_picks 에 있으면 PDF 매칭 사용 (DER 보다 우선)
+        if h01_field in _PHASE_FIELDS and h01_field in phase_picks:
+            reg, src, note = phase_picks[h01_field]
+            addr_hex = getattr(reg, 'address_hex', '') or f'0x{reg.address:04X}'
+            rows.append({
+                'field': h01_field,
+                'source': src,  # 'PDF_LINE' / 'PDF_PHASE' / 'PDF_ALIAS_R'
+                'status': 'O',
+                'type': getattr(reg, 'data_type', 'U16') or 'U16',
+                'unit': getattr(reg, 'unit', '') or expected_unit,
+                'scale': getattr(reg, 'scale', '') or '',
+                'address': addr_hex,
+                'definition': reg.definition or '',
+                'note': note or ('선간전압 사용' if src == 'PDF_LINE'
+                                  else ('상전압 사용' if src == 'PDF_PHASE' else '')),
+            })
+            continue
         rows.append({
             'field': h01_field,
             'source': 'DER',
@@ -1570,16 +2230,29 @@ def build_h01_match_table(categorized: dict, meta: dict) -> List[dict]:
         energy_reg = _find_matched_reg(categorized, 'total_energy')
     rows.append(_make_pdf_match_row('cumulative_energy', energy_reg, 'Total Energy 미발견'))
 
-    # cumulative_energy_low (소수부/Wh/Low Byte) — 있으면 매핑, 없으면 N/A
+    # cumulative_energy_low (소수부/Wh/Low Byte) — 있으면 매핑, 없으면 cumulative_energy 에 alias
+    # 컨벤션: common/*_registers.py 에서 CUMULATIVE_ENERGY_LOW = CUMULATIVE_ENERGY (단일 U32/U16 인 경우)
     energy_low_reg = _find_matched_reg(categorized, 'cumulative_energy_low')
     if energy_low_reg:
         rows.append(_make_pdf_match_row('cumulative_energy_low', energy_low_reg))
+    elif energy_reg:
+        # 별도 소수부 레지스터가 없으면 cumulative_energy 와 동일 주소로 alias
+        rows.append({
+            'field': 'cumulative_energy_low', 'source': 'PDF_ALIAS',
+            'status': 'O',
+            'address': energy_reg.address_hex,
+            'definition': energy_reg.definition,
+            'type': energy_reg.data_type,
+            'unit': energy_reg.unit or '',
+            'scale': energy_reg.scale or '',
+            'note': 'cumulative_energy alias (단일 레지스터에 통합값)',
+        })
     else:
         rows.append({
             'field': 'cumulative_energy_low', 'source': 'PDF',
-            'status': '-', 'address': '-', 'definition': '-',
+            'status': 'X', 'address': '-', 'definition': '-',
             'type': '', 'unit': '', 'scale': '',
-            'note': '소수부 레지스터 없음 (단일 레지스터)',
+            'note': 'cumulative_energy 미발견 — alias 불가',
         })
 
     status_reg = _find_matched_reg(categorized, 'inverter_status', cat='STATUS')
@@ -1609,13 +2282,74 @@ def build_h01_match_table(categorized: dict, meta: dict) -> List[dict]:
                     break
             if status_reg:
                 break
-    # 상태 정의(값 테이블) 검증 — 통상 Appendix에 별도 정의
+    # status 미발견 시 주소 추정: alarm 첫 주소 - 1 (frequency 뒤, alarm 앞)
+    if not status_reg:
+        alarm_addrs = [r.address for r in categorized.get('ALARM', [])
+                       if isinstance(r.address, int) and r.address > 0x1000]
+        freq_reg = _find_matched_reg(categorized, 'frequency')
+        if alarm_addrs and freq_reg and isinstance(freq_reg.address, int):
+            # frequency와 alarm 사이 주소에 status가 있을 가능성
+            est_addr = min(alarm_addrs) - 1
+            if freq_reg.address < est_addr < min(alarm_addrs):
+                status_reg = RegisterRow(
+                    definition='Work state (추정)',
+                    address=est_addr, address_hex=f'0x{est_addr:04X}',
+                    data_type='U16', rw='RO', category='STATUS',
+                    h01_field='inverter_status')
     status_note = ''
     rows.append(_make_pdf_match_row('status', status_reg, 'Work State 미발견'))
     if status_note and rows[-1]['status'] == 'O':
         rows[-1]['note'] = status_note
 
     alarm_regs = categorized.get('ALARM', [])
+    # MONITORING 레지스터 주소와 겹치는 alarm 제거 (PDF 파싱 오류 방지)
+    mon_addrs = {r.address for r in categorized.get('MONITORING', [])
+                 if isinstance(r.address, int)}
+    # ALARM 중 MPPT/DC 레지스터 주소 범위에 있는 것을 MONITORING으로 재분류
+    # (PDF 파싱에서 DC voltage/current가 ERROR_CODE로 오인된 경우)
+    reclassified = []
+    clean_alarms = []
+    for r in alarm_regs:
+        if isinstance(r.address, int) and r.address in mon_addrs:
+            continue  # MONITORING과 주소 겹침 → 제거
+        # 주변 주소에 DC/PV voltage/current가 있으면 MONITORING으로 재분류
+        if isinstance(r.address, int):
+            neighbors = [reg for reg in categorized.get('MONITORING', [])
+                         if isinstance(reg.address, int) and abs(reg.address - r.address) <= 4]
+            dc_neighbors = [n for n in neighbors
+                           if any(k in n.definition.lower() for k in ['dc voltage', 'dc current',
+                                  'dc_voltage', 'dc_current', 'pv voltage', 'pv current'])]
+            if dc_neighbors:
+                # DC 영역에 있는 alarm → MONITORING으로 이동
+                r.category = 'MONITORING'
+                # 주소 패턴으로 MPPT 번호 추정
+                # DC voltage/current는 연속 쌍: V1,I1,V2,I2,V3,I3,V4,I4
+                # 가장 작은 DC 주소(voltage 1)를 기준으로 offset 계산
+                all_dc = [n for n in categorized.get('MONITORING', [])
+                          if isinstance(n.address, int) and
+                          any(k in n.definition.lower() for k in ['dc_voltage', 'dc voltage',
+                               'dc_current', 'dc current'])]
+                if all_dc:
+                    base_addr = min(n.address for n in all_dc)
+                else:
+                    base_addr = min(n.address for n in dc_neighbors)
+                offset = r.address - base_addr
+                mppt_n = (offset // 2) + 1
+                # 채널 번호 유효성 체크: 1~32 벗어나면 재분류 건너뜀 (오염 방지)
+                if not (1 <= mppt_n <= 32):
+                    clean_alarms.append(r)
+                    continue
+                if offset % 2 == 0:  # 짝수 = voltage
+                    r.h01_field = f'mppt{mppt_n}_voltage'
+                    r.definition = f'DC_VOLTAGE_{mppt_n}'
+                else:  # 홀수 = current
+                    r.h01_field = f'mppt{mppt_n}_current'
+                    r.definition = f'DC_CURRENT_{mppt_n}'
+                categorized['MONITORING'].append(r)
+                reclassified.append(r)
+                continue
+        clean_alarms.append(r)
+    alarm_regs = clean_alarms
     alarm_dist = distribute_alarms(alarm_regs)
     # alarm1이 없으면 MONITORING 범주에서 fault/alarm code 레지스터 검색
     if not alarm_dist.get('alarm1'):
@@ -1642,12 +2376,179 @@ def build_h01_match_table(categorized: dict, meta: dict) -> List[dict]:
                 'note': '보조 알람 없음' if slot != 'alarm1' else '알람 미발견',
             })
 
+    # MPPT voltage를 먼저 모두 수집 → 주소 근접성 검증
+    # 단, 노이즈/반대키워드/채널불일치는 v_addrs 빌드에서 제외 (오염 방지)
+    mppt_v_addrs = {}  # {n: address}
+    for n in range(1, max_mppt + 1):
+        v_reg = _find_matched_reg(categorized, f'mppt{n}_voltage')
+        if not v_reg or not isinstance(v_reg.address, int):
+            continue
+        # 사전 검증: 필터 통과한 voltage만 v_addrs에 등록
+        dl_pre = (v_reg.definition or '').lower()
+        if any(k in dl_pre for k in ['current', 'curr', 'ipv', '전류']) and \
+           not any(k in dl_pre for k in ['voltage', 'volt', 'vpv', '전압']):
+            continue
+        if any(k in dl_pre for k in ('debug', 'temperat', 'reserved', 'dummy', 'fault',
+                                     'error', 'alarm', 'warning', 'factory', 'calibrat',
+                                     'test', '_avg', ' avg', 'average')):
+            continue
+        mppt_v_addrs[n] = v_reg.address
+
+    # 강제 +2 주소 보정 비활성화 (Deye 등에서 잘못된 주소를 덮어쓰는 부작용)
+    # 이전 로직은 mppt1 매칭만 있고 mppt2/3/4 매칭이 없을 때 base+2*(n-1) 주소를
+    # 강제로 가져와 MODULE_CURRENT/TEMPERATER_AVE/DEBUG_DATA 같은 무관 레지스터를
+    # voltage 로 잘못 매칭하는 원인이 되었음. 이름 기반 매칭 결과만 신뢰한다.
+
+    # 반대 키워드 차단 (#1): voltage 슬롯에 current/curr/전류 들어간 정의는 거부, 반대도 동일
+    def _opposite_keyword_reject(reg_obj, mtype: str) -> bool:
+        if not reg_obj or not reg_obj.definition:
+            return False
+        dl = reg_obj.definition.lower()
+        if mtype == 'voltage':
+            has_v = any(k in dl for k in ['voltage', 'volt', 'vpv', '전압'])
+            has_i = any(k in dl for k in ['current', 'curr', 'ipv', '전류'])
+            return has_i and not has_v
+        else:  # current
+            has_v = any(k in dl for k in ['voltage', 'volt', 'vpv', '전압'])
+            has_i = any(k in dl for k in ['current', 'curr', 'ipv', '전류'])
+            return has_v and not has_i
+
+    # #4 노이즈 차단: debug/temperat/reserved/dummy/fault/error/alarm/factory/calibration/test/avg
+    _NOISE_KEYWORDS = ('debug', 'temperat', 'reserved', 'dummy', 'fault', 'error',
+                       'alarm', 'warning', 'factory', 'calibrat', 'test',
+                       '_avg', ' avg', 'average')
+
+    def _is_noise(reg_obj) -> bool:
+        if not reg_obj or not reg_obj.definition:
+            return False
+        dl = reg_obj.definition.lower()
+        return any(k in dl for k in _NOISE_KEYWORDS)
+
+    # #3 채널번호 우선순위: 정의에 명시적 번호가 있는데 슬롯 번호와 다르면 거부
+    def _channel_num_mismatch(reg_obj, slot_n: int) -> bool:
+        if not reg_obj or not reg_obj.definition:
+            return False
+        dl = reg_obj.definition.lower().replace('_', ' ')
+        # Kstar 패턴: "PV{m} String current {n}" — global flat index 사용
+        # (m,n) 자체는 슬롯 번호와 다르므로 검사 건너뜀
+        if re.search(r'pv\s*\d+\s+string\s+current', dl):
+            return False
+        # 추출 패턴: pv1, mppt1, dc voltage 1, voltage_1, reg_1, vpv1, ipv1, ppv1
+        nums = set()
+        for m in re.finditer(
+                r'(?:pv|mppt|reg|module|vpv|ipv|ppv|dc[\s_]*(?:voltage|current|power))[\s_]*(\d+)',
+                dl):
+            nums.add(int(m.group(1)))
+        for m in re.finditer(
+                r'(?:voltage|current|volt|curr|power|watt)[\s_]+(\d+)\b', dl):
+            nums.add(int(m.group(1)))
+        if not nums:
+            return False  # 번호 없음 → 거부 안 함 (Module Voltage 등 통과)
+        return slot_n not in nums
+
     for n in range(1, max_mppt + 1):
         for mtype in ['voltage', 'current']:
             field = f'mppt{n}_{mtype}'
             reg = _find_matched_reg(categorized, field)
+            if _opposite_keyword_reject(reg, mtype):
+                reg = None
+            elif _is_noise(reg):
+                reg = None
+            elif _channel_num_mismatch(reg, n):
+                reg = None
+
+            # voltage인 경우 보정된 주소와 비교
+            # current/curr/전류 키워드 가진 레지스터는 voltage 슬롯에 매칭 금지
+            if reg and mtype == 'voltage' and n in mppt_v_addrs and isinstance(reg.address, int):
+                if reg.address != mppt_v_addrs[n]:
+                    # 보정된 주소에 해당하는 레지스터 찾기
+                    target = mppt_v_addrs[n]
+                    for cat in ['MONITORING', 'ALARM', 'INFO']:
+                        for r in categorized.get(cat, []):
+                            if isinstance(r.address, int) and r.address == target:
+                                dl = (r.definition or '').lower()
+                                if any(k in dl for k in ['current', 'curr', '전류']):
+                                    continue
+                                if _is_noise(r):
+                                    continue
+                                if _channel_num_mismatch(r, n):
+                                    continue
+                                reg = r
+                                break
+                        if reg and isinstance(reg.address, int) and reg.address == target:
+                            break
+                    else:
+                        # 레지스터 없으면 주소 추정으로 생성
+                        reg = None
+
+            # current인 경우 주소 근접성 검증 (voltage ±10 범위)
+            if mtype == 'current' and n in mppt_v_addrs:
+                v_addr = mppt_v_addrs[n]
+                need_fix = False
+                if reg and isinstance(reg.address, int):
+                    if abs(reg.address - v_addr) > 10:
+                        need_fix = True
+                    # 다른 MPPT의 voltage/current와 주소 중복 확인
+                    for other_n, other_v in mppt_v_addrs.items():
+                        if other_n != n and reg.address in (other_v, other_v + 1):
+                            need_fix = True
+                            break
+                elif not reg:
+                    need_fix = True
+
+                if need_fix:
+                    # voltage 주소 +1 에서 current 찾기 (V/I 연속 쌍 패턴)
+                    # voltage/volt/전압 키워드 가진 레지스터는 current 슬롯에 매칭 금지
+                    # 노이즈(temperat/debug/fault 등) 및 채널번호 불일치도 차단
+                    better = None
+                    target_addr = v_addr + 1
+                    for cat in ['MONITORING', 'ALARM', 'INFO']:
+                        for r in categorized.get(cat, []):
+                            if isinstance(r.address, int) and r.address == target_addr:
+                                dl = (r.definition or '').lower()
+                                if any(k in dl for k in ['voltage', 'volt', '전압']):
+                                    continue
+                                if _is_noise(r):
+                                    continue
+                                if _channel_num_mismatch(r, n):
+                                    continue
+                                better = r
+                                break
+                        if better: break
+                    # 못 찾으면 voltage ±3 범위에서 current 키워드로 검색
+                    if not better:
+                        for cat in ['MONITORING', 'INFO']:
+                            for r in categorized.get(cat, []):
+                                if not isinstance(r.address, int): continue
+                                dl = r.definition.lower()
+                                if any(k in dl for k in ['current', 'curr', '전류']):
+                                    if abs(r.address - v_addr) <= 3:
+                                        if _is_noise(r):
+                                            continue
+                                        if _channel_num_mismatch(r, n):
+                                            continue
+                                        better = r
+                                        break
+                            if better: break
+                    if better:
+                        reg = better
+
             if reg:
                 rows.append(_make_pdf_match_row(field, reg))
+            elif mtype == 'voltage':
+                # voltage 없으면 current 주소 - 1 로 추정 (MPPT V/I 쌍 패턴)
+                cur_reg = _find_matched_reg(categorized, f'mppt{n}_current')
+                if cur_reg and isinstance(cur_reg.address, int):
+                    est_addr = cur_reg.address - 1
+                    rows.append({
+                        'field': field, 'source': 'PDF', 'status': 'O',
+                        'address': f'0x{est_addr:04X}',
+                        'definition': f'MPPT_{n}_VOLTAGE (추정)',
+                        'type': 'U16', 'unit': 'V', 'scale': '0.1',
+                        'note': f'current({cur_reg.address_hex}) -1 주소 추정',
+                    })
+                else:
+                    rows.append(_make_pdf_match_row(field, None))
             elif mtype == 'current':
                 # current 없으면 voltage + power로 계산 가능한지 체크
                 has_v = _find_matched_reg(categorized, f'mppt{n}_voltage')
@@ -1679,6 +2580,12 @@ def build_h01_match_table(categorized: dict, meta: dict) -> List[dict]:
     for n in range(1, max_string + 1):
         field = f'string{n}_current'
         reg = _find_matched_reg(categorized, field)
+        if _opposite_keyword_reject(reg, 'current'):
+            reg = None
+        elif _is_noise(reg):
+            reg = None
+        elif _channel_num_mismatch(reg, n):
+            reg = None
         if reg:
             rows.append(_make_pdf_match_row(field, reg))
         else:
@@ -1704,7 +2611,111 @@ def build_h01_match_table(categorized: dict, meta: dict) -> List[dict]:
             else:
                 rows.append(_make_pdf_match_row(field, None, 'String current 미지원 시 생략'))
 
+    # ── stride 보간: mppt{n}/string{n} 단일 행 누락 시 인접 행으로부터 추정 ──
+    # PDF 표 추출 (pymupdf find_tables) 이 페이지 경계/병합 셀에서 한 줄 흘릴 때
+    # 인접 mppt(n-1), mppt(n+1) 또는 string(n-1), string(n+1) 가 균일 stride 면
+    # 누락된 n 행의 주소를 보간하여 매칭 처리.
+    _interpolate_stride_gaps(rows)
+
     return rows
+
+
+def _interpolate_stride_gaps(rows: List[dict]) -> None:
+    """mppt{n}_voltage/current, string{n}_current 의 단일 행 누락을 stride 보간."""
+    import re as _re
+
+    def _parse_field(field):
+        m = _re.match(r'^(mppt|string)(\d+)_(voltage|current)$', field or '')
+        if not m:
+            return None
+        return (m.group(1), int(m.group(2)), m.group(3))
+
+    def _parse_addr(addr_str):
+        if not addr_str or addr_str == '-' or '~' in str(addr_str):
+            return None
+        try:
+            return int(addr_str, 16)
+        except (ValueError, TypeError):
+            return None
+
+    field_to_idx = {r.get('field', ''): i for i, r in enumerate(rows)}
+    used_addrs = set()
+    for r in rows:
+        a = _parse_addr(r.get('address', ''))
+        if a is not None:
+            used_addrs.add(a)
+
+    def _get_addr(family, idx, kind):
+        f = f'{family}{idx}_{kind}'
+        if f not in field_to_idx:
+            return None
+        r = rows[field_to_idx[f]]
+        if r.get('status') != 'O':
+            return None
+        return _parse_addr(r.get('address', ''))
+
+    for i, row in enumerate(rows):
+        if row.get('status') == 'O':
+            continue
+        parsed = _parse_field(row.get('field', ''))
+        if not parsed:
+            continue
+        family, n, kind = parsed
+
+        prev_addr = _get_addr(family, n - 1, kind)
+        next_addr = _get_addr(family, n + 1, kind)
+        prev2_addr = _get_addr(family, n - 2, kind)
+        next2_addr = _get_addr(family, n + 2, kind)
+
+        predicted = None
+        method = ''
+
+        # 1) midpoint: prev/next 양쪽이 균일 stride 일 때
+        if prev_addr is not None and next_addr is not None:
+            diff = next_addr - prev_addr
+            if 0 < diff <= 8 and diff % 2 == 0:
+                predicted = prev_addr + diff // 2
+                method = 'midpoint'
+        # 2) forward extrapolation: next, next2 로부터 역추정 (블록 시작 행 누락)
+        if predicted is None and next_addr is not None and next2_addr is not None:
+            stride = next2_addr - next_addr
+            if 0 < stride <= 4:
+                cand = next_addr - stride
+                if cand > 0:
+                    predicted = cand
+                    method = 'forward extrap'
+        # 3) backward extrapolation: prev, prev2 로부터 정추정 (블록 끝 행 누락)
+        if predicted is None and prev_addr is not None and prev2_addr is not None:
+            stride = prev_addr - prev2_addr
+            if 0 < stride <= 4:
+                predicted = prev_addr + stride
+                method = 'backward extrap'
+
+        if predicted is None or predicted in used_addrs:
+            continue
+
+        # 인접 행에서 type/unit/scale 템플릿 복사
+        template = None
+        for idx in (n - 1, n + 1):
+            f = f'{family}{idx}_{kind}'
+            if f in field_to_idx and rows[field_to_idx[f]].get('status') == 'O':
+                template = rows[field_to_idx[f]]
+                break
+        if template is None:
+            continue
+
+        rows[i] = {
+            'field': row['field'],
+            'source': 'PDF_INTERP',
+            'status': 'O',
+            'address': f'0x{predicted:04X}',
+            'definition': f'{family.upper()}{n}_{kind.upper()} (stride 보간)',
+            'type': template.get('type', 'U16'),
+            'unit': template.get('unit', ''),
+            'scale': template.get('scale', ''),
+            'note': f'stride 보간 ({method}) — 인접 행으로부터 주소 추정',
+        }
+        used_addrs.add(predicted)
 
 
 def _find_matched_reg(categorized: dict, h01_field: str, cat: str = None) -> Optional[RegisterRow]:
@@ -1766,19 +2777,25 @@ def _make_pdf_match_row(h01_field: str, reg, miss_note: str = '') -> dict:
 
 def _parse_sunspec_text_registers(pages: list) -> list:
     """
-    SMA SunSpec 텍스트 형식 파싱 — 40001+ 10진수 주소 (테이블 없는 형식)
+    SunSpec/SMA/SAJ 텍스트 형식 파싱 — 표 형태 인식 실패시 fallback
 
-    예시:
-      40200 Active power (W)
-      1
-      int16
-      RO
+    지원 형식:
+      1) SunSpec/SMA SB: 40001+ decimal addresses (4xxxx)
+         40200 Active power (W) / 1 / int16 / RO
+      2) SMA EDMx: 30001+ decimal addresses (3xxxx)
+         30001 Version number / 2 / U32 / RAW / RO
+      3) SAJ: NNNNH hex 주소 (multi-line)
+         0100H / 1 / MPVMode / UInt16 / R / Inverter working mode
     """
-    RE_ADDR = re.compile(r'^(4[0-9]{4})\s+(.+)')
+    # 4xxxx (SunSpec) or 3xxxx (SMA EDMx) decimal address; 또는 NNNNH 형식 hex
+    RE_ADDR = re.compile(r'^([34][0-9]{4})\s+(.+)')
+    RE_ADDR_HEX_H = re.compile(r'^([0-9A-Fa-f]{3,4})H\s*$')
     KNOWN_TYPES = {
         'uint16', 'int16', 'uint32', 'int32', 'string',
         'acc32', 'bitfield32', 'sunssf', 'enum16', 'pad',
         'float32', 'acc64', 'ipaddr', 'eui48', 'ipv6addr',
+        # SMA EDMx 추가 형식
+        'u16', 'u32', 'u64', 's16', 's32', 's64',
     }
     SKIP_TYPES = {'pad', 'sunssf'}
 
@@ -1787,7 +2804,7 @@ def _parse_sunspec_text_registers(pages: list) -> list:
         all_lines.extend(p.get('text', '').split('\n'))
 
     # 독립 주소 행 + 다음 행 설명 병합: "40225\nManufacturer-specific status code (StVnd)..."
-    RE_ADDR_ONLY = re.compile(r'^(4[0-9]{4})\s*$')
+    RE_ADDR_ONLY = re.compile(r'^([34][0-9]{4})\s*$')
     merged = []
     i = 0
     while i < len(all_lines):
@@ -1805,11 +2822,45 @@ def _parse_sunspec_text_registers(pages: list) -> list:
 
     entries = []
     for i, line in enumerate(all_lines):
-        m = RE_ADDR.match(line.strip())
+        ln = line.strip()
+        m = RE_ADDR.match(ln)
         if m:
             reg_no = int(m.group(1))
             desc = m.group(2).strip()
             entries.append((i, reg_no, desc))
+            continue
+        # SAJ 형식: 'NNNNH' 단독 행 + 다음 행에 SIZE + 그 다음 행에 NAME
+        # NAME 행은 KNOWN_TYPES 가 아니어야 함 (Type 행과 구분)
+        m2 = RE_ADDR_HEX_H.match(ln)
+        if m2:
+            try:
+                reg_no = int(m2.group(1), 16)
+            except ValueError:
+                continue
+            # 다음 두 행 검사: SIZE 그리고 NAME
+            j = i + 1
+            saj_size = 1
+            if j < len(all_lines) and all_lines[j].strip().isdigit():
+                try:
+                    saj_size = int(all_lines[j].strip())
+                except ValueError:
+                    saj_size = 1
+                j += 1
+            saj_name = ''
+            while j < len(all_lines):
+                cand = all_lines[j].strip()
+                if not cand:
+                    j += 1
+                    continue
+                if cand.lower() in KNOWN_TYPES:
+                    break
+                # 영문/숫자로 시작하는 이름
+                if cand and (cand[0].isalpha() or cand[0].isdigit()):
+                    saj_name = cand
+                    break
+                j += 1
+            if saj_name:
+                entries.append((i, reg_no, saj_name))
 
     if not entries:
         return []
@@ -1846,8 +2897,16 @@ def _parse_sunspec_text_registers(pages: list) -> list:
 
         if dtype in SKIP_TYPES:
             continue
-        name = abbrev if abbrev else full_desc
-        if name.lower() == 'pad' or (abbrev and abbrev.lower().endswith('sf')):
+        # SMA EDMx (3xxxx) 는 약어가 단위 (Wh/W/VAr) 인 경우가 많음 — 약어 무시
+        # SunSpec (4xxxx) 는 약어가 cell-name (Mn/Md/StVnd) 인 경우가 많음 — 약어 사용
+        is_sma_edmx = (30000 <= reg_no <= 39999)
+        _UNIT_ABBREVS = {'w', 'wh', 'var', 'va', 'a', 'v', 'hz', 'kw', 'kwh',
+                         'kvar', 'kva', 'pf', 'wm2', '%', '°c', 'c', 'k'}
+        if is_sma_edmx or (abbrev and abbrev.lower() in _UNIT_ABBREVS):
+            name = full_desc if full_desc else (abbrev or '')
+        else:
+            name = abbrev if abbrev else full_desc
+        if not name or name.lower() == 'pad' or (abbrev and abbrev.lower().endswith('sf')):
             continue
 
         # 타입별 레지스터 수 결정
@@ -1877,18 +2936,298 @@ def _parse_sunspec_text_registers(pages: list) -> list:
 
 # ─── Stage 1 메인 ───────────────────────────────────────────────────────────
 
+def _run_ai_pdf_extraction(pdf_path: str, ai_settings: dict,
+                           progress: 'ProgressCallback' = None) -> List[Dict]:
+    """Use Claude API to extract register tables from PDF text.
+
+    Sends the first ~100 pages of PDF text to Claude with a comprehensive
+    prompt that produces RTU-compatible register data including control
+    registers, alarm bitfields, and inverter mode table.
+    """
+    import anthropic
+
+    def log(msg, level='info'):
+        if progress:
+            progress(msg, level)
+
+    log('[AI] PDF 텍스트 추출 중...')
+    pages = extract_pdf_text_and_tables(pdf_path, log=log)
+    # Build text for Claude (limit ~200K chars to fit context)
+    full_text = '\n\n'.join(
+        f'--- Page {p["page"]} ---\n{p["text"]}'
+        for p in pages[:100]
+    )[:200000]
+
+    log(f'[AI] Claude API 호출 중... (model={ai_settings["model"]}, {len(full_text)} chars)')
+    client = anthropic.Anthropic(api_key=ai_settings['api_key'])
+
+    prompt = f"""You are a Modbus protocol expert specializing in solar inverter register maps.
+Extract ONLY the essential operational registers from this inverter protocol document.
+
+## IMPORTANT: REGISTER COUNT GUIDELINE
+A typical solar inverter has **40-80 unique register addresses** needed for RTU monitoring.
+- AC grid: ~8 (3 voltages + 3 currents + frequency + [per-phase frequency])
+- DC/PV per-MPPT: 2-3 per MPPT (voltage, current, [power])
+- Per-string currents: 1-2 per string (voltage+current if separate from MPPT)
+- Grid meter/Load: 0-18 (some inverters have CT/meter registers)
+- Power totals: 3-5 (active, reactive, PF, PV total, [per-phase power])
+- Energy: 2-5 (cumulative, daily, import, export, load)
+- Temperature: 1-2
+- Status: 1 (inverter mode)
+- Alarm: 1-3 error code registers
+- Control: 3-5 (on/off, power limit, PF, reactive power)
+- Device info: 3-8 (model, serial, firmware versions, nominal values)
+Total: roughly 40-80 registers. If you extract more than 100, you are likely including
+unnecessary registers. Be SELECTIVE — only extract what an RTU needs for monitoring & control.
+
+## DO NOT EXTRACT these types of registers:
+- Communication settings (baud rate, slave address, protocol version)
+- Time/date/clock registers
+- Reserved or unused registers
+- Manufacturer-specific debug/test registers
+- Grid protection limit settings (over/under voltage thresholds, frequency limits)
+  UNLESS they are actively writable control parameters
+- Statistics/counters that are not energy (e.g., run hours, boot count)
+- Duplicate representations of the same physical quantity (e.g., if both "Total power"
+  and "Active power" exist at different addresses for the same value, pick ONE)
+- Line-to-line voltages (AB/BC/CA) if phase-to-neutral (L1/L2/L3) voltages are also present
+- Registers from "Reserved for future use" sections
+
+## Required JSON fields for each register:
+- "address": hex string like "0x1037"
+- "name": register name in UPPER_SNAKE_CASE (English). Use STANDARD NAMES below.
+- "data_type": one of "U16", "S16", "U32", "S32", "STRING"
+- "scale": numeric scale factor (e.g., 0.1, 0.01, 1)
+- "unit": physical unit ("V", "A", "W", "Hz", "kWh", "degC", "")
+- "fc": function code (3 or 4). 3=Holding, 4=Input
+- "rw": "R" for read-only, "RW" for read-write
+- "description": short English description
+- "category": one of "MONITORING", "CONTROL", "STATUS", "ALARM", "DEVICE_INFO"
+
+## STANDARD REGISTER NAMES — USE THESE EXACT NAMES:
+
+### AC Grid (per-phase, category=MONITORING):
+L1_VOLTAGE, L2_VOLTAGE, L3_VOLTAGE (phase-to-neutral voltages)
+L1_CURRENT, L2_CURRENT, L3_CURRENT
+PHASE_A_POWER, PHASE_B_POWER, PHASE_C_POWER (only if per-phase power exists)
+FREQUENCY (grid frequency, primary/L1)
+L2_FREQUENCY, L3_FREQUENCY (if per-phase frequency registers exist)
+
+### Per-MPPT DC input (category=MONITORING):
+PV1_VOLTAGE, PV1_CURRENT, MPPT1_POWER (MPPT channel 1)
+PV2_VOLTAGE, PV2_CURRENT, MPPT2_POWER (MPPT channel 2)
+...continue for each MPPT in the PDF (PV3, PV4, etc.)
+NOTE: Some PDFs call these "PV input 1/2/3" or "MPPT 1/2/3" — same thing.
+
+### Per-String currents (category=MONITORING):
+STRING1_CURRENT, STRING2_CURRENT, ... (if PDF has per-string current registers)
+IMPORTANT: Many inverters have BOTH per-MPPT registers (PV1_VOLTAGE/PV1_CURRENT at one
+address range) AND per-string registers (String1 voltage/current at a DIFFERENT address
+range). These are NOT duplicates — they are physically separate registers.
+Extract BOTH sets if they exist at different addresses.
+Only skip string registers if they are literally the SAME address as MPPT registers.
+
+### Power totals (category=MONITORING):
+ACTIVE_POWER — total AC active power output (W)
+REACTIVE_POWER — total reactive power (Var)
+POWER_FACTOR — grid power factor
+PV_POWER — total DC input power (only if a separate register exists)
+
+### Grid meter / Load measurement (category=MONITORING, if present):
+Some inverters have CT/meter registers for grid-side and load-side measurement:
+L1_WATT_OF_GRID, L2_WATT_OF_GRID, L3_WATT_OF_GRID — per-phase grid power
+L1_WATT_OF_LOAD, L2_WATT_OF_LOAD, L3_WATT_OF_LOAD — per-phase load power
+L1_N_PHASE_VOLTAGE_OF_GRID, L2_N_PHASE_VOLTAGE_OF_GRID, L3_N_PHASE_VOLTAGE_OF_GRID
+L1_CURRENT_OF_GRID, L2_CURRENT_OF_GRID, L3_CURRENT_OF_GRID
+L1_N_PHASE_VOLTAGE_OF_LOAD, L2_N_PHASE_VOLTAGE_OF_LOAD, L3_N_PHASE_VOLTAGE_OF_LOAD
+L1_CURRENT_OF_LOAD, L2_CURRENT_OF_LOAD, L3_CURRENT_OF_LOAD
+ACCUMULATED_ENERGY_OFIMPORT, ACCUMULATED_ENERGY_OFEXPORT, ACCUMULATED_ENERGY_OF_LOAD
+These are NOT duplicates of inverter AC output — they measure the grid connection point.
+Include ALL of them if present in the PDF.
+
+### Energy (category=MONITORING):
+CUMULATIVE_ENERGY — lifetime total energy (kWh)
+DAILY_ENERGY — today's energy (only if exists)
+ACCUMULATED_ENERGY_OFIMPORT — import energy from grid (if present)
+ACCUMULATED_ENERGY_OFEXPORT — export energy to grid (if present)
+
+### Temperature (category=MONITORING):
+INNER_TEMP — inverter internal/heatsink temperature
+(Add IPM_TEMP/MODULE_TEMP only if PDF has a second distinct temperature sensor)
+
+### Bus voltage (category=MONITORING, only if present):
+PBUS_VOLTAGE, NBUS_VOLTAGE — DC bus voltages (some brands expose these)
+
+### Status register (category=STATUS):
+INVERTER_MODE — operating state register. Add a "modes" field:
+  "modes": {{"0": "INITIAL", "1": "STANDBY", "3": "ON_GRID", "5": "FAULT"}}
+  Map the PDF's status codes to these NORMALIZED names:
+  - Initialization/boot → INITIAL
+  - Waiting/standby/idle → STANDBY
+  - Normal/running/grid-tied/generating → ON_GRID
+  - Fault/error/abnormal → FAULT
+  - Shutdown/off/stopped → SHUTDOWN
+  - Starting/MPPT → STARTUP (optional)
+  Include ALL mode values from the PDF, normalized to the names above.
+
+### Error/Alarm registers (category=ALARM):
+ERROR_CODE1, ERROR_CODE2, ERROR_CODE3 — fault/alarm registers.
+Name them in order of address (lowest address = ERROR_CODE1).
+
+**CRITICAL — BITFIELD extraction:**
+Many inverters use bitfield alarm registers where each bit indicates a different fault.
+You MUST search the ENTIRE PDF — including appendices, annexes, and tables at the end —
+for bit-level fault definitions. They often appear as:
+- "Bit 0: Over-temperature" / "Bit 1: Ground fault" etc.
+- A table with columns like "Bit", "Name/Description"
+- "Fault Word 1: bit0=xxx, bit1=yyy"
+
+If the register IS a bitfield, add "bits" with ALL defined bits:
+  "bits": {{"0": "OVER_TEMPERATURE", "1": "GROUND_FAULT", "2": "DC_OVERVOLTAGE", ...}}
+  - Use UPPER_SNAKE_CASE for bit names
+  - Include EVERY defined bit (not just examples)
+  - A single alarm register typically has 8-16 defined bits
+
+If the register is an ENUM (the register value itself is a fault code number), add:
+  "fault_codes": {{"1": "Grid overvoltage", "2": "Grid undervoltage", ...}}
+  Include ALL fault codes from the PDF's fault code table/appendix.
+
+### Device info (category=DEVICE_INFO):
+DEVICE_MODEL or DEVICE_MODEL_NAME — model name (STRING type, add "length" = register count)
+DEVICE_SERIAL_NUMBER — serial number (STRING type)
+FIRMWARE_VERSION or MASTER_FIRMWARE_VERSION — main firmware version
+SLAVE_FIRMWARE_VERSION — secondary firmware (if present)
+EMS_FIRMWARE_VERSION, LCD_FIRMWARE_VERSION — additional firmware versions (if present)
+NOMINAL_VOLTAGE, NOMINAL_FREQUENCY — rated values (if present)
+NOMINAL_POWER or RATED_POWER — rated power (if present)
+GRID_PHASE_NUMBER — number of phases (if present)
+Include ALL device information registers found in the PDF.
+
+### Control registers (category=CONTROL, rw=RW):
+ONLY extract these specific control registers:
+- INVERTER_ON_OFF — remote start/stop command
+- ACTIVE_POWER_LIMIT — active power curtailment (%)
+- POWER_FACTOR_SET — power factor setpoint
+- REACTIVE_POWER_PCT — reactive power percentage setpoint
+Look for them in "Control", "Command", "Setting", or "Write" sections.
+Do NOT classify read-only configuration/threshold registers as CONTROL.
+Typically an inverter has only 3-5 true control registers.
+
+## For 32-bit registers (U32/S32):
+- Use the LOW word address (first/lower register address)
+- Do NOT create separate entries for the HIGH word
+- The system will automatically handle 2-register reads
+
+## SCALE values:
+Use the PDF's documented scale factor or gain. Common patterns:
+- Voltage: 0.1V/bit, Current: 0.01A/bit, Power: varies (check W vs kW)
+- Frequency: 0.01Hz/bit, Power factor: 0.001, Temperature: 0.1°C/bit
+- If the PDF says "Gain: 10" that means scale=0.1 (divide by gain)
+- If the PDF says "Unit: 0.1V" that means scale=0.1
+
+## FINAL CHECKLIST — verify before output:
+✓ 3 AC voltages (L1/L2/L3) + 3 AC currents + FREQUENCY
+✓ Per-MPPT voltage & current for EACH MPPT channel in the PDF
+✓ Per-String voltage & current if PDF has dedicated string registers (different addresses from MPPT)
+✓ Grid meter/Load registers if PDF has CT/meter section (L1_WATT_OF_GRID etc.)
+✓ ACTIVE_POWER + POWER_FACTOR + CUMULATIVE_ENERGY
+✓ INVERTER_MODE with "modes" mapping
+✓ 1-3 ERROR_CODE registers with "bits" or "fault_codes" from PDF appendix
+✓ INNER_TEMP
+✓ At least INVERTER_ON_OFF control register
+✓ DEVICE_MODEL + DEVICE_SERIAL_NUMBER + all firmware versions
+✓ Total register count is 40-80 (NOT 100+)
+
+## Output format:
+Output ONLY a valid JSON array. No markdown, no explanation, no code blocks.
+Start with [ and end with ].
+
+PDF Document:
+{full_text}"""
+
+    try:
+        # Use streaming to avoid timeout for long-running models (Opus etc.)
+        ai_text = ''
+        input_tokens = 0
+        output_tokens = 0
+        with client.messages.stream(
+            model=ai_settings['model'],
+            max_tokens=32000,
+            messages=[{"role": "user", "content": prompt}],
+        ) as stream:
+            for text in stream.text_stream:
+                ai_text += text
+            # Get final message for usage stats
+            final_msg = stream.get_final_message()
+            if final_msg and final_msg.usage:
+                input_tokens = final_msg.usage.input_tokens
+                output_tokens = final_msg.usage.output_tokens
+    except Exception as api_err:
+        err_msg = str(api_err)
+        if 'credit balance' in err_msg.lower() or 'billing' in err_msg.lower():
+            log(f'[AI] API credit balance too low - recharge at console.anthropic.com', 'error')
+        elif 'authentication' in err_msg.lower() or '401' in err_msg:
+            log(f'[AI] API key authentication failed', 'error')
+        else:
+            log(f'[AI] Claude API error: {err_msg[:200]}', 'error')
+            raise
+
+    log(f'[AI] 응답 수신 완료: {len(ai_text)} chars, tokens={input_tokens}+{output_tokens}')
+
+    # Parse JSON from response
+    try:
+        # Find JSON array in response (skip any markdown fences)
+        text = ai_text.replace('```json', '').replace('```', '')
+        start = text.find('[')
+        end = text.rfind(']') + 1
+        if start >= 0 and end > start:
+            registers = json.loads(text[start:end])
+        else:
+            registers = json.loads(text)
+        log(f'[AI] {len(registers)}개 레지스터 추출 완료')
+    except json.JSONDecodeError as e:
+        log(f'[AI] JSON 파싱 실패: {e}', 'error')
+        registers = []
+
+    # Post-process: normalize bit keys to int
+    for reg in registers:
+        if 'bits' in reg and isinstance(reg['bits'], dict):
+            reg['bits'] = {int(k): v for k, v in reg['bits'].items()}
+
+    return registers
+
+
 def run_stage1(
     input_path: str,
     output_dir: str,
     device_type: str = 'inverter',
     progress: ProgressCallback = None,
+    ai_settings: dict = None,
 ) -> dict:
-    """Stage 1: PDF/Excel → Stage 1 Excel (MAPPING_RULES_V2)"""
+    """Stage 1: PDF/Excel → Stage 1 Excel (MAPPING_RULES_V2)
+
+    When ai_settings is provided (dict with api_key and model), Claude API
+    is used to extract registers from the PDF as a supplementary source.
+    The AI-extracted registers are merged with the rule-based extraction
+    (AI fills gaps where rule-based parsing missed registers).
+    """
     def log(msg, level='info'):
         if progress:
             progress(msg, level)
     openpyxl = get_openpyxl()
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+
+    # AI mode: Claude API가 직접 PDF 파싱 (rule-based 건너뜀)
+    ai_registers = []
+    _ai_mode_active = False
+    if ai_settings and os.path.splitext(input_path)[1].lower() == '.pdf':
+        try:
+            ai_registers = _run_ai_pdf_extraction(input_path, ai_settings, progress)
+            log(f'[AI] {len(ai_registers)}개 레지스터 추출 완료 — AI 직접 파싱 모드')
+            _ai_mode_active = True
+        except Exception as e:
+            log(f'[AI] AI 추출 실패: {type(e).__name__}: {e}', 'error')
+            log('[AI] rule-based 모드로 폴백합니다', 'warn')
 
     log('레퍼런스 로딩 중...')
     synonym_db = load_synonym_db()
@@ -1903,8 +3242,97 @@ def run_stage1(
 
     log(f'입력 파일 읽기: {os.path.basename(input_path)}')
     all_tables = []
+    pages = []  # Excel 경로에서도 _detect_phase_type 등이 안전하게 동작
 
-    if ext == '.pdf':
+    # AI 모드: rule-based PDF 테이블 파싱 건너뛰고 AI 결과를 직접 사용
+    if _ai_mode_active and ai_registers:
+        log('[AI] Rule-based 파싱 건너뜀 — AI 추출 결과로 직접 진행')
+        # AI 결과를 RegisterRow 형식으로 변환
+        registers = []
+        _ai_extra_data = {}  # addr -> {bits, modes, fault_codes}
+        for ar in ai_registers:
+            try:
+                addr_str = ar.get('address', '')
+                if isinstance(addr_str, str):
+                    addr = int(addr_str, 16) if addr_str.startswith('0x') else int(addr_str)
+                else:
+                    addr = int(addr_str)
+                name = ar.get('name', f'AI_REG_{addr:#06x}')
+                dt = ar.get('data_type', 'U16')
+                scale = ar.get('scale', 1)
+                unit = ar.get('unit', '')
+                fc = int(ar.get('fc', 3))
+                desc = ar.get('description', '')
+                rw = ar.get('rw', 'R')
+                cat = ar.get('category', 'MONITORING')
+                # Map AI category to V2 categories
+                cat_map = {
+                    'DEVICE_INFO': 'INFO', 'STATUS': 'STATUS',
+                    'ALARM': 'ALARM', 'CONTROL': 'DER_CONTROL',
+                    'MONITORING': 'MONITORING',
+                }
+                category = cat_map.get(cat, 'MONITORING')
+                # Preserve AI extra data (bits, modes, fault_codes)
+                extra = {}
+                if ar.get('bits'):
+                    extra['bits'] = ar['bits']
+                if ar.get('modes'):
+                    extra['modes'] = ar['modes']
+                if ar.get('fault_codes'):
+                    extra['fault_codes'] = ar['fault_codes']
+                if ar.get('length'):
+                    extra['length'] = ar['length']
+                if extra:
+                    _ai_extra_data[addr] = extra
+                # Build value_definitions string for bits/modes
+                vd = ''
+                if ar.get('modes'):
+                    vd = '; '.join(f'{k}={v}' for k, v in ar['modes'].items())
+                elif ar.get('bits'):
+                    vd = '; '.join(f'bit{k}={v}' for k, v in sorted(ar['bits'].items(), key=lambda x: int(x[0])))
+                elif ar.get('fault_codes'):
+                    vd = '; '.join(f'{k}={v}' for k, v in list(ar['fault_codes'].items())[:20])
+                registers.append(RegisterRow(
+                    address=addr, definition=name, data_type=dt,
+                    scale=str(scale), unit=unit, fc=fc, rw=rw,
+                    comment=desc, category=category,
+                    value_definitions=vd,
+                ))
+            except (ValueError, TypeError):
+                continue
+
+        # Count categories
+        cats = {}
+        for r in registers:
+            cats[r.category] = cats.get(r.category, 0) + 1
+        cat_summary = ', '.join(f'{k}={v}' for k, v in sorted(cats.items()))
+        log(f'[AI] {len(registers)}개 레지스터 ({cat_summary})')
+        log(f'[AI] bits/modes/fault_codes: {len(_ai_extra_data)}개 레지스터에 추가 데이터')
+
+        # Save AI extra data (bits/modes/fault_codes) as JSON for Stage 3
+        if _ai_extra_data:
+            ai_json_path = os.path.join(output_dir, '_ai_extra_data.json')
+            # Convert int keys to strings for JSON serialization
+            serializable = {}
+            for addr, data in _ai_extra_data.items():
+                key = f'0x{addr:04X}'
+                serializable[key] = {}
+                for field, val in data.items():
+                    if isinstance(val, dict):
+                        serializable[key][field] = {str(k): v for k, v in val.items()}
+                    else:
+                        serializable[key][field] = val
+            with open(ai_json_path, 'w', encoding='utf-8') as f:
+                json.dump(serializable, f, indent=2, ensure_ascii=False)
+            log(f'[AI] Extra data saved: {ai_json_path}')
+
+        # pages는 빈 리스트 — _detect_phase_type 등에서 안전하게 동작
+        # manufacturer 추출을 위해 최소한의 설정
+        manufacturer = basename.split('_')[0].split('-')[0].split(' ')[0]
+        if manufacturer.endswith('PV') or manufacturer.endswith('HYB'):
+            manufacturer = manufacturer[:-2].rstrip('-')
+        # 이후 코드로 jump (register 분류/매핑/Excel 생성)
+    elif ext == '.pdf':
         pages = extract_pdf_text_and_tables(input_path, log=log)
         log(f'  PDF {len(pages)}페이지 추출 완료')
 
@@ -2000,16 +3428,64 @@ def run_stage1(
     else:
         raise ValueError(f'지원하지 않는 파일 형식: {ext}')
 
-    log('레지스터 테이블 파싱...')
-    registers = extract_registers_from_tables(all_tables, fc_list=fc_list)
-    log(f'  {len(registers)}개 레지스터 추출 (원본)')
+    # AI 모드: registers는 위에서 이미 생성됨 → 테이블 파싱 건너뜀
+    if not _ai_mode_active:
+        log('레지스터 테이블 파싱...')
+        registers = extract_registers_from_tables(all_tables, fc_list=fc_list)
+        log(f'  {len(registers)}개 레지스터 추출 (원본)')
 
-    # SunSpec 텍스트 형식 폴백 (SMA 등 — 40001+ 10진수 주소 텍스트 형식)
-    if not registers and ext == '.pdf':
-        log('  표준 테이블 없음 → SunSpec 텍스트 형식 시도...')
-        registers = _parse_sunspec_text_registers(pages)
-        if registers:
-            log(f'  SunSpec 텍스트 형식: {len(registers)}개 레지스터 추출')
+    # 텍스트 형식 폴백 (SunSpec/SMA EDMx/SAJ 등 — find_tables() 실패시)
+    # 추출 결과가 적거나(<20) 노이즈만 (BYTE/BIT 같은 protocol-description 키워드)
+    # 있을 때 텍스트 형식 fallback 시도하여 보강
+    def _is_noisy(regs):
+        if not regs:
+            return True
+        noisy_kw = ('BYTE', 'BIT_OF_REGISTER', 'COMMAND', 'CRC', 'INVALID',
+                    'SLAVE_ADDRESS', 'STARTING_ADDRESS', 'SERVER_BUSY')
+        noisy = sum(1 for r in regs if any(kw in (r.definition or '').upper() for kw in noisy_kw))
+        return noisy >= len(regs) * 0.5
+    if not _ai_mode_active and ext == '.pdf' and (not registers or len(registers) < 20 or _is_noisy(registers)):
+        log('  표준 테이블 부족/노이즈 → 텍스트 형식 fallback 시도...')
+        text_regs = _parse_sunspec_text_registers(pages)
+        if text_regs:
+            log(f'  텍스트 형식: {len(text_regs)}개 레지스터 추출')
+            # 기존(노이즈) 무시하고 텍스트 결과 사용
+            existing_addrs = {r.address for r in registers if isinstance(r.address, int)}
+            for tr in text_regs:
+                if isinstance(tr.address, int) and tr.address not in existing_addrs:
+                    registers.append(tr)
+                    existing_addrs.add(tr.address)
+            log(f'  병합 후: {len(registers)}개 레지스터')
+
+    # ── AI-extracted registers merge (non-AI mode fallback only) ────────
+    if ai_registers and not _ai_mode_active:
+        existing_addrs = {r.address for r in registers if isinstance(r.address, int)}
+        ai_added = 0
+        for ar in ai_registers:
+            try:
+                addr_str = ar.get('address', '')
+                addr = int(addr_str, 16) if isinstance(addr_str, str) else int(addr_str)
+                if addr in existing_addrs:
+                    continue
+                name = ar.get('name', f'AI_REG_{addr:#06x}')
+                dt = ar.get('data_type', 'U16')
+                scale = ar.get('scale', 1)
+                unit = ar.get('unit', '')
+                fc = int(ar.get('fc', 3))
+                desc = ar.get('description', '')
+                rw = ar.get('rw', 'R')
+                registers.append(RegisterRow(
+                    address=addr, definition=name, data_type=dt,
+                    scale=str(scale), unit=unit, fc=fc, rw=rw,
+                    description=f'[AI] {desc}',
+                    page=0, raw_row=None,
+                ))
+                existing_addrs.add(addr)
+                ai_added += 1
+            except (ValueError, TypeError):
+                continue
+        if ai_added:
+            log(f'[AI] {ai_added}개 레지스터 병합 (rule-based에 없던 주소)')
 
     if not registers:
         raise NotRegisterMapError(
@@ -2018,10 +3494,10 @@ def run_stage1(
             '인버터 Modbus Register Map / Protocol 문서를 업로드해주세요.'
         )
 
-    manufacturer = basename.split('_')[0].split(' ')[0]
-    # 파일명에 '-PV'/'-HYB' 같은 타입 접미어가 붙어있으면 제거
-    # 예: "Senergy-PV" → "Senergy", "Ekos-PV" → "Ekos"
-    manufacturer = re.sub(r'-(PV|HYB|HYBRID)$', '', manufacturer, flags=re.IGNORECASE)
+    if not _ai_mode_active:
+        manufacturer = basename.split('_')[0].split(' ')[0]
+        # 파일명에 '-PV'/'-HYB' 같은 타입 접미어가 붙어있으면 제거
+        manufacturer = re.sub(r'-(PV|HYB|HYBRID)$', '', manufacturer, flags=re.IGNORECASE)
     log(f'  제조사 (파일명 기반): {manufacturer}')
 
     DER_FIXED_ADDRS = set()
@@ -2041,27 +3517,142 @@ def run_stage1(
     if ref_patterns:
         mfr_lower = manufacturer.lower()
         matched_ref = {k: v for k, v in ref_patterns.items() if mfr_lower in k.lower()}
+
+        def _reg_type_hint(name: str) -> str:
+            """레지스터 이름/단위에서 측정 타입 추정.
+            Growatt 등에서 Pac2 H → L3_CURRENT 같은 잘못된 레퍼런스 치환 방지."""
+            if not name:
+                return ''
+            n = name.lower().replace('_', ' ').strip()
+            # 접두사 기반 (Growatt, ABB 등의 관례)
+            # Pac/Ppv = power, Vac/Vpv = voltage, Iac/Ipv = current, Fac = freq
+            if re.match(r'^p(ac|pv|ower|v\d|out)', n) or 'power' in n or 'watt' in n:
+                return 'power'
+            if re.match(r'^v(ac|pv|\d|olt)', n) or 'voltage' in n or '전압' in n:
+                return 'voltage'
+            if re.match(r'^i(ac|pv|\d)', n) or 'current' in n or '전류' in n or 'amp' in n:
+                return 'current'
+            if re.match(r'^f(ac|req)', n) or 'frequency' in n or 'hz' in n:
+                return 'frequency'
+            if 'energy' in n or 'wh' in n or 'kwh' in n:
+                return 'energy'
+            if 'temp' in n or '온도' in n:
+                return 'temperature'
+            if 'factor' in n or re.fullmatch(r'pf\d*', n):
+                return 'power_factor'
+            return ''
+
+        def _ref_type_hint(ref: str) -> str:
+            """레퍼런스 이름에서 측정 타입 추정.
+            LOW/HIGH/SET/FAULT 등 임계치/설정 레지스터는 'threshold'로 분류해서
+            측정 필드 치환 대상에서 제외."""
+            u = ref.upper()
+            # 설정/임계치 — 측정값 아님
+            if any(k in u for k in ('_LOW', '_HIGH', '_SET', '_MAX', '_MIN',
+                                     '_LIMIT', '_FAULT', '_TRIP', '_TIME',
+                                     '_DELAY', 'FAULT_VALUE', 'VAC_LOW',
+                                     'VAC_HIGH', 'FAC_LOW', 'FAC_HIGH',
+                                     'IAC_LOW', 'IAC_HIGH', 'WMAX',
+                                     'V_REF', 'I_REF')):
+                return 'threshold'
+            if 'POWER_FACTOR' in u or u.endswith('_PF'):
+                return 'power_factor'
+            if 'VOLTAGE' in u or u.endswith('_V') or 'VOLT' in u:
+                return 'voltage'
+            if 'CURRENT' in u or u.endswith('_A') or 'AMP' in u:
+                return 'current'
+            if 'POWER' in u or u.endswith('_W') or u.endswith('WATT'):
+                return 'power'
+            if 'FREQ' in u or 'HERTZ' in u:
+                return 'frequency'
+            if 'ENERGY' in u or u.endswith('_WH') or u.endswith('_KWH'):
+                return 'energy'
+            if 'TEMP' in u or 'TMP' in u:
+                return 'temperature'
+            return ''
+
         if matched_ref:
             enriched = 0
+            skipped_conflict = 0
+            # 표준 이름 우선순위
+            _STD = {
+                'L1_VOLTAGE', 'L2_VOLTAGE', 'L3_VOLTAGE',
+                'L1_CURRENT', 'L2_CURRENT', 'L3_CURRENT',
+                'R_PHASE_VOLTAGE', 'S_PHASE_VOLTAGE', 'T_PHASE_VOLTAGE',
+                'R_PHASE_CURRENT', 'S_PHASE_CURRENT', 'T_PHASE_CURRENT',
+                'FREQUENCY', 'AC_POWER', 'PV_POWER', 'POWER_FACTOR',
+                'INNER_TEMP', 'INVERTER_MODE', 'CUMULATIVE_ENERGY', 'TOTAL_ENERGY',
+                'MPPT1_VOLTAGE', 'MPPT1_CURRENT', 'MPPT2_VOLTAGE', 'MPPT2_CURRENT',
+                'ERROR_CODE1', 'ERROR_CODE2', 'ERROR_CODE3',
+            }
+            # INFO 메타데이터 키워드 — 모델/시리얼/펌웨어 등은 ref 가
+            # ALARM/STRING_ABNORMAL 같은 잘못된 이름으로 덮지 않도록 보호
+            _INFO_META_KW = ('model', 'serial', 'firmware', 'version',
+                             'product', 'manufacturer', 'vendor', 'sn',
+                             'fw ver', 'sw ver', 'device type')
             for reg in registers:
                 addr = reg.address if isinstance(reg.address, int) else parse_address(reg.address)
                 if addr is None:
                     continue
-                ref_name = None
+                # 모든 매칭된 ref 파일에서 후보 수집 → 표준 이름 우선 선택
+                candidates = []
                 for proto, addr_map in matched_ref.items():
                     if addr in addr_map:
-                        ref_name = addr_map[addr]
-                        break
-                if ref_name:
-                    original = reg.definition
-                    reg.definition = ref_name
-                    if reg.comment and original != ref_name:
-                        reg.comment = f'{original} | {reg.comment}'
-                    elif original != ref_name:
-                        reg.comment = original
-                    enriched += 1
-            if enriched:
-                log(f'  레퍼런스 enrichment: {enriched}/{len(registers)}개 ({list(matched_ref.keys())})')
+                        candidates.append(addr_map[addr])
+                if not candidates:
+                    continue
+                std_candidates = [c for c in candidates if c in _STD]
+                ref_name = std_candidates[0] if std_candidates else candidates[0]
+
+                # STRING/ASCII 데이터 타입 또는 INFO 메타데이터 정의는
+                # ref enrichment 에서 제외 (Inverter Model information →
+                # PV_STRING_ABNORMAL 같은 stale ref 오염 방지)
+                _dtype_u = (reg.data_type or '').upper()
+                _def_l = (reg.definition or '').lower().replace('_', ' ')
+                if _dtype_u in ('STRING', 'STRINGING', 'ASCII', 'BCD'):
+                    skipped_conflict += 1
+                    continue
+                if any(kw in _def_l for kw in _INFO_META_KW):
+                    skipped_conflict += 1
+                    continue
+
+                # 타입 불일치 검사: Pac→CURRENT 같은 잘못된 치환 차단
+                orig_type = _reg_type_hint(reg.definition)
+                # unit 기반 추가 체크
+                unit_lower = (reg.unit or '').lower()
+                if not orig_type:
+                    if unit_lower in ('v',) or 'volt' in unit_lower:
+                        orig_type = 'voltage'
+                    elif unit_lower in ('a',) or unit_lower == 'amp':
+                        orig_type = 'current'
+                    elif unit_lower in ('w', 'kw') or 'watt' in unit_lower:
+                        orig_type = 'power'
+                    elif 'va' == unit_lower or unit_lower == 'kva':
+                        orig_type = 'power'
+                    elif unit_lower in ('hz',):
+                        orig_type = 'frequency'
+                    elif unit_lower in ('wh', 'kwh'):
+                        orig_type = 'energy'
+                ref_type = _ref_type_hint(ref_name)
+                if orig_type and ref_type and orig_type != ref_type:
+                    skipped_conflict += 1
+                    continue  # 타입 충돌 → 레퍼런스 치환 거부
+                # 보수적 정책: orig 타입은 명확한데 ref 타입 불명 → 치환 거부
+                # (SERIAL_NO_5, RESERVED 같은 메타데이터가 측정 필드 이름을 덮지 않게)
+                if orig_type and not ref_type:
+                    skipped_conflict += 1
+                    continue
+                original = reg.definition
+                reg.definition = ref_name
+                if reg.comment and original != ref_name:
+                    reg.comment = f'{original} | {reg.comment}'
+                elif original != ref_name:
+                    reg.comment = original
+                enriched += 1
+            msg = f'  레퍼런스 enrichment: {enriched}/{len(registers)}개'
+            if skipped_conflict:
+                msg += f' (타입충돌 {skipped_conflict}개 건너뜀)'
+            log(msg)
         else:
             log(f'  레퍼런스 enrichment: 해당 제조사({manufacturer}) 없음')
 
@@ -2113,6 +3704,34 @@ def run_stage1(
 
     max_mppt = 0
     max_string = 0
+    # 스트링전류 우선 원칙:
+    # PDF에 "PVN String M current" 같은 string current 모니터링 레지스터가
+    # 있으면, 그 N 의 최댓값을 MPPT 카운트로 사용한다 (PDF 에 더 많은
+    # PV input voltage 가 있어도 무시).
+    # Kstar: PV1~PV12 input voltage + PV1~PV6 String current 1-4 →
+    #        MPPT=6, String=24 (6×4)
+    pv_string_pv_nums = set()
+    for reg in registers:
+        d = reg.definition or ''
+        m = re.search(r'\bPV\s*(\d+)\s+String\s+current', d, re.I)
+        if m:
+            pv_string_pv_nums.add(int(m.group(1)))
+    pv_string_max = max(pv_string_pv_nums) if pv_string_pv_nums else 0
+
+    # Solis 패턴: "MPPT N voltage/current" 와 "PVN voltage/current" 가 둘 다
+    # 있으면 → MPPT N 은 진짜 MPPT, PVN 은 string-level 로 분류.
+    # 예: Solis V19 → "MPPT 1V~16V" (16 MPPT) + "PV1~32 Current" (32 string)
+    has_explicit_mppt = False
+    explicit_mppt_max = 0
+    for reg in registers:
+        d = reg.definition or ''
+        m = re.search(r'\bMPPT\s*(\d+)\s*(voltage|current|V|I)\b', d, re.I)
+        if m:
+            n = int(m.group(1))
+            if 1 <= n <= 64:
+                has_explicit_mppt = True
+                explicit_mppt_max = max(explicit_mppt_max, n)
+
     # detect_channel_from_ref는 제조사 매칭 ref만 사용 (타 제조사 주소 충돌 방지)
     for reg in registers:
         ch = detect_channel_number(reg.definition)
@@ -2123,6 +3742,14 @@ def run_stage1(
         if ch:
             prefix, n = ch
             if prefix == 'MPPT':
+                # 스트링전류 우선: pv_string_max 가 있으면 그 이상은 무시
+                if pv_string_max > 0 and n > pv_string_max:
+                    continue
+                # Solis 패턴: explicit MPPT 가 있으면 그 이상의 PVN 은
+                # string 으로 재분류
+                if has_explicit_mppt and n > explicit_mppt_max:
+                    max_string = max(max_string, n)
+                    continue
                 max_mppt = max(max_mppt, n)
             elif prefix == 'STRING':
                 max_string = max(max_string, n)
@@ -2151,6 +3778,9 @@ def run_stage1(
     if max_mppt > 0 and max_string < max_mppt:
         max_string = max_mppt
 
+    # V2: 단상/삼상 감지 — PDF 텍스트 + 레지스터 이름 휴리스틱
+    phase_type = _detect_phase_type(pages, registers)
+
     # V2: IV Scan 지원 = IV 데이터 레지스터(Tracker/PV point)가 있어야 함
     # IV command(0x600D)만 있고 데이터 레지스터 없으면 미지원 (예: Huawei)
     iv_info = detect_iv_from_pdf(registers)
@@ -2172,6 +3802,7 @@ def run_stage1(
         'device_type': device_type,
         'max_mppt': max_mppt,
         'max_string': max_string,
+        'phase_type': phase_type,  # 'single' / 'three' / 'both' / 'unknown'
         'string_monitoring': max_string > max_mppt,  # True: String별 전류 모니터링 지원
         'iv_scan': iv_scan_supported and device_type == 'inverter',
         'iv_data_points': iv_info.get('data_points', 0),
@@ -2184,6 +3815,7 @@ def run_stage1(
     }
 
     log(f'  제조사: {manufacturer}, MPPT: {max_mppt}, String: {max_string}')
+    log(f'  상 타입: {phase_type}')
     if meta['iv_scan']:
         log(f'  IV Scan: Yes (command={meta["iv_command_addr"]}, '
             f'trackers={meta["iv_trackers"]}, data_points={meta["iv_data_points"]})')
@@ -2197,18 +3829,21 @@ def run_stage1(
     excluded = []
 
     for reg in registers:
+        # 매칭된 제조사 ref 만 사용 — 다른 제조사의 동일 주소 매핑 (예: Kstar 0x0BF8 vs
+        # Solis SERIAL_NUMBER_SN_4) 이 카테고리를 오염시키는 것을 방지
         cat, reason = classify_register_with_rules(
-            reg, synonym_db, review_history, ref_patterns,
+            reg, synonym_db, review_history, matched_ref,
             device_type, all_regs=registers)
         if cat == 'EXCLUDE':
             excluded.append(reg)
             continue
         reg.category = cat
-        reg.h01_field = assign_h01_field(reg, synonym_db, ref_patterns)
+        reg.h01_field = assign_h01_field(reg, synonym_db, matched_ref)
 
         if cat == 'REVIEW':
             reg.review_reason = reason or '자동 분류 불가'
-            fuzzy = match_synonym_fuzzy(reg.definition, synonym_db, threshold=0.4)
+            # REVIEW에서는 사용자가 결정하도록 fuzzy 힌트 임계치는 낮게 유지
+            fuzzy = match_synonym_fuzzy(reg.definition, synonym_db, threshold=0.5)
             if fuzzy:
                 reg.review_suggestion = f'{fuzzy["category"]}/{fuzzy["field"]} (유사도 {fuzzy["score"]:.0%})'
             else:
@@ -2294,6 +3929,32 @@ def run_stage1(
 
     # ── 정의 파일 fallback: definitions/{manufacturer}_definitions.json ──
     _apply_saved_definitions(categorized, manufacturer, log)
+
+    # ── Solis 패턴 후처리: explicit MPPT 가 있으면 mppt{n}_current (n>explicit_mppt_max)
+    #    레지스터의 h01_field 를 string{n}_current 로 재매핑
+    #    (assign_h01_field 는 explicit_mppt_max 를 모르므로 여기서 보정)
+    if has_explicit_mppt and explicit_mppt_max > 0:
+        _mppt_re = re.compile(r'^mppt(\d+)_(voltage|current|power)$')
+        relabeled = 0
+        for cat_regs in categorized.values():
+            for reg in cat_regs:
+                if not reg.h01_field:
+                    continue
+                mm = _mppt_re.match(reg.h01_field)
+                if not mm:
+                    continue
+                n = int(mm.group(1))
+                kind = mm.group(2)
+                if n > explicit_mppt_max:
+                    if kind == 'current':
+                        reg.h01_field = f'string{n}_current'
+                        relabeled += 1
+                    else:
+                        # voltage/power 는 슬롯 없음 → 매핑 제거
+                        reg.h01_field = ''
+                        relabeled += 1
+        if relabeled:
+            log(f'  Solis 후처리: {relabeled}개 레지스터를 string{{n}}_current 로 재매핑')
 
     h01_match_table = build_h01_match_table(categorized, meta)
 
@@ -2649,6 +4310,16 @@ def run_stage1(
         ws_iv.column_dimensions['D'].width = 12
         ws_iv.column_dimensions['E'].width = 10
 
+    # ═══════════════════════════════════════════════════════════════════
+    # Sheet INFO_MAPPING — Model/SN 수동 매핑 (Stage1 INFO 패널용)
+    # ═══════════════════════════════════════════════════════════════════
+    _info_match_for_sheet = suggestions.get('_info_match', {})
+    try:
+        _add_info_mapping_sheet(wb, _info_match_for_sheet, suggestions,
+                                all_regs_flat, openpyxl)
+    except Exception as _e:
+        log(f'INFO_MAPPING 시트 생성 실패: {_e}', 'warn')
+
     wb.save(output_path)
     wb.close()
 
@@ -2671,6 +4342,164 @@ def run_stage1(
     }
 
 
+def _add_info_mapping_sheet(wb, info_match: dict, suggestions: dict,
+                            all_regs: list, openpyxl_module) -> None:
+    """INFO_MAPPING 시트 추가 — Stage1 INFO 패널용 (Model + SN 수동 매핑).
+
+    구조 (H01_MAPPING 과 동일한 컬럼 규약):
+      A=No  B=field(model/sn)  C=설명  D=매칭된 레지스터(이름+주소)
+      E~G=추천 후보 1~3  H=전체 레지스터 목록(드롭다운 소스)
+      I=FC  J/K/L=숨김 메타데이터(name, fcs, addrs)  M=match_source
+    """
+    from openpyxl.styles import Font, PatternFill, Border, Side
+    from openpyxl.worksheet.datavalidation import DataValidation
+
+    ws = wb.create_sheet('INFO_MAPPING')
+
+    thin = Border(
+        left=Side(style='thin'), right=Side(style='thin'),
+        top=Side(style='thin'), bottom=Side(style='thin'))
+    hdr_font = Font(bold=True, color='FFFFFF')
+    hdr_fill = PatternFill('solid', fgColor='333333')
+    auto_fill  = PatternFill('solid', fgColor='D5F5E3')
+    empty_fill = PatternFill('solid', fgColor='FDECEA')
+    ref_fill   = PatternFill('solid', fgColor='EBF5FB')
+    suggest_fill = PatternFill('solid', fgColor='FFF9C4')
+
+    ws['A1'] = 'INFO_MAPPING — Model / Serial Number 수동 매핑'
+    ws['A1'].font = Font(bold=True, size=13)
+    ws['A2'] = ('※ D열에서 매핑할 레지스터를 선택하세요. '
+                'E~G열은 추천 후보, H열은 전체 INFO 후보 목록.')
+    ws['A2'].font = Font(italic=True, color='555555')
+
+    headers = ['No', 'Field', '설명', '매칭된 레지스터 (주소)',
+               '추천 후보 1', '추천 후보 2', '추천 후보 3',
+               '전체 레지스터 목록', 'FC']
+    for j, h in enumerate(headers, start=1):
+        cell = ws.cell(row=3, column=j, value=h)
+        cell.font = hdr_font
+        cell.fill = hdr_fill
+        cell.border = thin
+
+    INFO_FIELDS = [
+        ('model', 'Model 정보 (제조사/타입/제품명)'),
+        ('sn',    'Serial Number / Firmware Version'),
+    ]
+
+    matched_map = {
+        'model': info_match.get('matched_model'),
+        'sn':    info_match.get('matched_sn'),
+    }
+    suggest_map = {
+        'model': suggestions.get('info_model', []) or [],
+        'sn':    suggestions.get('info_sn', []) or [],
+    }
+
+    # 전체 후보 풀 (드롭다운 H열) — 모든 reg 의 이름 (주소 첫 1개만)
+    # 동시에 name → first addr_hex / fc 매핑 수집
+    name_to_addr: Dict[str, str] = {}
+    name_to_fc: Dict[str, str] = {}
+    name_to_def: Dict[str, str] = {}
+    for reg in all_regs:
+        if not reg.definition:
+            continue
+        nm = to_upper_snake(reg.definition)
+        if not nm or nm in name_to_addr:
+            continue
+        addr_hex = reg.address_hex if isinstance(reg.address, int) else (reg.address_hex or '')
+        name_to_addr[nm] = addr_hex
+        name_to_def[nm] = reg.definition
+        fc = str(getattr(reg, 'fc', '') or '').strip()
+        name_to_fc[nm] = fc if fc in ('3', '4') else '3'
+    avail_entries = sorted(name_to_addr.keys())
+
+    DATA_START = 4
+    n_fields = len(INFO_FIELDS)
+
+    for i, (field, desc) in enumerate(INFO_FIELDS):
+        row = DATA_START + i
+        ws.cell(row=row, column=1, value=i + 1).border = thin
+        ws.cell(row=row, column=2, value=field).border = thin
+        ws.cell(row=row, column=3, value=desc).border = thin
+
+        m = matched_map.get(field) or {}
+        match_name = m.get('name') or ''
+        match_addr = m.get('address') or ''
+        if match_name and match_addr:
+            display = f'{match_name} ({match_addr})'
+        elif match_name:
+            display = match_name
+        else:
+            display = ''
+
+        cell_d = ws.cell(row=row, column=4, value=display)
+        cell_d.border = thin
+        cell_d.fill = auto_fill if display else empty_fill
+
+        # 추천 후보 (E~G)
+        cands = suggest_map.get(field, [])
+        cand_clean = []
+        for c in cands:
+            defn = (c.get('definition') or '').strip()
+            addr = (c.get('addr') or '').strip()
+            if not defn:
+                continue
+            # 첫 번째 주소만 사용 (연속 그룹 0xXXXX~0xYYYY → 0xXXXX)
+            first_addr = addr.split('~')[0].strip().split(' ')[0]
+            nm = to_upper_snake(defn.split('...')[0])
+            cand_clean.append((nm, first_addr, defn))
+        for ci, (nm, addr, defn) in enumerate(cand_clean[:3]):
+            val = f'{nm} ({addr})' if addr else nm
+            c_e = ws.cell(row=row, column=5 + ci, value=val)
+            c_e.border = thin
+            c_e.fill = suggest_fill
+
+        # FC (I열) — 매칭된 레지스터의 FC 또는 기본 3
+        fc_val = '3'
+        if match_name and match_name in name_to_fc:
+            fc_val = name_to_fc[match_name]
+        ws.cell(row=row, column=9, value=int(fc_val)).border = thin
+
+        # M열 (숨김): 매칭 출처
+        ws.cell(row=row, column=13, value='pdf' if display else '')
+
+    # H열: 전체 후보 목록 (드롭다운 소스) + J/K/L 메타
+    for i, name in enumerate(avail_entries):
+        ws.cell(row=DATA_START + i, column=8, value=name).fill = ref_fill
+        ws.cell(row=DATA_START + i, column=10, value=name)
+        fc_n = name_to_fc.get(name, '3')
+        ws.cell(row=DATA_START + i, column=11, value=fc_n)
+        ws.cell(row=DATA_START + i, column=12, value=name_to_addr.get(name, ''))
+
+    # DataValidation: D열 드롭다운
+    last_avail_row = DATA_START + max(len(avail_entries), n_fields) - 1
+    last_data_row = DATA_START + n_fields - 1
+    if avail_entries:
+        dv = DataValidation(
+            type='list',
+            formula1=f'$H${DATA_START}:$H${last_avail_row}',
+            allow_blank=True,
+            showDropDown=False,
+        )
+        ws.add_data_validation(dv)
+        dv.add(f'D{DATA_START}:D{last_data_row}')
+
+    # 컬럼 너비 + 숨김
+    ws.column_dimensions['A'].width = 5
+    ws.column_dimensions['B'].width = 10
+    ws.column_dimensions['C'].width = 35
+    ws.column_dimensions['D'].width = 38
+    ws.column_dimensions['E'].width = 28
+    ws.column_dimensions['F'].width = 28
+    ws.column_dimensions['G'].width = 28
+    ws.column_dimensions['H'].width = 30
+    ws.column_dimensions['I'].width = 6
+    ws.column_dimensions['J'].hidden = True
+    ws.column_dimensions['K'].hidden = True
+    ws.column_dimensions['L'].hidden = True
+    ws.column_dimensions['M'].hidden = True
+
+
 def _build_all_suggestions(h01_table: list, categorized: dict,
                            all_regs: list, meta: dict, log=None) -> dict:
     """
@@ -2685,16 +4514,166 @@ def _build_all_suggestions(h01_table: list, categorized: dict,
 
     # ── 1. INFO: Model/SN 미매칭 ──
     info_regs = categorized.get('INFO', [])
-    has_model = any(
-        (any(k in r.definition.lower() for k in ['model', 'device type', 'type code'])
-         and not any(k in r.definition.lower() for k in ['working', 'battery', 'pf', 'init fault']))
-        or r.definition.startswith('DEVICE_MODEL')  # PDF 텍스트 추출 모델명
-        for r in info_regs)
-    has_sn = any(
-        any(k in r.definition.lower() for k in ['serial_number', 'serial n', 'serialn', 'c_serial',
-                                                  'sn[', 'sn0', 'sn1', 'serial no', 'inverter sn',
-                                                  'product code', 'c_serialnumber'])
-        for r in info_regs)
+
+    # synonym_db에서 사용자 선택 INFO 항목 로드 (info_model / info_sn 의 synonyms)
+    _user_model_syns: set = set()
+    _user_sn_syns: set = set()
+    try:
+        from . import load_synonym_db as _load_db
+        _sdb = _load_db()
+        _sdb_fields = _sdb.get('fields', {})
+        for _key, _attr in (('info_model', _user_model_syns),
+                            ('info_sn',    _user_sn_syns)):
+            _entry = _sdb_fields.get(_key)
+            if isinstance(_entry, dict):
+                for _s in _entry.get('synonyms', []) or []:
+                    _attr.add(str(_s).upper().replace(' ', '_'))
+            elif isinstance(_entry, list):
+                for _s in _entry:
+                    _attr.add(str(_s).upper().replace(' ', '_'))
+    except Exception:
+        pass
+
+    def _name_key(reg) -> str:
+        return (reg.definition or '').upper().replace(' ', '_')
+
+    # Model/SN 검사 — 정의를 정규화(언더스코어/점/하이픈→공백)한 뒤 키워드 매칭
+    # 사용자 선택(synonym_db) 도 함께 확인. INFO 뿐 아니라 all_regs 까지 검색
+    def _info_norm(s: str) -> str:
+        if not s:
+            return ' '
+        n = s.lower().replace('_', ' ').replace('.', ' ').replace('-', ' ')
+        n = re.sub(r'\s+', ' ', n).strip()
+        return ' ' + n + ' '
+
+    # Model: 인버터 모델 식별자 (대부분 ASCII/STRING 타입)
+    # 1순위: 진짜 모델 (device/inverter/machine model, model h/l)
+    # 2순위: product/type 키워드
+    # 3순위(fallback): manufacturer/vendor 등 브랜드 문자열
+    _MODEL_PRIMARY_KWS = [' model', ' inverter model', ' device model',
+                          ' machine model', ' product name', ' product code',
+                          ' product type', ' device type', ' type code',
+                          ' inverter type',
+                          # 한국어
+                          '모델명', '모델 명', '모델번호', '제품명', '제품 명',
+                          '제품번호', '제품 번호', '기기명', '장치명']
+    _MODEL_FALLBACK_KWS = [' manufacturer', ' mfr ', ' maker ', ' vendor ',
+                           ' device info']
+    _MODEL_NEG = [' working ', ' battery ', ' init fault ', ' mode ',
+                  ' state ', ' pf ', ' traker ', ' tracker ', ' bms ',
+                  ' afci ', ' epm ', ' fault ', ' alarm ', ' warning ',
+                  ' set ', ' set value', ' ref ', ' enable ', ' disable ',
+                  ' boost ', ' charge ', ' discharge ', ' control ',
+                  ' mppt ', ' grid ', ' protection ', ' status ']
+
+    def _model_score(reg):
+        """Model 후보 점수: 높을수록 우선. 0이면 후보 아님."""
+        nd = _info_norm(reg.definition)
+        # 길이 필터: PDF 문단이 잘못 추출된 노이즈 (>62자) 제외
+        if len(nd) > 62:
+            return 0
+        if any(neg in nd for neg in _MODEL_NEG):
+            return 0
+        # serial number 가 포함된 정의는 시리얼 후보지 모델이 아님
+        if ' serial' in nd or ' sn ' in nd:
+            return 0
+        score = 0
+        if any(kw in nd for kw in _MODEL_PRIMARY_KWS):
+            score = 100
+        elif (reg.definition or '').startswith('DEVICE_MODEL'):
+            score = 100
+        elif any(kw in nd for kw in _MODEL_FALLBACK_KWS):
+            score = 50
+        if score == 0:
+            return 0
+        # ASCII/STRING 타입은 model 의 강한 신호
+        if (reg.data_type or '').upper() in ('STRING', 'STRINGING', 'ASCII'):
+            score += 10
+        # 짧고 정확한 정의 보너스 (예: "Model H", "Device Model")
+        if len(nd) <= 22:
+            score += 5
+        return score
+
+    def _pick_model(regs):
+        ranked = [(r, _model_score(r)) for r in regs]
+        ranked = [(r, s) for r, s in ranked if s > 0]
+        if not ranked:
+            return None
+        ranked.sort(key=lambda x: -x[1])
+        return ranked[0][0]
+
+    has_model = False
+    matched_model_reg = _pick_model(info_regs)
+    if matched_model_reg:
+        has_model = True
+    if not has_model:
+        matched_model_reg = _pick_model(all_regs)
+        if matched_model_reg:
+            has_model = True
+    if not has_model and _user_model_syns:
+        for r in all_regs:
+            if _name_key(r) in _user_model_syns:
+                has_model = True
+                matched_model_reg = r
+                break
+
+    # SN: 시리얼번호 OR 펌웨어버전 (둘 다 인버터 식별 가능, 보통 ASCII)
+    # 1순위: 진짜 SN (serial/sn 인덱스), 2순위: firmware/software fallback
+    _SN_PRIMARY_KWS = [' serial', ' c serial', ' inverter sn ',
+                       # 한국어
+                       '시리얼번호', '시리얼 번호', '시리얼', '일련번호',
+                       '제조번호', '시리얼no', 's/n']
+    _SN_FALLBACK_KWS = [' firmware', ' fw ver', ' fwver', ' fw no', ' fw[',
+                        ' software version', ' soft version', ' soft ver',
+                        ' software ver', ' sw ver', ' sw version',
+                        ' control firmware']
+    # BMS/서브보드 등 인버터 본체가 아닌 보조 모듈은 SN 후보에서 제외
+    _SN_NEG = [' bms ', ' mcu ', ' control board', ' afci', ' epm ',
+               ' historical fault ', ' fault alert ', ' fault data ']
+    # 'sn1' 'sn[' 같은 SN 인덱스 패턴 — 정규화된 토큰으로 단어경계 검사
+    _SN_INDEX_RE = re.compile(r'\bsn\d+\b|\bsn\[')
+
+    def _sn_score(reg):
+        """SN 후보 점수: 높을수록 우선. 0이면 후보 아님."""
+        nd = _info_norm(reg.definition)
+        if any(neg in nd for neg in _SN_NEG):
+            return 0
+        score = 0
+        if any(kw in nd for kw in _SN_PRIMARY_KWS):
+            score = 100  # 진짜 SN
+        elif _SN_INDEX_RE.search(nd):
+            score = 95
+        elif any(kw in nd for kw in _SN_FALLBACK_KWS):
+            score = 50  # firmware fallback
+        if score == 0:
+            return 0
+        # ASCII 타입은 SN/firmware의 강한 신호
+        if (reg.data_type or '').upper() in ('STRING', 'STRINGING', 'ASCII'):
+            score += 10
+        return score
+
+    def _pick_sn(regs):
+        ranked = [(r, _sn_score(r)) for r in regs]
+        ranked = [(r, s) for r, s in ranked if s > 0]
+        if not ranked:
+            return None
+        ranked.sort(key=lambda x: -x[1])
+        return ranked[0][0]
+
+    has_sn = False
+    matched_sn_reg = _pick_sn(info_regs)
+    if matched_sn_reg:
+        has_sn = True
+    if not has_sn:
+        matched_sn_reg = _pick_sn(all_regs)
+        if matched_sn_reg:
+            has_sn = True
+    if not has_sn and _user_sn_syns:
+        for r in all_regs:
+            if _name_key(r) in _user_sn_syns:
+                has_sn = True
+                matched_sn_reg = r
+                break
 
     if not has_model:
         cands = _suggest_info_field(all_regs, 'model')
@@ -2873,8 +4852,24 @@ def _build_all_suggestions(h01_table: list, categorized: dict,
             suggestions['iv_scan'] = _make_suggestion('iv_scan', cands)
             if log: log(f'  제안: IV Scan 후보 {len(cands)}개')
 
-    # INFO 매칭 여부 반환용
-    suggestions['_info_match'] = {'model': has_model, 'sn': has_sn}
+    # INFO 매칭 여부 반환용 — 매칭된 레지스터의 첫 주소 + definition 도 포함
+    def _reg_brief(r):
+        if r is None:
+            return None
+        return {
+            'definition': r.definition or '',
+            'name': to_upper_snake(r.definition) if r.definition else '',
+            'address': r.address_hex if isinstance(r.address, int) else (r.address_hex or ''),
+            'addr_int': r.address if isinstance(r.address, int) else None,
+            'data_type': r.data_type or '',
+        }
+
+    suggestions['_info_match'] = {
+        'model': has_model,
+        'sn': has_sn,
+        'matched_model': _reg_brief(matched_model_reg),
+        'matched_sn': _reg_brief(matched_sn_reg),
+    }
 
     return suggestions
 
@@ -2908,27 +4903,42 @@ def _suggest_info_field(all_regs: list, field_type: str) -> list:
     - 2개 미만이면 보조 키워드로 보충
     """
     if field_type == 'model':
-        prim_kws  = ['model', 'device type', 'type code', 'product']
-        prim_excl = ['working', 'battery', 'pf']
-        str_kws   = ['model', 'product']
+        prim_kws  = ['model', 'device type', 'type code', 'product',
+                     'manufacturer', 'mfr', 'maker', 'vendor',
+                     'inverter type', 'inverter model', 'device info',
+                     '모델명', '모델', '제품명', '기기명', '장치명']
+        prim_excl = ['working', 'battery', 'pf', 'mode', 'state']
+        str_kws   = ['model', 'product', 'manufacturer', 'mfr', 'vendor', '모델', '제품']
         sec_kws   = ['type', 'rated', 'name', 'equip', 'identifier', 'kind']
-    else:  # sn
-        prim_kws  = ['serial', 'sn']
+    else:  # sn — 시리얼번호 또는 펌웨어버전
+        prim_kws  = ['serial', 'sn',
+                     'firmware', 'fw_ver', 'fw ver', 'fw[', 'fwver',
+                     'fw_no', 'software version', 'soft ver', 'sw_ver',
+                     'sw ver', 'software ver',
+                     '시리얼', '일련번호', '제조번호']
         prim_excl = []
-        str_kws   = ['serial', 'sn']
-        sec_kws   = ['number', 'id', 'code', 'uid', 'barcode', 'lot']
+        str_kws   = ['serial', 'sn', 'firmware', 'fw', 'software', 'sw',
+                     '시리얼', '일련']
+        sec_kws   = ['number', 'id', 'code', 'uid', 'barcode', 'lot',
+                     'version', 'ver']
 
     def _score_single(reg, kws, excl, str_kws):
         dl = reg.definition.lower()
-        if not any(k in dl for k in kws):
-            return 0, ''
         if any(k in dl for k in excl):
+            return 0, ''
+        kw_hit = any(k in dl for k in kws)
+        is_ascii = (reg.data_type or '').upper() in ('STRING', 'STRINGING', 'ASCII')
+        if not kw_hit:
             return 0, ''
         score = 70
         reason = f'{field_type.upper()} 키워드'
-        if (reg.data_type or '').upper() in ('STRING', 'STRINGING', 'ASCII'):
+        # ASCII/STRING 타입은 Model/SN/FW 의 강력한 신호
+        if is_ascii:
+            score = 90
+            reason = f'{field_type.upper()} + ASCII 타입'
             if any(k in dl for k in str_kws):
-                score, reason = 85, f'{field_type.upper()} + STRING 타입'
+                score = 95
+                reason = f'{field_type.upper()} 키워드 + ASCII'
         return score, reason
 
     # 1차: 주 키워드 매칭
@@ -3233,14 +5243,16 @@ def _suggest_candidates(x_field: str, all_regs: list, categorized: dict) -> list
                 if any(k in dl for k in ['volt', 'vpv', 'v pv', 'dc volt']):
                     if (f'pv{n}' in dl or f'mppt{n}' in dl or
                             f'input {n}' in dl or f'input{n}' in dl or
-                            f'dc{n}' in dl or f'pp{n}' in dl):
+                            f'dc{n}' in dl or f'pp{n}' in dl or
+                            f'dc_voltage_{n}' in dl or f'dc voltage {n}' in dl):
                         score = 80
                         reason = f'PV{n} voltage 후보'
             elif is_current:
                 if any(k in dl for k in ['curr', 'ipv', 'i pv', 'dc curr']):
                     if (f'pv{n}' in dl or f'mppt{n}' in dl or
                             f'input {n}' in dl or f'input{n}' in dl or
-                            f'dc{n}' in dl or f'pp{n}' in dl):
+                            f'dc{n}' in dl or f'pp{n}' in dl or
+                            f'dc_current_{n}' in dl or f'dc current {n}' in dl):
                         score = 80
                         reason = f'PV{n} current 후보'
 

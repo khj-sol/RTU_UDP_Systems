@@ -180,10 +180,28 @@ def load_reference_patterns() -> Dict[str, Dict[int, str]]:
     """
     common/*_registers.py에서 RegisterMap 속성 → 주소 매핑 수집
     Returns: {protocol_name: {address: attr_name}}
+
+    주의: 같은 주소에 서로 다른 의미의 속성이 있으면(예: Growatt 0x000D =
+    FREQUENCY AND FW_VERSION2M), 해당 주소는 매핑에서 제외한다.
+    → FC03 vs FC04 cross-table 충돌을 자동 회피.
     """
     patterns = {}
-    py_files = glob.glob(os.path.join(COMMON_DIR, '*_registers.py'))
-    for fpath in set(py_files):
+    # Prefer RTU's verified common/ over the model-maker scratch common/.
+    # If both contain the same protocol filename, RTU_COMMON_DIR wins so that
+    # hand-curated, ground-truth maps drive enrichment instead of stale auto
+    # outputs (which can self-poison via wrong addresses → cycle).
+    py_files: list = []
+    seen_basenames: set = set()
+    for _src in (RTU_COMMON_DIR, COMMON_DIR):
+        if not _src or not os.path.isdir(_src):
+            continue
+        for fp in glob.glob(os.path.join(_src, '*_registers.py')):
+            base = os.path.basename(fp)
+            if base in seen_basenames:
+                continue
+            seen_basenames.add(base)
+            py_files.append(fp)
+    for fpath in py_files:
         fname = os.path.basename(fpath)
         proto = fname.replace('_registers.py', '').lstrip('REF_')
         try:
@@ -193,26 +211,56 @@ def load_reference_patterns() -> Dict[str, Dict[int, str]]:
             rm = getattr(mod, 'RegisterMap', None)
             if rm is None:
                 continue
-            addr_map = {}
-            # 별칭 감지: 같은 주소를 가리키는 속성이 여러 개면 원본(비별칭) 우선
-            # 우선순위: L1/L2/L3 > R/S/T, 언더스코어 포함 긴 이름 > 짧은 별칭
+            # 주소별로 모든 속성 수집 (별칭 제외)
             alias_prefixes = ('R_', 'S_', 'T_', 'R_PHASE', 'S_PHASE', 'T_PHASE',
                               'FIRMWARE_VERSION', 'AC_POWER', 'PV_POWER', 'FREQUENCY',
                               'TOTAL_ENERGY', 'GRID_POWER', 'ACTION_MODE',
                               'POWER_FACTOR_SET', 'REACTIVE_POWER_SET', 'REACTIVE_POWER_PCT',
-                              'ACTIVE_POWER_PCT', 'OPERATION_MODE', 'IV_SCAN_COMMAND', 'IV_SCAN_STATUS')
+                              'ACTIVE_POWER_PCT', 'OPERATION_MODE', 'IV_SCAN_COMMAND', 'IV_SCAN_STATUS',
+                              'INNER_TEMP', 'POWER_FACTOR', 'CUMULATIVE_ENERGY', 'DAILY_ENERGY',
+                              'INVERTER_MODE', 'L1_VOLTAGE', 'L2_VOLTAGE', 'L3_VOLTAGE',
+                              'L1_CURRENT', 'L2_CURRENT', 'L3_CURRENT', 'MPPT1_VOLTAGE',
+                              'MPPT1_CURRENT', 'MPPT2_VOLTAGE', 'MPPT2_CURRENT',
+                              'ERROR_CODE1', 'ERROR_CODE2', 'ERROR_CODE3')
+            addr_to_names = {}  # {addr: [(is_alias, attr_name), ...]}
             for attr in sorted(dir(rm)):
                 if attr.startswith('_'):
                     continue
                 val = getattr(rm, attr)
                 if isinstance(val, int) and 0 <= val <= 0xFFFF:
-                    is_alias = any(attr == p or  # 정확히 일치하는 경우만 별칭
+                    is_alias = any(attr == p or
                                    (attr.startswith(p) and not attr[len(p):].startswith('_'))
                                    for p in alias_prefixes)
-                    if val in addr_map and not is_alias:
-                        addr_map[val] = attr
-                    elif val not in addr_map:
-                        addr_map[val] = attr
+                    addr_to_names.setdefault(val, []).append((is_alias, attr))
+            # 충돌 검사: 한 주소에 non-alias 이름이 2개 이상이면 의미 충돌 → 제외
+            # 우선순위: 표준 alias(L1/L2/L3_VOLTAGE/CURRENT 등) > 원본 이름
+            # → 레퍼런스 enrichment에서 H01 호환 이름을 우선 사용
+            _STANDARD_NAMES = {
+                'L1_VOLTAGE', 'L2_VOLTAGE', 'L3_VOLTAGE',
+                'L1_CURRENT', 'L2_CURRENT', 'L3_CURRENT',
+                'R_PHASE_VOLTAGE', 'S_PHASE_VOLTAGE', 'T_PHASE_VOLTAGE',
+                'R_PHASE_CURRENT', 'S_PHASE_CURRENT', 'T_PHASE_CURRENT',
+                'FREQUENCY', 'AC_POWER', 'PV_POWER', 'POWER_FACTOR',
+                'INNER_TEMP', 'INVERTER_MODE', 'CUMULATIVE_ENERGY',
+                'MPPT1_VOLTAGE', 'MPPT1_CURRENT', 'MPPT2_VOLTAGE', 'MPPT2_CURRENT',
+            }
+            addr_map = {}
+            for addr, names in addr_to_names.items():
+                non_aliases = [n for a, n in names if not a]
+                aliases = [n for a, n in names if a]
+                if len(non_aliases) >= 2:
+                    # 서로 다른 원본 이름 → 신뢰 불가, 매핑 제외
+                    continue
+                # 1순위: 표준 이름 (aliases 중 L1_CURRENT 등)
+                standard = [n for n in aliases if n in _STANDARD_NAMES]
+                if standard:
+                    addr_map[addr] = standard[0]
+                # 2순위: non-alias (원본 PDF 이름)
+                elif non_aliases:
+                    addr_map[addr] = non_aliases[0]
+                # 3순위: 기타 alias
+                elif aliases:
+                    addr_map[addr] = aliases[0]
             patterns[proto] = addr_map
         except Exception:
             continue
@@ -278,6 +326,11 @@ MPPT_CURRENT_RE = re.compile(r'MPPT[_\s]*(\d+)[_\s]*(?:INPUT[_\s]*)?CURRENT', re
 MPPT_POWER_RE   = re.compile(r'MPPT[_\s]*(\d+)[_\s]*(?:INPUT[_\s]*)?POWER', re.I)
 STRING_VOLTAGE_RE = re.compile(r'STRING[_\s]*(\d+)[_\s]*(?:INPUT[_\s]*)?VOLTAGE', re.I)
 STRING_CURRENT_RE = re.compile(r'STRING[_\s]*(\d+)[_\s]*(?:INPUT[_\s]*)?CURRENT', re.I)
+# Growatt: "V_String1", "V String1_", "Vstring1" (전압 prefix가 STRING 앞에)
+# 끝에 \b 대신 (?!\d) — 숫자가 더 이어지지 않는 끝점만 매칭 (트레일링 _ 허용)
+V_STRING_N_RE   = re.compile(r'\bV[_\s]*STRING[_\s]*(\d+)(?!\d)', re.I)
+# Growatt: "Curr_String1", "Curr String8_", "I_String1", "Istring1"
+I_STRING_N_RE   = re.compile(r'\b(?:Curr|I)[_\s]*STRING[_\s]*(\d+)(?!\d)', re.I)
 PV_VOLTAGE_RE = re.compile(r'PV[_\s]*(\d+)[_\s]*(?:INPUT[_\s]*)?VOLTAGE', re.I)
 PV_CURRENT_RE = re.compile(r'PV[_\s]*(\d+)[_\s]*(?:INPUT[_\s]*)?CURRENT', re.I)
 # Kstar: PV{n} String current {m} → String 번호 = (n-1)*strings_per_mppt + m
@@ -309,6 +362,19 @@ def detect_channel_number(definition: str) -> Optional[tuple]:
         return None
     if 'test' in dl or 'threshold' in dl:
         return None
+    # V2: alarm/fault/error 레지스터는 MPPT 채널이 아님 (Solis Fault Code 03 등 오감지 방지)
+    if any(k in dl for k in ['fault', 'error', 'alarm', 'warning', 'abnormal']):
+        return None
+    # 제어/설정 키워드 제외 (PV3_VOLT_SET, PV3_POWER_LIMIT 등)
+    if any(k in dl for k in ['_set', ' set', 'setpoint', '_limit', ' limit',
+                              'enable', 'disable', 'reset', 'control']):
+        return None
+
+    # 채널 번호 상한 체크: 실제 인버터 최대 MPPT/String 은 32 (Solis PV100kW)
+    # 32 초과는 PDF parsing 오염 (셀 병합 오류로 붙은 잘못된 숫자)
+    MAX_CHANNEL = 32
+    def _check_n(n):
+        return 1 <= n <= MAX_CHANNEL
 
     # Kstar: PV{n} String current {m} → STRING
     m = PV_STRING_CURRENT_RE.search(definition)
@@ -355,7 +421,9 @@ def detect_channel_number(definition: str) -> Optional[tuple]:
         return ('MPPT', int(m.group(1)))
 
     # ABB: "Input 1 Voltage", "Input 2 Current" → MPPT
-    m = re.search(r'\bInput\s+(\d+)\s+(Voltage|Current|Power)', definition, re.I)
+    # 언더스코어 형태도 허용 ("INVERTER_INPUT_1_VOLTAGE" 같은 정규화 결과)
+    # \b 는 underscore 를 word char 로 보기 때문에 (?:^|[\s_]) 사용
+    m = re.search(r'(?:^|[\s_])Input[_\s]+(\d+)[_\s]+(Voltage|Current|Power)', definition, re.I)
     if m:
         return ('MPPT', int(m.group(1)))
 
@@ -363,6 +431,64 @@ def detect_channel_number(definition: str) -> Optional[tuple]:
     m = re.search(r'\bDC\s+Input\s+#(\d+)', definition, re.I)
     if m:
         return ('MPPT', int(m.group(1)))
+
+    # Deye / others: "PV1 input power", "PV2 input voltage", "PV3 input current"
+    # 'PV{N}[_ ]*(input[_ ]*)?(voltage|current|power|watt|volt|curr)'
+    # 언더스코어/공백 모두 separator 로 허용
+    # 끝 경계는 (?![a-z]) — _POWER_PV3 처럼 _ 가 따라와도 OK
+    m = re.search(
+        r'\bPV(\d+)[_\s]*(?:input[_\s]*)?(voltage|current|power|watt|volt|curr)(?![a-z])',
+        definition, re.I)
+    if m:
+        return ('MPPT', int(m.group(1)))
+
+    # Deye: "Dc voltage N" / "Dc current N" / "DC voltage N"
+    # ('voltage'/'current' 가 N 앞에 위치, DC가 별도 단어)
+    m = re.search(r'\bDC\s+(?:voltage|current|power)\s+(\d+)\b', definition, re.I)
+    if m:
+        n = int(m.group(1))
+        return ('MPPT', n) if _check_n(n) else None
+
+    # Deye 한글: "직류전압1", "직류전류3"
+    m = re.search(r'직류(?:전압|전류|전력)\s*(\d+)', definition)
+    if m:
+        n = int(m.group(1))
+        return ('MPPT', n) if _check_n(n) else None
+
+    # Deye concat: "직류전압1Dc voltage 1" → 직류 패턴이 위에서 잡혀야 함
+    # 만약 직류는 못 잡고 'voltage 1' 형식만 있으면 마지막에 시도
+    m = re.search(r'\b(?:dc|direct\s*current)\s*(?:input\s+)?(?:voltage|current|power)\s+(\d+)',
+                  definition, re.I)
+    if m:
+        n = int(m.group(1))
+        return ('MPPT', n) if _check_n(n) else None
+
+    # DC_VOLTAGE_N / DC_CURRENT_N (underscore 형식) — 이름이 DC_VOLTAGE_{N}으로
+    # 직접 정규화된 경우. Central type fallback 전에 먼저 매칭해 잘못된 mppt1
+    # 매핑을 막음. N > 32 면 PDF 파싱 오염으로 간주해 None 반환.
+    m = re.search(r'\bDC[_\s]*(voltage|current|power|volt|curr)[_\s]*(\d+)\b',
+                  definition, re.I)
+    if m:
+        n = int(m.group(2))
+        return ('MPPT', n) if _check_n(n) else None
+
+    # Deye 압축 형식: 'PV1_V', 'PV1_I', 'PV1V', 'PV1I', 'PV1 V_', 'PV1 I_'
+    # PV{N}_V/PV{N}V → voltage, PV{N}_I/PV{N}I → current
+    # 단어 경계 처리: 끝이 영문자가 아니어야 함 (PV1_V vs PV1_VOLTAGE 구분)
+    m = re.search(r'\bPV(\d+)[_\s]*V(?![A-Za-z])', definition, re.I)
+    if m:
+        return ('MPPT', int(m.group(1)))
+    m = re.search(r'\bPV(\d+)[_\s]*I(?![A-Za-z])', definition, re.I)
+    if m:
+        return ('MPPT', int(m.group(1)))
+
+    # Growatt: "V_String1", "Curr_String1" (V/Curr 가 STRING 앞에 위치)
+    m = V_STRING_N_RE.search(definition)
+    if m:
+        return ('STRING', int(m.group(1)))
+    m = I_STRING_N_RE.search(definition)
+    if m:
+        return ('STRING', int(m.group(1)))
 
     for pat, prefix in [(MPPT_VOLTAGE_RE, 'MPPT'), (MPPT_CURRENT_RE, 'MPPT'),
                          (MPPT_POWER_RE, 'MPPT'), (PV_VOLTAGE_RE, 'MPPT'),

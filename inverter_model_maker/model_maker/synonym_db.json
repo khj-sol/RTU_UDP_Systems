@@ -13,6 +13,7 @@
         "VAC_R",
         "R_PHASE_VOLTAGE",
         "Grid Voltage Phase A",
+<<<<<<< HEAD
         "Inverter – Part number (PN2)",
         "Inverter – Part number (PN0)",
         "Inverter – Part number (PN1)",
@@ -105,6 +106,14 @@
         "INTERNAL_STORAGE_ERROR",
         "GFCI_ABNORMAL",
         "File version"
+=======
+        "A Phase Voltage",
+        "Ua",
+        "UaN",
+        "L1전압",
+        "R상전압",
+        "A상전압"
+>>>>>>> 9837d06791ee1e2c66fd4a43108878afbb4ff0a1
       ]
     },
     "L2_VOLTAGE": {
@@ -120,6 +129,7 @@
         "VAC_S",
         "S_PHASE_VOLTAGE",
         "Grid Voltage Phase B",
+<<<<<<< HEAD
         "Zero Power",
         "Inverter – Part number (PN3)",
         "Self-Test Fail",
@@ -150,6 +160,14 @@
         "PV_STRING_REVERSE",
         "VDE 0126-1-1-BU",
         "CEI0-16"
+=======
+        "B Phase Voltage",
+        "Ub",
+        "UbN",
+        "L2전압",
+        "S상전압",
+        "B상전압"
+>>>>>>> 9837d06791ee1e2c66fd4a43108878afbb4ff0a1
       ]
     },
     "L3_VOLTAGE": {
@@ -165,26 +183,12 @@
         "VAC_T",
         "T_PHASE_VOLTAGE",
         "Grid Voltage Phase C",
-        "Grid Fail",
-        "Inverter – Part number (PN4)",
-        "Sensor Test + Meas.Riso",
-        "Sys Month",
-        "Grid Faultrecord 5-value",
-        "Grid Faultrecord 1-value",
-        "Grid Faultrecord 2-value",
-        "Grid Faultrecord 3-value",
-        "Grid Faultrecord 4-value",
-        "Average grid over-voltage (10minutes)",
-        "Inverter abnormal",
-        "T-phase CurrentCalibration Factor",
-        "Northern Ireland",
-        "CAlinevoltage",
-        "AC Relay Fault",
-        "T-phase VoltageCalibration Factor",
-        "R-phase CurrentCalibration Factor",
-        "0x0E",
-        "비상 스위치ON",
-        "10-minute grid overvoltage"
+        "C Phase Voltage",
+        "Uc",
+        "UcN",
+        "L3전압",
+        "T상전압",
+        "C상전압"
       ]
     },
     "L1_CURRENT": {
@@ -200,16 +204,11 @@
         "IAC_R",
         "R_PHASE_CURRENT",
         "Grid Current Phase A",
-        "Inverter – Part number (PN5)",
-        "String 10 abnormal alarm",
-        "Vref Error",
-        "String Test Threshold",
-        "Northern Ireland-MV480",
-        "LeakagecurrentRCD",
-        "Northern Ireland-MV800",
-        "STRING_10_ABNORMAL_ALARM",
-        "battery capacityShut Downbattery capacity ShutDown",
-        "Fault information No.3CharacterFault information word 3"
+        "A Phase Current",
+        "Ia",
+        "L1전류",
+        "R상전류",
+        "A상전류"
       ]
     },
     "L2_CURRENT": {
@@ -224,6 +223,7 @@
         "Iac2",
         "IAC_S",
         "S_PHASE_CURRENT",
+<<<<<<< HEAD
         "Grid Not Present",
         "Low ambient temperature",
         "The ambient temperature fallsbelow - 25 °C (-13 °F)",
@@ -235,6 +235,14 @@
         "NRS-097-2-1",
         "0x2B",
         "C10/11-MV800"
+=======
+        "Grid Current Phase B",
+        "B Phase Current",
+        "Ib",
+        "L2전류",
+        "S상전류",
+        "B상전류"
+>>>>>>> 9837d06791ee1e2c66fd4a43108878afbb4ff0a1
       ]
     },
     "L3_CURRENT": {
@@ -249,6 +257,7 @@
         "Iac3",
         "IAC_T",
         "T_PHASE_CURRENT",
+<<<<<<< HEAD
         "Input OC",
         "Inverter – Country/Grid standard",
         "Sys Day",
@@ -313,6 +322,14 @@
         "PRC 024 Western-_ _MV800",
         "PRC 024 Western-_ _MV480",
         "PRC 024 Western-_ _MV600"
+=======
+        "Grid Current Phase C",
+        "C Phase Current",
+        "Ic",
+        "L3전류",
+        "T상전류",
+        "C상전류"
+>>>>>>> 9837d06791ee1e2c66fd4a43108878afbb4ff0a1
       ]
     },
     "FREQUENCY": {
@@ -323,26 +340,12 @@
         "AC Frequency",
         "Fac",
         "Line Frequency",
-        "L1 Frequency",
-        "MASTER Exclusion",
-        "Inverter – Week production – Low byte",
-        "Inverter – Year production – Low byte",
-        "Excessively high ambient temperature",
-        "String 13 abnormal alarm",
-        "Reactive powerpercentagesetting",
-        "Leak Fault",
-        "LCDlanguage",
-        "Grid overvoltage",
-        "Internal ambient temperatureis too high.",
-        "Operating State",
-        "Boost abnormal",
-        "L2 Frequency",
-        "L3 Frequency",
         "Frequency of grid",
-        "Day Generation",
         "Gridfrequency",
-        "FrequencyClass",
+        "L1 Frequency",
+        "주파수",
         "주파수 Frequency",
+<<<<<<< HEAD
         "Reserve",
         "RD1699/661",
         "전체 상태",
@@ -350,6 +353,27 @@
         "STRING_13_ABNORMAL_ALARM",
         "REGISTER_NUMBER",
         "Feature data sequencenumber"
+=======
+        "Output Frequency"
+      ]
+    },
+    "AC_POWER": {
+      "category": "MONITORING",
+      "h01_field": "ac_power",
+      "synonyms": [
+        "Active Power",
+        "AC Active Power",
+        "Output Power",
+        "Grid Active Power",
+        "Total Active Power",
+        "Active Output Power",
+        "Inverter Active Power",
+        "Pac",
+        "유효전력",
+        "유효전력종합",
+        "유효전력(종합)",
+        "Grid Active Power Total"
+>>>>>>> 9837d06791ee1e2c66fd4a43108878afbb4ff0a1
       ]
     },
     "PV_POWER": {
@@ -362,38 +386,8 @@
         "Input Power",
         "Total PV Power",
         "PV_TOTAL_INPUT_POWER",
-        "I_DC_Power",
-        "Pac H",
-        "Pac L",
-        "Pac1 H",
-        "Pac1 L",
-        "Pac2 H",
-        "Pac2 L",
-        "Pac3 L",
-        "Pac3 H",
-        "PV 3 power event warning",
-        "PV12 input power",
-        "PV11 input power",
-        "PV10 input power",
-        "PV9 input power",
-        "PV8 input power",
-        "PV7 input power",
-        "PV6 input power",
-        "PV5 input power",
-        "PV4 input power",
-        "PV1 input power",
-        "PV2 input power",
-        "PV3 input power",
-        "Rotational speed of fan B",
-        "ELECTRIC RULE NO.21-MV600",
-        "태양전지 전력",
-        "Rotational speed of fan A",
-        "Rotational speed of fan C",
-        "ELECTRIC RULE NO.21-MV480",
-        "ELECTRIC RULE NO.21-MV800",
-        "ELECTRIC RULE NO.21-LV208",
-        "ELECTRIC RULE NO.21-LV240",
         "TotalDCInputPower",
+<<<<<<< HEAD
         "PV3 abnormal",
         "PV1_ABNORMAL",
         "PV2_ABNORMAL",
@@ -418,6 +412,36 @@
         "DCpower",
         "G59-England",
         "RD1699/661-MV800"
+=======
+        "태양전지 전력",
+        "PV전력",
+        "DC Input Power"
+      ]
+    },
+    "POWER_FACTOR": {
+      "category": "MONITORING",
+      "h01_field": "power_factor",
+      "synonyms": [
+        "Power Factor",
+        "Cos Phi",
+        "PF",
+        "Grid Power Factor",
+        "역률",
+        "출력역률"
+      ]
+    },
+    "REACTIVE_POWER": {
+      "category": "MONITORING",
+      "h01_field": "reactive_power",
+      "synonyms": [
+        "Reactive Power",
+        "Total Reactive Power",
+        "Grid Reactive Power",
+        "AC Reactive Power",
+        "Qac",
+        "무효전력",
+        "무효전력종합"
+>>>>>>> 9837d06791ee1e2c66fd4a43108878afbb4ff0a1
       ]
     },
     "CUMULATIVE_ENERGY": {
@@ -431,26 +455,10 @@
         "Accumulated Energy",
         "Total Generation Energy",
         "Eac total",
-        "Einv all",
         "Energy total",
-        "Energy Since Commissioning",
-        "I_AC_Energy_WH",
-        "Total poweryields",
-        "Inverter – Total Energy",
-        "Cap",
-        "WH",
-        "Energy total H",
-        "Energy total L",
-        "Accumulated energy ofimport",
-        "Accumulated energy ofexport",
-        "Accumulated energy of load",
         "Total energy yield",
-        "Daily energy yield",
-        "Annual energy yield",
-        "MPPT4DCAccumulatedEnergyYield",
-        "Accumulatedenergyyieldcorrection",
-        "SettingtheAccumulatedEnergyYield",
         "누적발전량",
+<<<<<<< HEAD
         "적산전력량 Total generation Energy",
         "CUMULATIVE_ENERGY_LOW",
         "Accumulatedpowergeneration",
@@ -467,6 +475,10 @@
         "NRS-097-2-1-MV800",
         "PRC 024 ERCOT-MV800_ _",
         "TAI-MEA-MV800"
+=======
+        "적산전력량",
+        "적산전력량 Total generation Energy"
+>>>>>>> 9837d06791ee1e2c66fd4a43108878afbb4ff0a1
       ]
     },
     "DAILY_ENERGY": {
@@ -478,8 +490,8 @@
         "Daily Power Yields",
         "Daily Generation",
         "Eac today",
-        "Einv day",
         "Energy today",
+<<<<<<< HEAD
         "Inverter – Daily Energy",
         "Temperature Fault",
         "Time total L",
@@ -526,17 +538,22 @@
         "CEI0-21-MV480",
         "CEI0-21-MV800",
         "CEI0-16-MV800"
+=======
+        "일발전량",
+        "금일발전량"
+>>>>>>> 9837d06791ee1e2c66fd4a43108878afbb4ff0a1
       ]
     },
     "TEMPERATURE": {
       "category": "MONITORING",
-      "h01_field": "temperature",
+      "h01_field": "inner_temp",
       "synonyms": [
         "Internal Temperature",
         "Inner Temperature",
         "Module Temperature",
         "Inverter Temperature",
         "Cabinet Temperature",
+<<<<<<< HEAD
         "Inverter – Inverter Temperature",
         "Excessively high module temperature",
         "Current Input over threshold (out of measurement range)",
@@ -547,6 +564,33 @@
         "START_BIT",
         "EN50438 IE_",
         "Number of points"
+=======
+        "Heatsink Temperature",
+        "Temp Inv",
+        "Tmp Cab",
+        "내부온도",
+        "인버터_내부온도",
+        "방열판_온도"
+      ]
+    },
+    "INVERTER_MODE": {
+      "category": "MONITORING",
+      "h01_field": "mode",
+      "synonyms": [
+        "Inverter State",
+        "Operating State",
+        "Operation State",
+        "Running State",
+        "Running Status",
+        "System State",
+        "Work State",
+        "Work Mode",
+        "Device Status",
+        "Inverter Status",
+        "운전상태",
+        "시스템동작상태",
+        "운전모드"
+>>>>>>> 9837d06791ee1e2c66fd4a43108878afbb4ff0a1
       ]
     },
     "DEVICE_MODEL": {
@@ -639,10 +683,11 @@
         "Q Control"
       ]
     },
-    "mppt3_current": {
+    "info_sn": {
       "category": "MONITORING",
-      "h01_field": "mppt3_current",
+      "h01_field": "info_sn",
       "synonyms": [
+<<<<<<< HEAD
         "MPPT3_POWER_/_MPPT3_VOLTAGE",
         "DCA",
         "mppt3_current",
@@ -653,22 +698,69 @@
         "MPPT_3_CURRENT",
         "MPPT3_CURRENT",
         "PO12.3"
+=======
+        "SERIAL_NO_4...[×4]"
+      ]
+    },
+    "mppt4_voltage": {
+      "category": "MONITORING",
+      "h01_field": "mppt4_voltage",
+      "synonyms": [
+        "DC_VOLTAGE4DC_VOLTAGE_4"
+      ]
+    },
+    "mppt4_current": {
+      "category": "MONITORING",
+      "h01_field": "mppt4_current",
+      "synonyms": [
+        "直流电流4DC_CURRENT_4"
+      ]
+    },
+    "mppt7_voltage": {
+      "category": "MONITORING",
+      "h01_field": "mppt7_voltage",
+      "synonyms": [
+        "DC_VOLTAGE_7"
+      ]
+    },
+    "mppt2_voltage": {
+      "category": "MONITORING",
+      "h01_field": "mppt2_voltage",
+      "synonyms": [
+        "2DC_VOLTAGE_2",
+        "MPPT2_VOLTAGE"
+>>>>>>> 9837d06791ee1e2c66fd4a43108878afbb4ff0a1
       ]
     },
     "alarm1": {
       "category": "MONITORING",
       "h01_field": "alarm1",
       "synonyms": [
-        "MPPTROAD_NUMBERMPPT_NUMBER"
+        "HIGH_BYTE_OFTOTAL_FEEDINGHOURS_HOURLYPOWERGENERATION",
+        "0_OFF_1_ON_INDIA_BOSH_SPECIALARM_SUPPORT",
+        "ERROR_MESSAGE",
+        "LOW_BYTE_OFTOTAL_FEEDINGHOURS_HOURLYPOWERGENERATION",
+        "HIGH_BYTE_OFTOTAL_FEEDPOWER_TOGRID_TOTAL_POWERGENERATION"
       ],
       "value_keywords": [
-        "error",
-        "failure",
-        "fan",
-        "grid",
-        "phase",
-        "reserved",
-        "wrong"
+        "acreactive",
+        "byte",
+        "controlstate",
+        "current",
+        "currentvalue",
+        "detectionvalue",
+        "factor",
+        "high",
+        "iso",
+        "istr",
+        "leak",
+        "low",
+        "output",
+        "pid",
+        "power",
+        "pvstring",
+        "spd",
+        "string"
       ]
     }
   }

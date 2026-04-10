@@ -3,6 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- 브라우저 캐싱 방지: 코드 변경 즉시 반영 -->
+  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
   <title>Model Maker Web v2</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -200,7 +204,7 @@
     .h01-mapping-section h4 { color: #7eb8f7; margin-bottom: 6px; }
     .h01-row {
       display: grid;
-      grid-template-columns: 148px 1fr;
+      grid-template-columns: 148px 1fr 46px;
       gap: 6px;
       align-items: center;
       padding: 3px 0;
@@ -209,6 +213,18 @@
     .h01-row:last-child { border-bottom: none; }
     .h01-matched { color: #4ade80; font-family: 'Consolas', monospace; font-size: 11px; }
     .h01-unmatched { color: #f87171; font-family: 'Consolas', monospace; font-size: 11px; }
+    .h01-source-tag {
+      display: inline-block;
+      font-size: 9px;
+      padding: 1px 5px;
+      margin-left: 4px;
+      border-radius: 3px;
+      font-family: 'Segoe UI', sans-serif;
+      font-weight: 600;
+      vertical-align: middle;
+    }
+    .h01-tag-auto { background:#16a34a; color:#fff; }   /* PDF/HANDLER 자동매칭 */
+    .h01-tag-der  { background:#0891b2; color:#fff; }   /* DER 매칭 */
   </style>
 </head>
 <body>
@@ -216,6 +232,7 @@
 <header>
   <h1>Model Maker Web v2</h1>
   <span>Inverter Modbus PDF → RTU Register Map  |  Stage 1 → 2 → 3</span>
+  <span id="ai-badge" style="display:none; margin-left:16px; background:#7c3aed; color:white; padding:2px 10px; border-radius:4px; font-size:13px;">🤖 AI Mode</span>
 </header>
 
 <div class="pipeline">
@@ -253,6 +270,22 @@
           </div>
         </div>
       </div>
+      <div id="info-mapping-area" style="display:none">
+        <div class="h01-mapping-section">
+          <h4 style="display:flex;justify-content:space-between;align-items:center">
+            <span>📋 INFO 매핑 (Model / SN)</span>
+            <span id="info-mapping-status" style="font-size:12px">-/-</span>
+          </h4>
+          <div style="font-size:11px;color:#9ca3af;margin-bottom:8px">
+            매칭된 Model/SN 레지스터를 확인하고 필요시 드롭다운으로 수정하세요.
+          </div>
+          <div id="info-mapping-table"></div>
+          <button class="run-btn" id="btn-save-info-mapping" onclick="saveInfoMapping()"
+                  style="background:#0891b2;color:#fff;margin-top:10px;padding:6px;font-size:12px">
+            💾 INFO 매핑 저장
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -276,8 +309,8 @@
       </div>
       <label>MPPT 채널 수</label>
       <input type="number" id="s2-mppt" min="1" max="12" value="4" />
-      <label>MPPT당 String 수</label>
-      <input type="number" id="s2-str" min="1" max="8" value="2" />
+      <label>총 String 수 <span style="color:#94a3b8;font-size:10px">(MPPT와 독립, Growatt 등 비대칭 인버터 지원)</span></label>
+      <input type="number" id="s2-str" min="0" max="32" value="8" />
       <label>용량 (파일명용, 예: 50kW)</label>
       <input type="text" id="s2-cap" placeholder="50kW" />
       <label>IV 데이터 포인트 수 (0=미지원)</label>
@@ -288,6 +321,22 @@
         <div class="review-section">
           <h4>⚠ REVIEW 항목 — 사용자 판정 필요</h4>
           <div id="review-rows"></div>
+        </div>
+      </div>
+      <div id="mppt-mapping-area" style="display:none">
+        <div class="h01-mapping-section">
+          <h4 style="display:flex;justify-content:space-between;align-items:center">
+            <span>⚡ MPPT/String 매핑 (전압·전류)</span>
+            <span id="mppt-mapping-status" style="font-size:12px">-/-</span>
+          </h4>
+          <div style="font-size:11px;color:#9ca3af;margin-bottom:8px">
+            MPPT/String 전압·전류의 자동매칭을 확인하고 필요시 수정하세요.
+          </div>
+          <div id="mppt-mapping-table"></div>
+          <button class="run-btn" id="btn-save-mppt-mapping" onclick="saveMpptMapping()"
+                  style="background:#0891b2;color:#fff;margin-top:10px;padding:6px;font-size:12px">
+            💾 MPPT 매핑 저장
+          </button>
         </div>
       </div>
     </div>
@@ -307,7 +356,10 @@
       </div>
       <div id="h01-mapping-area" style="display:none">
         <div class="h01-mapping-section">
-          <h4>🔗 H01 매핑 확인/수정</h4>
+          <h4 style="display:flex;justify-content:space-between;align-items:center">
+            <span>🔗 H01 매핑 확인/수정</span>
+            <span id="h01-mapping-status" style="font-size:12px">-/-</span>
+          </h4>
           <div style="font-size:11px;color:#9ca3af;margin-bottom:8px">
             자동매칭 결과를 확인하고 필요시 드롭다운으로 수정하세요.
             <span style="color:#4ade80">✓ 초록</span>=매칭됨&nbsp;
@@ -319,6 +371,10 @@
             💾 매핑 저장 후 Stage 3 활성화
           </button>
         </div>
+      </div>
+      <div id="stage4-result" style="display:none; margin-top:12px; padding:10px; background:#0d1b2a; border:1px solid #1e40af; border-radius:6px; font-size:12px">
+        <div id="stage4-grade" style="font-size:13px; font-weight:700; margin-bottom:6px"></div>
+        <div id="stage4-details" style="color:#cbd5e1; line-height:1.6"></div>
       </div>
       <button class="run-btn" id="btn-s3" disabled onclick="runStage3()">Stage 3 실행 — registers.py 생성</button>
       <div class="log-box" id="log-s3"><span style="color:#ffffff">-- Stage 2 완료 후 활성화 --</span></div>
@@ -333,7 +389,17 @@
 </div>
 
 <script>
-  const API = '/api';
+  // Detect if running inside dashboard iframe (proxy at /api/mm2-app/).
+  // When proxied, API calls must go through the proxy path, not root /api.
+  const _isProxied = window.location.pathname.includes('/mm2-app');
+  const API = _isProxied ? '/api/mm2-app/api' : '/api';
+  // AI mode flag from dashboard: ?ai_mode=1 in iframe URL
+  const _aiMode = new URLSearchParams(window.location.search).get('ai_mode') === '1';
+  // Show AI badge in header
+  if (_aiMode) {
+    const badge = document.getElementById('ai-badge');
+    if (badge) badge.style.display = 'inline';
+  }
   let sessionId = null;
   let ws = null;
   let uploadedFilename = null;
@@ -360,11 +426,14 @@
               document.getElementById('card-s1').className = 'stage-card done';
               document.getElementById('card-s2').className = 'stage-card active';
               document.getElementById('btn-s2').disabled = false;
+              // INFO 매핑 패널 자동 로드
+              setTimeout(() => loadInfoMapping(), 100);
             }
             if (s.stage >= 2) {
               document.getElementById('card-s2').className = 'stage-card done';
               document.getElementById('card-s3').className = 'stage-card active';
               document.getElementById('btn-s3').disabled = false;
+              setTimeout(() => loadMpptMapping(), 100);
             }
             appendLog('s1', `[F5 복원] ${savedOrig} — 이전 작업을 이어서 실행할 수 있습니다.`, 'info');
             restored = true;
@@ -382,7 +451,9 @@
       sessionStorage.removeItem('mm_orig_name');
     }
 
-    ws = new WebSocket(`ws://${location.host}/api/ws/${sessionId}`);
+    const _wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const _wsPath = _isProxied ? `/api/mm2-app/api/ws/${sessionId}` : `/api/ws/${sessionId}`;
+    ws = new WebSocket(`${_wsProto}//${location.host}${_wsPath}`);
     ws.onmessage = (e) => {
       const msg = JSON.parse(e.data);
       appendLog(msg.stage, msg.text, msg.level);
@@ -449,18 +520,57 @@
   }
 
   // ─── Stage 실행 ────────────────────────────────────────────────
+  let _s1ProgressTimer = null;
   async function runStage1() {
-    document.getElementById('btn-s1').disabled = true;
+    const btn = document.getElementById('btn-s1');
+    const origText = btn.textContent;
+    btn.disabled = true;
     clearLog('s1');
-    await fetch(`${API}/stage1/run`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        session_id: sessionId,
-        filename: uploadedFilename,
-        device_type: document.getElementById('s1-device').value,
-      }),
-    });
+    // Show AI mode status immediately in log
+    if (_aiMode) {
+      appendLog('s1', '🤖 AI Mode — Claude API가 직접 PDF를 파싱합니다', 'ok');
+      appendLog('s1', '  Rule-based 건너뜀 → AI 추출 → Stage 2/3 진행', 'info');
+      btn.textContent = '🤖 AI 분석 중...';
+      btn.style.background = '#7c3aed';
+      // Periodic progress indicator (AI can take 30s-2min)
+      let dots = 0;
+      let elapsed = 0;
+      _s1ProgressTimer = setInterval(() => {
+        dots = (dots + 1) % 4;
+        elapsed += 5;
+        const phases = [
+          [0,  'PDF 텍스트 추출 중'],
+          [5,  'Claude API 호출 중 — PDF 분석 대기'],
+          [15, 'Claude가 레지스터 추출 중'],
+          [30, 'Claude 응답 대기 중 (대용량 PDF는 1~2분 소요)'],
+          [60, '아직 처리 중... 잠시만 기다려주세요'],
+          [90, '거의 완료... 응답 수신 중'],
+        ];
+        let phase = phases[0][1];
+        for (const [t, msg] of phases) { if (elapsed >= t) phase = msg; }
+        btn.textContent = `🤖 ${phase}${'.'.repeat(dots)}`;
+      }, 5000);
+    } else {
+      appendLog('s1', 'Rule-based 파싱 모드 (AI Mode OFF)', 'info');
+      btn.textContent = '실행 중...';
+    }
+    appendLog('s1', `Stage 1 실행 중... (${uploadedFilename})`, 'info');
+    try {
+      await fetch(`${API}/stage1/run`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: sessionId,
+          filename: uploadedFilename,
+          device_type: document.getElementById('s1-device').value,
+          use_ai: _aiMode,
+        }),
+      });
+    } finally {
+      if (_s1ProgressTimer) { clearInterval(_s1ProgressTimer); _s1ProgressTimer = null; }
+      btn.textContent = origText;
+      btn.style.background = '';
+    }
   }
 
   async function uploadStage1Excel(input) {
@@ -492,7 +602,7 @@
       body: JSON.stringify({
         session_id: sessionId,
         mppt: parseInt(document.getElementById('s2-mppt').value),
-        strings_per_mppt: parseInt(document.getElementById('s2-str').value),
+        total_strings: parseInt(document.getElementById('s2-str').value),
         capacity: document.getElementById('s2-cap').value,
         iv_data_points: parseInt(document.getElementById('s2-iv-points').value),
       }),
@@ -580,21 +690,68 @@
     } else {
       ivField.value = String(msg.iv_data_points || 64);
     }
+
+    // Stage 1 자동 감지값으로 Stage 2 MPPT/총 String 입력 미리 채움
+    // (사용자가 인버터에 따라 직접 수정 가능)
+    const detMppt = parseInt(msg.max_mppt) || 0;
+    const detStr  = parseInt(msg.max_string) || 0;
+    if (detMppt > 0) {
+      const mEl = document.getElementById('s2-mppt');
+      mEl.value = detMppt;
+      mEl.style.background = '#1e3a2a';
+      mEl.style.borderColor = '#86efac';
+    }
+    if (detStr > 0) {
+      const sEl = document.getElementById('s2-str');
+      sEl.value = detStr;
+      sEl.style.background = '#1e3a2a';
+      sEl.style.borderColor = '#86efac';
+    }
+    if (detMppt > 0 || detStr > 0) {
+      appendLog('s1',
+        `Stage 1 자동 감지: MPPT ${detMppt} / 총 String ${detStr} — Stage 2 입력란에 미리 채움 (필요시 수정)`,
+        'info');
+    }
+
+    // 상 타입 감지 결과 표시 (단상/삼상/공통)
+    const phaseType = msg.phase_type || 'unknown';
+    const phaseLabel = {
+      'single':  '단상 (1-phase / 2-wire)',
+      'three':   '삼상 (3-phase)',
+      'both':    '단상/삼상 공통 (런타임 구분)',
+      'unknown': '미확인',
+    }[phaseType] || phaseType;
+    const phaseColor = {
+      'single':  'info',
+      'three':   'info',
+      'both':    'warn',
+      'unknown': 'warn',
+    }[phaseType] || 'warn';
+    appendLog('s1', `상 타입: ${phaseLabel}`, phaseColor);
+
     appendLog('s1', `카테고리: ${Object.entries(msg.counts||{}).filter(([k,v])=>v>0).map(([k,v])=>`${k}:${v}`).join(' ')}`, 'ok');
 
-    // INFO 매칭 상태 표시 — Model 매칭되면 OK (SN 없어도 메타데이터로 대체 가능)
+    // Stage 1 검증: 인버터 모델명 + SN 레지스터 존재 여부
     const im = msg.info_match || {};
     const modelOk = im.model === true;
     const snOk    = im.sn    === true;
-    if (modelOk) {
-      appendLog('s1', `INFO: OK  (Model ✓${snOk ? '  SN ✓' : ''})`, 'ok');
-    } else {
-      appendLog('s1', 'INFO: Model ✗  (레지스터 미발견)', 'warn');
-    }
+    const modelMark = modelOk ? '✓' : '✗';
+    const snMark    = snOk ? '✓' : '✗';
+    // Stage 1 PASS = Model + SN 모두 매칭
+    const stage1_pass = modelOk && snOk;
+    const level = stage1_pass ? 'ok' : 'warn';
+    appendLog('s1',
+      `Stage 1 검증: ${stage1_pass ? '✅ PASS' : '⚠ WARN'}  Model ${modelMark}  SN ${snMark}` +
+      (!modelOk ? '  (모델명 레지스터 미발견)' : '') +
+      (modelOk && !snOk ? '  (SN 레지스터 미발견)' : ''),
+      level);
 
     if (msg.review_count > 0) {
       appendLog('s1', `REVIEW ${msg.review_count}개 — Stage 2에서 확인`, 'warn');
     }
+
+    // INFO 매핑 패널 자동 로드 (Stage 1 완료 시)
+    loadInfoMapping();
 
     // 제안 표시 (적용 후 재실행이면 건너뜀)
     const sugg = msg.suggestions || {};
@@ -798,11 +955,99 @@
   }
 
   function onStage2Done(msg) {
+    // Stage 2 버튼 재활성화 (사용자가 MPPT/String 수 조정 후 재실행 가능)
+    document.getElementById('btn-s2').disabled = false;
+
     const h01ok = msg.h01_matched === msg.h01_total;
     const derOk = msg.der_matched === msg.der_total;
     appendLog('s2',
       `H01: ${msg.h01_matched}/${msg.h01_total}  DER: ${msg.der_matched}/${msg.der_total}`,
       h01ok && derOk ? 'ok' : 'warn');
+
+    // Stage 2 검증: MPPT 전압/전류 + String 전압/전류 추출 여부
+    // (H01 pv_voltage/pv_current/pv_power 매핑의 기반)
+    const v = msg.stage2_validation || {};
+    const mppt_v = v.mppt_voltage || {found:0, expected:0};
+    const mppt_i = v.mppt_current || {found:0, expected:0};
+    const str_v  = v.string_voltage || {found:0, expected:0};
+    const str_i  = v.string_current || {found:0, expected:0};
+    const mark = (f, e) => {
+      if (e === 0) return '-';
+      if (f >= e) return '✓';
+      if (f > 0)  return '⚠';
+      return '✗';
+    };
+    const mpptOk = mppt_v.found >= mppt_v.expected && mppt_i.found >= mppt_i.expected;
+    const lvl = mpptOk ? 'ok' : 'warn';
+    appendLog('s2',
+      `검증: MPPT V ${mark(mppt_v.found, mppt_v.expected)} ${mppt_v.found}/${mppt_v.expected}  `
+      + `MPPT I ${mark(mppt_i.found, mppt_i.expected)} ${mppt_i.found}/${mppt_i.expected}  `
+      + `String V ${mark(str_v.found, str_v.expected)} ${str_v.found}/${str_v.expected}  `
+      + `String I ${mark(str_i.found, str_i.expected)} ${str_i.found}/${str_i.expected}`,
+      lvl);
+
+    // 추출 카운트 vs 사용자 입력 비교 (총 String 수 직접 입력 모드)
+    // 주의: 자동으로 입력 필드를 덮어쓰지 않는다 (사용자 의도 보존)
+    const mppt_actual = Math.max(mppt_v.found, mppt_i.found);
+    const str_actual = Math.max(str_v.found, str_i.found);
+    const mppt_input = parseInt(document.getElementById('s2-mppt').value) || 0;
+    const total_str_input = parseInt(document.getElementById('s2-str').value) || 0;
+
+    let needsRerun = false;
+    let suggestion = '';
+    if (mppt_actual > 0 && mppt_actual !== mppt_input) {
+      suggestion += `MPPT 채널: 입력 ${mppt_input} → 실제 추출 <b style="color:#86efac">${mppt_actual}</b>  `;
+      needsRerun = true;
+    }
+    if (str_actual !== total_str_input) {
+      suggestion += `String 총수: 입력 ${total_str_input} → 실제 추출 <b style="color:#86efac">${str_actual}</b>  `;
+      needsRerun = true;
+    }
+    if (needsRerun) {
+      appendLog('s2',
+        `💡 입력값과 실제 추출 카운트가 다릅니다. ${suggestion}`,
+        'warn');
+      appendLog('s2',
+        `→ MPPT/String 수를 확인 후 필요시 'Stage 2 실행' 다시 클릭 (입력값은 자동변경되지 않음)`,
+        'warn');
+      // 색상만 강조 — 값은 건드리지 않음
+      ['s2-mppt', 's2-str'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+          el.style.background = '#3a2a1e';
+          el.style.borderColor = '#fbbf24';
+        }
+      });
+    } else {
+      // 입력값이 정확함 — 입력 필드 색 초기화
+      ['s2-mppt', 's2-str'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) { el.style.background = ''; el.style.borderColor = ''; }
+      });
+    }
+
+    // IV Scan 검증: 지원 인버터에 한해
+    const iv = v.iv_scan || {};
+    if (iv.supported) {
+      const cmdMark = iv.command_found ? '✓' : '✗';
+      const expTrk = iv.expected_trackers || 0;
+      const resCount = iv.result_count || 0;
+      const trkMark = (expTrk > 0 && resCount >= expTrk) ? '✓' :
+                      (resCount > 0 ? '⚠' : '✗');
+      const ivLvl = (iv.command_found && resCount > 0) ? 'ok' : 'warn';
+      appendLog('s2',
+        `IV Scan: 명령 ${cmdMark}  결과레지스터 ${trkMark} ${resCount}개  `
+        + `(트래커 ${expTrk}, 데이터포인트 ${iv.data_points || 0})`,
+        ivLvl);
+    }
+
+    // Stage 2 최종 PASS 판정 (MPPT + String + IV)
+    const stage2_pass = msg.stage2_pass === true;
+    const fail_reasons = msg.fail_reasons || [];
+    appendLog('s2',
+      `Stage 2 검증: ${stage2_pass ? '✅ PASS' : '⚠ WARN — ' + fail_reasons.join(', ')}`,
+      stage2_pass ? 'ok' : 'warn');
+
     if (msg.review_count > 0 && msg.review_items && msg.review_items.length > 0) {
       appendLog('s2', `REVIEW ${msg.review_count}개 — 판정 후 H01 매핑 확인`, 'warn');
       showReview(msg.review_items);
@@ -812,11 +1057,21 @@
         `<br><span style="color:#fbbf24">REVIEW ${msg.review_count}개 미결</span>`;
       return; // REVIEW 판정 → H01 매핑 → Stage 3
     }
+
+    // 재실행 필요해도 Stage 3 수동 매핑 UI 를 표시해 사용자가 직접 매핑 가능하게 함
+    // (Deye 같이 PDF parsing 이 복잡한 인버터는 자동 추출이 부족해도 수동으로 완성 가능)
     document.getElementById('card-s2').className = 'stage-card done';
     document.getElementById('card-s3').className = 'stage-card active';
-    document.getElementById('s3-summary').innerHTML =
-      `H01 ${fmtMatch(msg.h01_matched, msg.h01_total)}  |  DER ${fmtMatch(msg.der_matched, msg.der_total)}`;
+    if (needsRerun) {
+      document.getElementById('s3-summary').innerHTML =
+        `H01 ${fmtMatch(msg.h01_matched, msg.h01_total)}  |  DER ${fmtMatch(msg.der_matched, msg.der_total)}` +
+        `<br><span style="color:#fbbf24;font-size:11px">⚠ 추출 카운트 부족 — 수동 매핑 또는 Stage 2 재실행 권장</span>`;
+    } else {
+      document.getElementById('s3-summary').innerHTML =
+        `H01 ${fmtMatch(msg.h01_matched, msg.h01_total)}  |  DER ${fmtMatch(msg.der_matched, msg.der_total)}`;
+    }
     loadH01Mapping(); // H01 매핑 확인 화면 표시 (Stage 3 버튼은 저장 후 활성화)
+    loadMpptMapping(); // MPPT/String 매핑 패널 표시 (Stage 2 카드)
   }
 
   function onStage3Done(msg) {
@@ -826,13 +1081,55 @@
     document.getElementById('dl-link').href =
       `${API}/download/${sessionId}/${msg.filename}`;
     document.getElementById('dl-link').textContent = `⬇ ${msg.filename} 다운로드`;
-    // 검증 결과
+    // Stage 3 검증: 코드 구조 검증 (class, H01_FIELD_MAP 등)
     const val = msg.validation || {};
     const passed = Object.values(val).filter(v => v).length;
     const total = Object.values(val).length;
-    appendLog('s3', `검증: ${passed}/${total} 통과`, passed === total ? 'ok' : 'warn');
+    appendLog('s3', `코드 검증: ${passed}/${total} 통과`, passed === total ? 'ok' : 'warn');
     if (msg.synonym_added > 0) appendLog('s3', `synonym_db: +${msg.synonym_added}개`, 'ok');
     if (msg.review_recorded > 0) appendLog('s3', `review_history: +${msg.review_recorded}개`, 'ok');
+
+    // Stage 3 검증: H01 매칭 + RTU 통신 검증
+    const st4 = msg.stage4;
+    // Stage 4 PASS = 17/17 H01 + grade=PASS
+    const stage4_pass = msg.stage4_pass === true;
+    if (st4) {
+      const box = document.getElementById('stage4-result');
+      const gradeEl = document.getElementById('stage4-grade');
+      const detailsEl = document.getElementById('stage4-details');
+      // 명시적 stage4_pass 우선, 없으면 grade 사용
+      const grade = stage4_pass ? 'PASS' : (st4.grade || '?');
+      const colors = {
+        PASS: ['#16a34a', '#86efac', '✅'],
+        WARN: ['#d97706', '#fbbf24', '⚠️'],
+        FAIL: ['#dc2626', '#f87171', '❌'],
+      };
+      const [bg, fg, icon] = colors[grade] || ['#475569', '#cbd5e1', '?'];
+      box.style.borderColor = bg;
+      gradeEl.innerHTML = `<span style="color:${fg}">${icon} Stage 4 검증: ${grade}</span>` +
+        `  <span style="color:#9ca3af;font-weight:400">17 H01 표준 필드 · RTU 통신</span>`;
+      // H01 매칭 상태
+      const h01Pct = (st4.h01_pct || 0).toFixed(0);
+      const h01Line = `① H01 매칭 <b style="color:${fg}">${st4.h01_resolved}/${st4.h01_total}</b> (${h01Pct}%)`;
+      // RTU 통신 상태 (주소 + 통신 시뮬)
+      const commOk = (st4.comm_status || '').startsWith('OK');
+      const commColor = commOk ? '#86efac' : '#f87171';
+      const addrOk = (st4.addr_status || '').startsWith('OK');
+      const addrColor = addrOk ? '#86efac' : '#f87171';
+      const rtuLine = `② RTU 통신`
+        + `<br>&nbsp;&nbsp;&nbsp;· 주소 범위 <b style="color:${addrColor}">${st4.addr_status||'?'}</b>`
+        + `<br>&nbsp;&nbsp;&nbsp;· Modbus TCP <b style="color:${commColor}">${st4.comm_status||'?'}</b>`;
+      let warnings = '';
+      if (st4.warnings && st4.warnings.length > 0) {
+        warnings = '<div style="margin-top:6px;color:#fbbf24">⚠ ' +
+          st4.warnings.map(w => w).join('<br>⚠ ') + '</div>';
+      }
+      detailsEl.innerHTML = `${h01Line}<br>${rtuLine}${warnings}`;
+      box.style.display = 'block';
+      appendLog('s3',
+        `Stage 4 검증: ${stage4_pass ? '✅ PASS' : '⚠ ' + grade}  H01 ${st4.h01_resolved}/${st4.h01_total}  RTU ${commOk ? '✓' : '✗'}`,
+        stage4_pass ? 'ok' : 'warn');
+    }
   }
 
   function showReview(items) {
@@ -902,10 +1199,166 @@
     }
   }
 
+  // ─── 공용 매핑 패널 (INFO/MPPT) ───────────────────────────────
+  // panelKey: 'info' or 'mppt' — DOM id 와 row class 구분용
+  async function loadSimpleMappingPanel(panelKey, endpoint, label) {
+    const area  = document.getElementById(`${panelKey}-mapping-area`);
+    const table = document.getElementById(`${panelKey}-mapping-table`);
+    const status = document.getElementById(`${panelKey}-mapping-status`);
+    if (!area || !table) return;
+    table.innerHTML = '<span style="color:#9ca3af;font-size:11px">불러오는 중...</span>';
+    area.style.display = 'block';
+
+    try {
+      const r = await fetch(`${API}/${endpoint}/${sessionId}`);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const data = await r.json();
+      const availList = data.available_with_fc || [];
+      // 이름 → 첫 주소 맵 (multiple address handling: 첫번째만)
+      const nameToAddr = {};
+      availList.forEach(it => {
+        const a = (it.addr || '').split('|')[0].split('~')[0].trim();
+        nameToAddr[it.name] = a;
+      });
+
+      table.innerHTML = '';
+      data.fields.forEach(f => {
+        const row = document.createElement('div');
+        row.className = `${panelKey}-row h01-row`;
+        row.dataset.field = f.field;
+        row.dataset.matchSource = f.match_source || '';
+
+        const cls = f.is_matched ? 'h01-matched' : 'h01-unmatched';
+        const icon = f.is_matched ? '✓' : '✗';
+        const ms = f.match_source || '';
+        let sourceTag = '';
+        if (ms === 'der') {
+          sourceTag = '<span class="h01-source-tag h01-tag-der">DER매칭</span>';
+        } else if (ms === 'handler' || ms === 'pdf') {
+          sourceTag = '<span class="h01-source-tag h01-tag-auto">자동매칭</span>';
+        }
+
+        const curName = f.current_register || '';
+        const sugg = f.suggestions || [];
+        // HANDLER 행은 dropdown 비우고 라벨만 표시
+        const isHandler = ms === 'handler';
+        const curAddr = f.current_addr || '';
+        const addrLabel = curAddr
+          ? `<span style="font-size:10px;color:#94a3b8;font-family:monospace">${curAddr}</span>`
+          : '<span></span>';
+
+        // 옵션 빌드 — 첫 주소만 표시
+        let opts = '<option value="">(없음)</option>';
+        if (sugg.length > 0) {
+          opts += '<optgroup label="── 추천 후보 ──">';
+          sugg.forEach(s => {
+            const a = nameToAddr[s] || '';
+            const lbl = a ? `${s} (${a})` : s;
+            const sa = s === curName ? ' selected' : '';
+            opts += `<option value="${s}"${sa}>${lbl}</option>`;
+          });
+          opts += '</optgroup>';
+        }
+        opts += '<optgroup label="── 전체 레지스터 ──">';
+        availList.forEach(it => {
+          const a = nameToAddr[it.name] || '';
+          const lbl = a ? `${it.name} (${a})` : it.name;
+          const sa = it.name === curName ? ' selected' : '';
+          opts += `<option value="${it.name}"${sa}>${lbl}</option>`;
+        });
+        opts += '</optgroup>';
+
+        const selectHtml = isHandler
+          ? `<span style="flex:1;font-size:11px;color:#fbbf24">HANDLER 계산</span>`
+          : `<select class="${panelKey}-select" data-field="${f.field}"
+                     onchange="updateSimpleMappingCounter('${panelKey}')"
+                     style="padding:3px 6px;font-size:11px;flex:1">${opts}</select>`;
+
+        row.innerHTML = `
+          <div class="${cls}" title="${f.description}">${icon} ${f.field}${sourceTag}</div>
+          ${selectHtml}
+          ${addrLabel}`;
+        table.appendChild(row);
+      });
+
+      updateSimpleMappingCounter(panelKey);
+      const matched = data.fields.filter(f => f.is_matched).length;
+      const total = data.fields.length;
+    } catch (err) {
+      table.innerHTML = `<span style="color:#f87171">${label} 매핑 로드 오류: ${err.message}</span>`;
+    }
+  }
+
+  function updateSimpleMappingCounter(panelKey) {
+    const rows = document.querySelectorAll(`#${panelKey}-mapping-table .${panelKey}-row`);
+    let mapped = 0;
+    rows.forEach(row => {
+      const sel = row.querySelector(`.${panelKey}-select`);
+      const ms = row.dataset.matchSource || '';
+      if (ms === 'handler' || ms === 'der' || (sel && sel.value)) mapped++;
+    });
+    const total = rows.length;
+    const status = document.getElementById(`${panelKey}-mapping-status`);
+    if (status) {
+      const color = mapped === total ? '#4ade80' : (mapped >= total*0.75 ? '#fbbf24' : '#f87171');
+      status.innerHTML = `<span style="color:${color};font-weight:700">${mapped}/${total}</span> 매핑됨`;
+    }
+  }
+
+  async function saveSimpleMappingPanel(panelKey, endpoint, label) {
+    const rows = document.querySelectorAll(`#${panelKey}-mapping-table .${panelKey}-row`);
+    const mappings = {};
+    rows.forEach(row => {
+      const sel = row.querySelector(`.${panelKey}-select`);
+      const ms = row.dataset.matchSource || '';
+      if (!sel) return;
+      // HANDLER/DER 자동 매칭 행은 빈값 전송 X
+      if (sel.value || (ms !== 'handler' && ms !== 'der')) {
+        mappings[sel.dataset.field] = sel.value;
+      }
+    });
+    const btn = document.getElementById(`btn-save-${panelKey}-mapping`);
+    if (btn) { btn.disabled = true; btn.textContent = '저장 중...'; }
+    try {
+      const r = await fetch(`${API}/${endpoint}/${sessionId}`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({mappings}),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const d = await r.json();
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = `✓ ${label} 매핑 저장됨 (${d.updated})`;
+        setTimeout(() => { btn.textContent = `💾 ${label} 매핑 저장`; }, 2000);
+      }
+    } catch (err) {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = `💾 ${label} 매핑 저장`;
+      }
+      alert(`${label} 매핑 저장 오류: ${err.message}`);
+    }
+  }
+
+  function loadInfoMapping() {
+    return loadSimpleMappingPanel('info', 'info-mapping', 'INFO');
+  }
+  function saveInfoMapping() {
+    return saveSimpleMappingPanel('info', 'info-mapping', 'INFO');
+  }
+  function loadMpptMapping() {
+    return loadSimpleMappingPanel('mppt', 'mppt-mapping', 'MPPT');
+  }
+  function saveMpptMapping() {
+    return saveSimpleMappingPanel('mppt', 'mppt-mapping', 'MPPT');
+  }
+
   // ─── H01 매핑 ──────────────────────────────────────────────────
   async function loadH01Mapping() {
     const area = document.getElementById('h01-mapping-area');
     const table = document.getElementById('h01-mapping-table');
+    const status = document.getElementById('h01-mapping-status');
     table.innerHTML = '<span style="color:#9ca3af;font-size:11px">불러오는 중...</span>';
     area.style.display = 'block';
 
@@ -914,54 +1367,244 @@
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const data = await r.json();
       const avail = data.available_registers || [];
+      const availWithFc = data.available_with_fc || avail.map(n => ({name: n, fcs: []}));
+
+      // FC가 분리된 인버터인지 감지: FC3과 FC4 둘 다 존재하면 분리형
+      const allFcs = new Set();
+      availWithFc.forEach(r => (r.fcs || []).forEach(fc => allFcs.add(fc)));
+      const hasFcSplit = allFcs.has(3) && allFcs.has(4);
+
+      // window 전역에 보관 — onChange 핸들러에서 사용
+      window._h01AvailWithFc = availWithFc;
+      window._h01HasFcSplit = hasFcSplit;
 
       table.innerHTML = '';
       data.fields.forEach(f => {
         const row = document.createElement('div');
         row.className = 'h01-row';
+        // 매칭 출처 — 카운터 (updateH01Counter) 가 select.value 외에 이 값도 인정
+        row.dataset.matchSource = f.match_source || '';
         const cls = f.is_matched ? 'h01-matched' : 'h01-unmatched';
         const icon = f.is_matched ? '✓' : '✗';
         const sugg = f.suggestions || [];
-
-        // 현재 매칭에서 이름만 추출 (주소 제거: "NAME (0xXXXX)" → "NAME")
-        const curName = f.current_register.replace(/\s*\(0x[0-9A-Fa-f]+\)/, '').trim();
-
-        // 드롭다운: 추천 후보 → 구분선 → 전체 목록
-        let opts = '<option value="">(없음)</option>';
-        if (sugg.length > 0) {
-          opts += '<optgroup label="── 추천 후보 ──">';
-          sugg.forEach(s => {
-            const sName = s.replace(/\s*\(0x[0-9A-Fa-f]+\)/, '').trim();
-            const sel = sName === curName ? ' selected' : '';
-            opts += `<option value="${sName}"${sel}>${s}</option>`;
-          });
-          opts += '</optgroup>';
+        // 매칭 출처 라벨: 'pdf'/'handler' → 자동매칭, 'der' → DER매칭
+        const ms = f.match_source || '';
+        let sourceTag = '';
+        if (ms === 'der') {
+          sourceTag = '<span class="h01-source-tag h01-tag-der">DER매칭</span>';
+        } else if (ms === 'handler' || ms === 'pdf') {
+          sourceTag = '<span class="h01-source-tag h01-tag-auto">자동매칭</span>';
         }
-        opts += '<optgroup label="── 전체 목록 ──">';
-        avail.forEach(reg => {
-          const sel = reg === curName ? ' selected' : '';
-          opts += `<option value="${reg}"${sel}>${reg}</option>`;
-        });
-        opts += '</optgroup>';
+
+        // current_register는 backend에서 이미 정리된 깨끗한 NAME
+        const curName = f.current_register || '';
+        const fc = f.fc || 3;
+
+        const fcSel3 = fc === 3 ? ' selected' : '';
+        const fcSel4 = fc === 4 ? ' selected' : '';
+
+        // FC dropdown 색상: ambiguous면 빨강, FC 분리형인데 매칭없음도 빨강 강조
+        const fcAmbig = !!f.fc_ambiguous;
+        const fcStyle = (fcAmbig || (hasFcSplit && !curName))
+          ? 'border:1px solid #f87171;background:#fee2e2;color:#b91c1c;font-weight:700'
+          : '';
+        const fcTitle = fcAmbig
+          ? '이 레지스터는 FC3/FC4 양쪽에 존재합니다 — 어느 쪽인지 선택하세요'
+          : (hasFcSplit ? 'FC3=Holding, FC04=Input' : 'FC');
+
+        // 현재 선택된 레지스터의 주소 (FC별로 다를 수 있음)
+        const curAddr = f.current_addr || '';
+        const addrLabel = curAddr ? `<span class="h01-addr" data-field="${f.h01_field}" style="font-size:10px;color:#94a3b8;margin-left:4px;font-family:monospace">${curAddr}</span>` : `<span class="h01-addr" data-field="${f.h01_field}" style="font-size:10px;color:#94a3b8;margin-left:4px;font-family:monospace"></span>`;
 
         row.innerHTML = `
-          <div class="${cls}" title="${f.description}">${icon} ${f.h01_field}</div>
-          <select class="h01-select" data-field="${f.h01_field}" style="padding:3px 6px;font-size:11px">${opts}</select>`;
+          <div class="${cls}" title="${f.description}">${icon} ${f.h01_field}${sourceTag}</div>
+          <select class="h01-select" data-field="${f.h01_field}"
+                  onchange="onH01RegisterChange(this)"
+                  style="padding:3px 6px;font-size:11px;flex:1"></select>
+          ${addrLabel}
+          <select class="h01-fc" data-field="${f.h01_field}"
+                  onchange="onH01FcChange(this)"
+                  style="padding:3px 4px;font-size:11px;width:42px;${fcStyle}" title="${fcTitle}">
+            <option value="3"${fcSel3}>F3</option><option value="4"${fcSel4}>F4</option>
+          </select>`;
         table.appendChild(row);
+
+        // 레지스터 옵션 채우기 (FC 필터 적용)
+        const sel = row.querySelector('.h01-select');
+        rebuildH01RegisterOptions(sel, fc, curName, sugg);
       });
 
+      updateH01Counter();
       const matched = data.fields.filter(f => f.is_matched).length;
+      const handlerCnt = data.fields.filter(f => f.match_source === 'handler').length;
+      const derCnt = data.fields.filter(f => f.match_source === 'der').length;
       const total = data.fields.length;
-      appendLog('s3', `H01 매핑 로드: ${matched}/${total} 자동매칭`, matched === total ? 'ok' : 'warn');
+      const breakdown = (handlerCnt || derCnt)
+        ? ` (HANDLER ${handlerCnt}, DER ${derCnt})` : '';
+      appendLog('s3', `H01 매핑 로드: ${matched}/${total} 자동매칭${breakdown} — 미매칭 ${total - matched}개 수동 매핑 가능`,
+                matched === total ? 'ok' : 'warn');
     } catch (err) {
       table.innerHTML = `<span style="color:#f87171">H01 매핑 로드 오류: ${err.message}</span>`;
     }
   }
 
+  // 레지스터 드롭다운 옵션 재구성 (FC 필터 적용)
+  function rebuildH01RegisterOptions(sel, fc, curName, suggestions) {
+    const availWithFc = window._h01AvailWithFc || [];
+    const hasFcSplit = window._h01HasFcSplit;
+    const sugg = suggestions || [];
+
+    // FC 분리형이면 선택된 FC를 갖는 레지스터만 표시
+    // 비분리형이면 모두 표시
+    const matchesFc = (fcs) => {
+      if (!hasFcSplit) return true;
+      if (!fcs || fcs.length === 0) return true; // FC 정보 없는 항목은 항상 표시
+      return fcs.includes(fc);
+    };
+
+    // 옵션 라벨에 주소 + FC 정보 포함
+    // - 단일 FC: "POWERFACTOR (FC3 @ 0x0091)"
+    // - 양쪽 FC + 현재 선택된 FC만: "POWERFACTOR (FC3/4 @ 0x0091) ⚠"
+    const optLabel = (info) => {
+      const name = info.name;
+      const fcs = info.fcs || [];
+      const addrs = info.addrs || {};
+      if (fcs.length === 0) return name;
+      if (fcs.length === 1) {
+        const a = addrs[fcs[0]] || '';
+        return a ? `${name} (FC${fcs[0]} @ ${a})` : `${name} (FC${fcs[0]})`;
+      }
+      // 양쪽 FC: 현재 필터된 FC의 주소를 우선 표기
+      const a = addrs[fc] || addrs[fcs[0]] || '';
+      return a ? `${name} (FC${fcs.join('/')} @ ${a}) ⚠` : `${name} (FC${fcs.join('/')}) ⚠`;
+    };
+
+    let opts = '<option value="">(없음)</option>';
+    const filteredSugg = sugg.filter(s => {
+      const info = availWithFc.find(r => r.name === s);
+      return info ? matchesFc(info.fcs) : true;
+    });
+    if (filteredSugg.length > 0) {
+      opts += '<optgroup label="── 추천 후보 ──">';
+      filteredSugg.forEach(s => {
+        const info = availWithFc.find(r => r.name === s) || {name: s, fcs: [], addrs: {}};
+        const selAttr = s === curName ? ' selected' : '';
+        opts += `<option value="${s}"${selAttr}>${optLabel(info)}</option>`;
+      });
+      opts += '</optgroup>';
+    }
+    opts += `<optgroup label="── 전체 추출 레지스터${hasFcSplit ? ' (FC' + fc + ')' : ''} ──">`;
+    availWithFc.forEach(r => {
+      if (!matchesFc(r.fcs)) return;
+      const selAttr = r.name === curName ? ' selected' : '';
+      opts += `<option value="${r.name}"${selAttr}>${optLabel(r)}</option>`;
+    });
+    opts += '</optgroup>';
+    sel.innerHTML = opts;
+
+    // 옵션을 채운 뒤 저장한 값 복원 (필터에서 사라졌으면 빈값)
+    if (curName && [...sel.options].some(o => o.value === curName)) {
+      sel.value = curName;
+    } else {
+      sel.value = '';
+    }
+    // suggestions를 다음 렌더에서 다시 사용할 수 있도록 보관
+    sel.dataset.suggestions = JSON.stringify(sugg);
+  }
+
+  // 주소 라벨 업데이트 헬퍼
+  function updateH01AddrLabel(field, regName, fc) {
+    const addrEl = document.querySelector(`.h01-addr[data-field="${field}"]`);
+    if (!addrEl) return;
+    const availWithFc = window._h01AvailWithFc || [];
+    const info = availWithFc.find(r => r.name === regName);
+    if (info && info.addrs && info.addrs[fc]) {
+      addrEl.textContent = info.addrs[fc];
+      addrEl.style.color = '#94a3b8';
+    } else if (info && info.fcs && info.fcs.length > 0) {
+      // fc 가 안 맞으면 첫 fc 주소 표시
+      const f0 = info.fcs[0];
+      addrEl.textContent = (info.addrs && info.addrs[f0]) || '';
+      addrEl.style.color = '#94a3b8';
+    } else {
+      addrEl.textContent = '';
+    }
+  }
+
+  // 사용자가 레지스터를 변경 → 그 레지스터의 FC가 단일이면 FC 자동확정
+  function onH01RegisterChange(sel) {
+    const field = sel.dataset.field;
+    const fcSel = document.querySelector(`.h01-fc[data-field="${field}"]`);
+    const availWithFc = window._h01AvailWithFc || [];
+    const info = availWithFc.find(r => r.name === sel.value);
+    if (fcSel && info && info.fcs && info.fcs.length === 1) {
+      fcSel.value = String(info.fcs[0]);
+      // 단일 FC로 확정 → 빨강 해제
+      fcSel.style.cssText = 'padding:3px 4px;font-size:11px;width:42px';
+      fcSel.title = 'FC';
+    } else if (fcSel && info && info.fcs && info.fcs.length === 2) {
+      // 양쪽 모두 가능 → ambiguous, 빨강
+      fcSel.style.cssText = 'padding:3px 4px;font-size:11px;width:42px;border:1px solid #f87171;background:#fee2e2;color:#b91c1c;font-weight:700';
+      fcSel.title = '이 레지스터는 FC3/FC4 양쪽에 존재합니다 — 어느 쪽인지 선택하세요';
+    } else if (fcSel) {
+      fcSel.style.cssText = 'padding:3px 4px;font-size:11px;width:42px';
+      fcSel.title = 'FC';
+    }
+    // 주소 라벨 갱신
+    const fcNow = fcSel ? parseInt(fcSel.value) : 3;
+    updateH01AddrLabel(field, sel.value, fcNow);
+    updateH01Counter();
+  }
+
+  // 사용자가 FC를 변경 → 레지스터 드롭다운을 새 FC로 필터링
+  function onH01FcChange(fcSel) {
+    const field = fcSel.dataset.field;
+    const regSel = document.querySelector(`.h01-select[data-field="${field}"]`);
+    if (!regSel) return;
+    const fc = parseInt(fcSel.value);
+    const sugg = JSON.parse(regSel.dataset.suggestions || '[]');
+    rebuildH01RegisterOptions(regSel, fc, regSel.value, sugg);
+    // 사용자가 직접 FC를 골랐으면 빨강 해제
+    fcSel.style.cssText = 'padding:3px 4px;font-size:11px;width:42px';
+    fcSel.title = 'FC';
+    // 주소 라벨 갱신
+    updateH01AddrLabel(field, regSel.value, fc);
+    updateH01Counter();
+  }
+
+  function updateH01Counter() {
+    const rows = document.querySelectorAll('#h01-mapping-table .h01-row');
+    let mapped = 0;
+    rows.forEach(row => {
+      const sel = row.querySelector('.h01-select[data-field]');
+      const ms = row.dataset.matchSource || '';
+      // HANDLER/DER 자동 매칭은 dropdown 값 없어도 매핑된 것으로 인정
+      if (ms === 'handler' || ms === 'der' || (sel && sel.value)) mapped++;
+    });
+    const total = rows.length;
+    const status = document.getElementById('h01-mapping-status');
+    if (status) {
+      const color = mapped === total ? '#4ade80' : (mapped >= total*0.75 ? '#fbbf24' : '#f87171');
+      status.innerHTML = `<span style="color:${color};font-weight:700">${mapped}/${total}</span> 매핑됨`;
+    }
+  }
+
   async function saveH01Mapping() {
-    const selects = document.querySelectorAll('.h01-select[data-field]');
+    const rows = document.querySelectorAll('#h01-mapping-table .h01-row');
     const mappings = {};
-    selects.forEach(s => { mappings[s.dataset.field] = s.value; });
+    rows.forEach(row => {
+      const sel = row.querySelector('.h01-select[data-field]');
+      if (!sel) return;
+      const ms = row.dataset.matchSource || '';
+      // HANDLER/DER 자동 매칭 행은 dropdown 이 비어있어도 col D auto-fill 유지
+      // → 빈 값으로 덮어쓰지 않도록 사용자가 명시 선택한 경우만 전송
+      if (sel.value || (ms !== 'handler' && ms !== 'der')) {
+        mappings[sel.dataset.field] = sel.value;
+      }
+    });
+    const fcSelects = document.querySelectorAll('.h01-fc[data-field]');
+    const fc = {};
+    fcSelects.forEach(s => { fc[s.dataset.field] = parseInt(s.value); });
 
     const btn = document.getElementById('btn-save-mapping');
     btn.disabled = true;
@@ -971,7 +1614,7 @@
       const r = await fetch(`${API}/h01-mapping/${sessionId}`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({mappings}),
+        body: JSON.stringify({mappings, fc}),
       });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const d = await r.json();

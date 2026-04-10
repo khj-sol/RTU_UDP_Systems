@@ -173,7 +173,11 @@ async def _handle_h01_async(rtu_id: int, device_key: tuple, parsed: dict):
     dev_type, dev_num = device_key
 
     # Skip hidden (deleted) RTUs entirely — no DB update, no WS broadcast
-    _rtu_check = await database.get_rtu(rtu_id)
+    try:
+        _rtu_check = await database.get_rtu(rtu_id)
+    except Exception as e:
+        logger.error(f"_handle_h01_async get_rtu failed: {type(e).__name__}: {e}")
+        return
     if _rtu_check and _rtu_check.get('hidden'):
         with engine._lock:
             engine.rtu_registry.pop(rtu_id, None)  # remove from memory too
@@ -182,9 +186,15 @@ async def _handle_h01_async(rtu_id: int, device_key: tuple, parsed: dict):
     # Upsert RTU in database + detect online recovery
     rtu_state = engine.rtu_registry.get(rtu_id)
     if rtu_state:
-        # Check if RTU was offline (reconnected without H05 restart)
-        rtu_db = await database.get_rtu(rtu_id)
-        if rtu_db and rtu_db.get('status') == 'offline':
+        # Atomic check+clear of the reconnect edge flag. Using an in-memory
+        # flag under engine._lock avoids the race where many concurrent H01
+        # device handlers each saw rtu_db status='offline' before any upsert
+        # completed, producing 13 rtu_reconnect broadcasts per batch.
+        with engine._lock:
+            was_pending = getattr(rtu_state, '_reconnect_pending', False)
+            if was_pending:
+                rtu_state._reconnect_pending = False
+        if was_pending:
             await database.save_event(rtu_id, "rtu_reconnect",
                 f"RTU resumed from {rtu_state.ip}:{rtu_state.port}")
             await ws_manager.broadcast({
@@ -193,7 +203,12 @@ async def _handle_h01_async(rtu_id: int, device_key: tuple, parsed: dict):
                 'detail': f"RTU resumed from {rtu_state.ip}:{rtu_state.port}",
             })
             logger.info(f"RTU {rtu_id} reconnected (was offline)")
-        await database.upsert_rtu(rtu_id, rtu_state.ip, rtu_state.port)
+        try:
+            await database.upsert_rtu(rtu_id, rtu_state.ip, rtu_state.port)
+        except Exception as e:
+            logger.error(f"upsert_rtu failed: {type(e).__name__}: {e}")
+            # Continue — don't block H01 data save just because the registry
+            # upsert had a transient SQL issue (column missing, busy, etc.)
 
     # Log backup recovery
     backup_flag = parsed.get('backup', 0)
@@ -220,7 +235,10 @@ async def _handle_h01_async(rtu_id: int, device_key: tuple, parsed: dict):
             })
 
     if dev_type == DEVICE_INVERTER:
-        await database.save_inverter_data(rtu_id, parsed)
+        try:
+            await database.save_inverter_data(rtu_id, parsed)
+        except Exception as e:
+            logger.error(f"save_inverter_data failed: {type(e).__name__}: {e}")
     elif dev_type == DEVICE_PROTECTION_RELAY:
         # Calculate inverter total AC power for PCC power flow
         inv_total_w = 0.0
@@ -405,6 +423,10 @@ async def _stale_rtu_checker():
                     if age > threshold and state.connected:
                         stale_ids.append((rtu_id, threshold))
                         state.connected = False
+                        # Arm reconnect edge-trigger so the next H01 emits
+                        # exactly one rtu_reconnect event (atomic check+clear
+                        # in _handle_h01_async under engine._lock).
+                        state._reconnect_pending = True
                     # Remove from memory after 2 hours offline (prevent unbounded growth)
                     elif age > 7200 and not state.connected:
                         remove_ids.append(rtu_id)
@@ -631,7 +653,13 @@ async def startup():
     _background_tasks.append(asyncio.create_task(_data_retention_task()))
     _background_tasks.append(asyncio.create_task(_wal_checkpoint_task()))
     _background_tasks.append(asyncio.create_task(_downsample_task()))
-    engine.on_h01_cycle_complete = send_control_check_for_rtu
+    # Disabled: automatic Status Check after every H01 cycle caused duplicate
+    # H04/H05(check)/H05(result) pairs in the Response Log whenever a manual
+    # control command was sent within the 30s manual-command window. The RTU
+    # already sends control_check+control_result spontaneously after every
+    # control write, and H01 data carries live inverter status, so the
+    # server-initiated periodic Status Check is redundant noise.
+    # engine.on_h01_cycle_complete = send_control_check_for_rtu
     logger.info("Background tasks started (stale checker, data retention, WAL checkpoint, downsample)")
 
     # Start built-in FTP server for firmware updates
@@ -690,21 +718,9 @@ async def shutdown():
 # Main
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    # DB 초기화 옵션 (기본: 유지)
-    if os.path.exists(DB_PATH):
-        choice = input(f"  기존 DB 발견: {DB_PATH}\n  삭제하고 새로 시작? [y/N]: ").strip().lower()
-        if choice == 'y':
-            os.remove(DB_PATH)
-            # WAL/SHM 파일도 삭제
-            for ext in ('-wal', '-shm'):
-                p = DB_PATH + ext
-                if os.path.exists(p):
-                    os.remove(p)
-            print("  DB 삭제 완료. 새로 생성됩니다.")
-        else:
-            print("  기존 DB 유지.")
-    print()
-
+    # DB는 매번 삭제하지 않음 — 운영 데이터 누적 보존.
+    # 개발 시 DB 초기화가 필요하면 web_server_prod/rtu_dashboard.db* 파일을
+    # 직접 삭제한 뒤 재시작하세요.
     uvicorn.run(
         "web_server_prod.main:app",
         host="0.0.0.0",

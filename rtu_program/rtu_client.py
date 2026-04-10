@@ -34,7 +34,7 @@ from modbus_handler import MultiDeviceHandler
 from backup_manager import BackupManager
 from der_avm_slave import DerAvmSlave, DerAvmSlaveSimulation
 from der_avm_registers import DerAvmRegisters, DER_AVM_COMM_TIMEOUT
-from common.Solarize_PV_50kw_registers import InverterMode, ErrorCode1, ErrorCode2, ErrorCode3
+from common.Solarize_50_3_registers import InverterMode, ErrorCode1, ErrorCode2, ErrorCode3
 
 # ─── UDP Constants ────────────────────────────────────────────────────────────
 UDP_RECV_TIMEOUT    = 10.0    # seconds to wait for ACK (H05 etc)
@@ -47,7 +47,11 @@ DEFAULT_UDP_PORT    = 9100
 DEFAULT_SERVER_PORT = 9100
 DEVICE_SEND_INTERVAL = 0.1   # seconds between H01 sends (batch)
 BATCH_ACK_TIMEOUT   = 30     # seconds to wait for batch ACKs
+<<<<<<< HEAD
 FIRST_CONN_WAIT     = 60     # upper bound; actual wait uses configured comm_period
+=======
+FIRST_CONN_WAIT     = int(os.environ.get('RTU_FIRST_WAIT', '20'))  # seconds to wait after first connection / recovery
+>>>>>>> 9837d06791ee1e2c66fd4a43108878afbb4ff0a1
 MODBUS_POLL_INTERVAL = 10    # seconds between Modbus polling cycles
 
 # ─── Platform Detection ───────────────────────────────────────────────────────
@@ -115,7 +119,7 @@ class SimpleConfig:
             if self.cfg.has_section('RTU'):
                 self.rtu_id     = self.cfg.getint('RTU', 'rtu_id', fallback=10000001)
                 self.local_port = self.cfg.getint('RTU', 'local_port', fallback=DEFAULT_UDP_PORT)
-                self.comm_period = self.cfg.getint('RTU', 'communication_period', fallback=60)
+                self.comm_period = self.cfg.getint('RTU', 'communication_period', fallback=20)
 
             if self.cfg.has_section('SERVER'):
                 self.server_host = self.cfg.get('SERVER', 'primary_host', fallback='solarize.ddns.net')
@@ -163,7 +167,8 @@ class RTUClient:
 
     VERSION = "1.1.0"
 
-    def __init__(self, config: SimpleConfig = None, simulation_mode: bool = False):
+    def __init__(self, config: SimpleConfig = None, simulation_mode: bool = False,
+                 tcp_host: str = None, tcp_port: int = None):
 
         if config:
             self.rtu_id      = config.rtu_id
@@ -203,12 +208,14 @@ class RTUClient:
 
         self.protocol = ProtocolHandler(self.rtu_id)
         self.modbus = MultiDeviceHandler(
-            use_hat=use_hat,
+            use_hat=use_hat and not tcp_host,
             channel=1,
             baudrate=rs485_baudrate,
             simulation_mode=simulation_mode,
-            use_cm4=use_cm4_hw,
+            use_cm4=use_cm4_hw and not tcp_host,
             serial_port=rs485_serial,
+            tcp_host=tcp_host,
+            tcp_port=tcp_port,
         )
         self.backup = BackupManager(self.rtu_id)
 
@@ -246,6 +253,10 @@ class RTUClient:
 
         # Heartbeat
         self.last_heartbeat_time = time.time()
+        # _last_rtu_info_time removed: periodic H05 RTU Info is no longer sent.
+        # RTU Info is only emitted in response to an explicit H03 CTRL_RTU_INFO.
+        self._last_inv_info_time = {}    # {dev_num: last_send_ts} for periodic inverter info
+        self._inv_info_interval  = 600.0 # 10 min between periodic inverter info per device
 
         # DER-AVM
         self.der_avm_enabled = False
@@ -639,15 +650,163 @@ class RTUClient:
                            CTRL_INV_ACTIVE_POWER, CTRL_INV_POWER_FACTOR,
                            CTRL_INV_REACTIVE_POWER):
             # Apply to Modbus device
+            self.logger.info(f"H03 ctrl_type={ctrl_type} target_handler={target_handler is not None} target_inv_ctrl={target_inv.get('control') if target_inv else None}")
             if target_handler and hasattr(target_handler, 'write_control'):
                 try:
                     with self._modbus_lock:
-                        target_handler.write_control(ctrl_type, applied_val)
+                        wr_result = target_handler.write_control(ctrl_type, applied_val)
+                    self.logger.info(f"write_control result: {wr_result}")
                 except Exception as e:
                     self.logger.error(f"H03 control apply error: {e}")
+            else:
+                self.logger.warning(f"H03 control SKIPPED - no target_handler or write_control method")
 
             # H05(13) + H05(14) fire-and-forget
             self._send_h05_control_sequence(target_handler, dev_num, model)
+
+        elif ctrl_type in (CTRL_MODBUS_READ, CTRL_MODBUS_WRITE):
+            # Raw Modbus test — extended H03 body
+            fc = parsed.get('modbus_fc')
+            slave_id = parsed.get('modbus_slave_id')
+            addr = parsed.get('modbus_address')
+            count = parsed.get('modbus_count', 1)
+            values = parsed.get('modbus_values', [])
+            if fc is None or slave_id is None or addr is None:
+                self.logger.error(f"H03 Modbus test: missing extended body")
+                return
+            self.logger.info(f"H03 Modbus test: FC{fc:02d} slave={slave_id} "
+                             f"addr=0x{addr:04X} count={count}")
+            # Find handler and master for the target slave_id
+            master = None
+            target_handler = None
+            for inv in self.inverters:
+                h = inv.get('handler')
+                if h:
+                    # Match by slave_id
+                    h_slave = getattr(h, 'slave_id', None)
+                    if h_slave == slave_id:
+                        target_handler = h
+                        if hasattr(h, 'master') and h.master:
+                            master = h.master
+                        break
+            # Fallback: first handler with a master
+            if not master and not target_handler:
+                for inv in self.inverters:
+                    h = inv.get('handler')
+                    if h and hasattr(h, 'master') and h.master:
+                        master = h.master
+                        break
+            if not master and hasattr(self.modbus, '_master'):
+                master = self.modbus._master
+
+            # Simulation mode: handler exists but no physical master
+            is_sim = target_handler and not master
+            if is_sim:
+                self.logger.info(f"H03 Modbus test: SIM mode for slave={slave_id}")
+
+            if not master and not is_sim:
+                self.logger.error("H03 Modbus test: no Modbus master available")
+                pkt, _ = self.protocol.create_h05_modbus_result(
+                    dev_num, fc, slave_id, addr, -2)
+                self._send_udp_no_ack(pkt)
+                return
+
+            try:
+                with self._modbus_lock:
+                    if is_sim:
+                        # Simulation: read register data from handler's sim data
+                        sim_regs = self._sim_read_registers(
+                            target_handler, fc, addr, count)
+                        if ctrl_type == CTRL_MODBUS_READ:
+                            if sim_regs is not None:
+                                pkt, _ = self.protocol.create_h05_modbus_result(
+                                    dev_num, fc, slave_id, addr, 0, sim_regs)
+                            else:
+                                pkt, _ = self.protocol.create_h05_modbus_result(
+                                    dev_num, fc, slave_id, addr, 0,
+                                    [0] * count)  # return zeros for unmapped
+                        else:
+                            # Write in sim mode: just acknowledge
+                            pkt, _ = self.protocol.create_h05_modbus_result(
+                                dev_num, fc, slave_id, addr, 0, values)
+                    elif ctrl_type == CTRL_MODBUS_READ:
+                        if fc == 4:
+                            regs = master.read_input_registers(addr, count, slave_id)
+                        else:
+                            regs = master.read_holding_registers(addr, count, slave_id)
+                        if regs is not None:
+                            pkt, _ = self.protocol.create_h05_modbus_result(
+                                dev_num, fc, slave_id, addr, 0, list(regs))
+                        else:
+                            pkt, _ = self.protocol.create_h05_modbus_result(
+                                dev_num, fc, slave_id, addr, -1)
+                    else:  # CTRL_MODBUS_WRITE
+                        if fc == 6 and len(values) == 1:
+                            ok = master.write_single_register(addr, values[0], slave_id)
+                        elif fc == 16 and values:
+                            ok = master.write_multiple_registers(addr, values, slave_id)
+                        else:
+                            ok = False
+                        rc = 0 if ok else -1
+                        pkt, _ = self.protocol.create_h05_modbus_result(
+                            dev_num, fc, slave_id, addr, rc,
+                            values if ok else None)
+                self._send_udp_no_ack(pkt)
+                self.logger.info(f"H03 Modbus test: result sent")
+            except Exception as e:
+                self.logger.error(f"H03 Modbus test error: {e}")
+                pkt, _ = self.protocol.create_h05_modbus_result(
+                    dev_num, fc, slave_id, addr, -2)
+                self._send_udp_no_ack(pkt)
+
+    def _sim_read_registers(self, handler, fc, addr, count):
+        """Read registers from simulation handler by building a register map
+        from the handler's last read_inverter_data() or read_monitor_data()."""
+        try:
+            # Get simulation data as dict
+            data = None
+            if hasattr(handler, 'read_inverter_data'):
+                data = handler.read_inverter_data()
+            if not data:
+                return [0] * count
+
+            # Build address -> value map from RegisterMap attributes
+            reg_module = getattr(handler, 'reg_module', None)
+            if not reg_module:
+                return [0] * count
+
+            reg_map_cls = getattr(reg_module, 'RegisterMap', None)
+            if not reg_map_cls:
+                return [0] * count
+
+            # Map: register_name -> address
+            addr_to_name = {}
+            for attr_name in dir(reg_map_cls):
+                if attr_name.startswith('_'):
+                    continue
+                val = getattr(reg_map_cls, attr_name, None)
+                if isinstance(val, int) and 0 <= val <= 0xFFFF:
+                    addr_to_name[val] = attr_name
+
+            # Map data keys to register values
+            reg_values = {}
+            for key, value in data.items():
+                # Find register address for this data key
+                upper_key = key.upper()
+                for reg_addr, reg_name in addr_to_name.items():
+                    if reg_name == upper_key or reg_name.replace('_', '') == upper_key.replace('_', ''):
+                        if isinstance(value, (int, float)):
+                            reg_values[reg_addr] = int(value) & 0xFFFF
+                        break
+
+            # Build result array
+            result = []
+            for i in range(count):
+                result.append(reg_values.get(addr + i, 0))
+            return result
+        except Exception as e:
+            self.logger.error(f"_sim_read_registers error: {e}")
+            return [0] * count
 
     # =========================================================================
     # H05 Control Sequence (fire-and-forget)
@@ -680,8 +839,14 @@ class RTUClient:
                         dev_num, model, mon_data)
                     self._send_udp_no_ack(pkt)
                     self.logger.info(f"H05(14) INV{dev_num} Control Result sent (seq={s})")
+                else:
+                    self.logger.warning(f"H05(14) INV{dev_num}: read_monitor_data returned None")
             except Exception as e:
-                self.logger.error(f"H05(14) error: {e}")
+                self.logger.error(f"H05(14) INV{dev_num} error: {e}")
+                import traceback
+                self.logger.error(traceback.format_exc())
+        else:
+            self.logger.warning(f"H05(14) INV{dev_num}: no read_monitor_data method")
 
     # =========================================================================
     # IV Scan Execution (runs in separate thread)
@@ -692,7 +857,7 @@ class RTUClient:
 
         Runs in separate thread to avoid blocking _receive_loop.
         """
-        from common.Solarize_PV_50kw_registers import IVScanStatus
+        from common.Solarize_50_3_registers import IVScanStatus
 
         string_count = inv_cfg.get('string_count', 8)
         self.logger.info(f"IV Scan started for INV{dev_num} ({string_count} strings)")
@@ -728,7 +893,7 @@ class RTUClient:
         scan_time = time.time() - scan_start
 
         if not finished:
-            self.logger.warning(f"IV Scan timeout ({poll_timeout}s) for INV{dev_num} — inverter may be offline or night mode")
+            self.logger.warning(f"IV Scan timeout ({poll_timeout}s) for INV{dev_num} - inverter may be offline or night mode")
             # Notify server of IV Scan failure
             try:
                 pkt, s = self.protocol.create_h05_event(
@@ -1302,7 +1467,8 @@ class RTUClient:
         try:
             self._send_periodic_inner(sent_packets)
         except Exception as e:
-            self.logger.error(f"Send periodic error: {e}")
+            import traceback
+            self.logger.error(f"Send periodic error: {e}\n{traceback.format_exc()}")
         finally:
             # Ensure _batch_receiving is always cleared
             if sent_packets:
@@ -1390,6 +1556,21 @@ class RTUClient:
                     sent_packets.append((seq, packet))
             time.sleep(DEVICE_SEND_INTERVAL)
 
+        # ── Phase 1.5: (removed) periodic H05 RTU Info ───────────────
+        # Previously this block sent H05 body_type=1 every 60 seconds so the
+        # server DB stayed up-to-date without a manual CTRL_RTU_INFO request.
+        # Removed at user request — RTU Info is now ONLY sent in response to
+        # an explicit H03 ctrl_type=2 (CTRL_RTU_INFO) request from the server.
+        now = time.time()
+
+        # ── Phase 1.6: (removed) periodic H05 Inverter Model Info ───────
+        # Previously sent every 10 minutes per inverter so the dashboard
+        # had model metadata without the user clicking Model Info. This
+        # caused 11 inverter_model events at startup to clutter the
+        # Control Response Log. Removed at user request — Model Info is
+        # now emitted ONLY in response to an explicit H03 ctrl_type=11
+        # (CTRL_INV_MODEL) request from the server/dashboard.
+
         # ── Phase 2: Backup packets (recovery mode only) ────────────────────
         if self.recovery_mode:
             for dev_type, dev_num in self._get_all_device_keys():
@@ -1428,14 +1609,21 @@ class RTUClient:
     # =========================================================================
 
     def _heartbeat_loop(self):
-        """Send H05 heartbeat every HEARTBEAT_INTERVAL seconds"""
+        """Send H05 heartbeat every HEARTBEAT_INTERVAL seconds.
+
+        Uses H05 body_type=2 (RTU_EVENT) with event name 'HEARTBEAT'
+        instead of the legacy empty body_type=0 ping. The server classifies
+        body_type=2 'HEARTBEAT' events into _LOG_ONLY_EVENTS so they do not
+        spam the dashboard Response Log but still serve as NAT keep-alive
+        and liveness signal.
+        """
         time.sleep(10)  # Initial delay
         while self.running:
             try:
                 now = time.time()
                 if now - self.last_heartbeat_time >= HEARTBEAT_INTERVAL:
-                    pkt, seq = self.protocol.create_h05_heartbeat()
-                    self.logger.debug(f"H05 HB TX (seq={seq})")
+                    pkt, seq = self.protocol.create_h05_event('HEARTBEAT')
+                    self.logger.debug(f"H05 HB TX (seq={seq}) body_type=2 'HEARTBEAT'")
                     self._send_to_servers(pkt, save_on_fail=False)
                     self.last_heartbeat_time = now
             except Exception as e:
@@ -1542,7 +1730,19 @@ def main():
                         help='Run in simulation mode')
     parser.add_argument('-d', '--debug', action='store_true',
                         help='Enable debug logging')
+    parser.add_argument('--modbus-tcp', type=str, default=None,
+                        help='Test mode: connect to Modbus TCP simulator (HOST:PORT)')
     args = parser.parse_args()
+
+    # Parse --modbus-tcp HOST:PORT
+    tcp_host, tcp_port = None, None
+    if args.modbus_tcp:
+        try:
+            tcp_host, p = args.modbus_tcp.split(':')
+            tcp_port = int(p)
+        except ValueError:
+            print(f"Invalid --modbus-tcp format: {args.modbus_tcp} (expected HOST:PORT)")
+            sys.exit(1)
 
     log_level = logging.DEBUG if args.debug else logging.INFO
 
@@ -1577,7 +1777,8 @@ def main():
 
     # Load device config from rs485_ch1.ini
     rs485_cfg_path = os.path.join(config_dir, 'rs485_ch1.ini')
-    client = RTUClient(config=config, simulation_mode=args.simulation)
+    client = RTUClient(config=config, simulation_mode=args.simulation,
+                       tcp_host=tcp_host, tcp_port=tcp_port)
 
     if os.path.exists(rs485_cfg_path):
         dev_cfg = _configparser.ConfigParser()

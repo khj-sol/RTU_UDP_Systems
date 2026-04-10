@@ -77,24 +77,29 @@ class ProtocolHandler:
             device_model, body_type, backup_data, sequence
         )
 
+        def _u16(v): return max(0, min(65535, int(v)))
+        def _s16(v): return max(-32768, min(32767, int(v)))
+        def _u32(v): return max(0, min(0xFFFFFFFF, int(v)))
+        def _u64(v): return max(0, int(v))
+
         basic = struct.pack(INV_BASIC_FORMAT,
-            int(data.get('pv_voltage', 0)),
-            int(data.get('pv_current', 0)),
-            int(data.get('pv_power', 0)),
-            int(data.get('r_voltage', 0)),
-            int(data.get('s_voltage', 0)),
-            int(data.get('t_voltage', 0)),
-            int(data.get('r_current', 0)),
-            int(data.get('s_current', 0)),
-            int(data.get('t_current', 0)),
-            int(data.get('ac_power', 0)),
-            int(data.get('power_factor', 1000)),
-            int(data.get('frequency', 600)),
-            int(data.get('cumulative_energy', 0)),
-            int(data.get('status', INV_STATUS_ON_GRID)),
-            int(data.get('alarm1', 0)),
-            int(data.get('alarm2', 0)),
-            int(data.get('alarm3', 0))
+            _u16(data.get('pv_voltage', 0)),
+            _u16(data.get('pv_current', 0)),
+            _u32(data.get('pv_power', 0)),
+            _u16(data.get('r_voltage', 0)),
+            _u16(data.get('s_voltage', 0)),
+            _u16(data.get('t_voltage', 0)),
+            _u16(data.get('r_current', 0)),
+            _u16(data.get('s_current', 0)),
+            _u16(data.get('t_current', 0)),
+            _u32(data.get('ac_power', 0)),
+            _s16(data.get('power_factor', 1000)),
+            _u16(data.get('frequency', 600)),
+            _u64(data.get('cumulative_energy', 0)),
+            _u16(data.get('status', INV_STATUS_ON_GRID)),
+            _u16(data.get('alarm1', 0)),
+            _u16(data.get('alarm2', 0)),
+            _u16(data.get('alarm3', 0))
         )
 
         body = basic
@@ -112,7 +117,12 @@ class ProtocolHandler:
             strings = data.get('strings', [])[:255]  # Max 255 strings (1-byte count)
             str_body = struct.pack('>B', len(strings))
             for s in strings:
-                str_body += struct.pack('>H', int(s / 10))
+                # s가 dict이면 raw_current/current 키에서 값 추출
+                if isinstance(s, dict):
+                    s_val = s.get('raw_current', s.get('current', 0))
+                else:
+                    s_val = s
+                str_body += struct.pack('>H', _u16(int(s_val) // 10))
             body += str_body
 
         return header + body, sequence
@@ -235,12 +245,46 @@ class ProtocolHandler:
             return None
         try:
             v = struct.unpack(H03_FORMAT, data[:H03_SIZE])
-            return {
+            result = {
                 'version': v[0], 'sequence': v[1], 'control_type': v[2],
                 'device_type': v[3], 'device_number': v[4], 'control_value': v[5]
             }
+            # Extended body for Modbus test (ctrl_type 20/21)
+            if v[2] in (CTRL_MODBUS_READ, CTRL_MODBUS_WRITE):
+                ext = data[H03_SIZE:]
+                if len(ext) >= 6:
+                    fc, slave_id, addr, count = struct.unpack('>BBHH', ext[:6])
+                    result['modbus_fc'] = fc
+                    result['modbus_slave_id'] = slave_id
+                    result['modbus_address'] = addr
+                    result['modbus_count'] = count
+                    # For write: extract values after the 6-byte extended header
+                    if v[2] == CTRL_MODBUS_WRITE and len(ext) >= 6 + count * 2:
+                        values = list(struct.unpack(f'>{count}H', ext[6:6 + count * 2]))
+                        result['modbus_values'] = values
+            return result
         except Exception:
             return None
+
+    def create_h05_modbus_result(self, device_number, fc, slave_id,
+                                 address, result_code, registers=None,
+                                 sequence=None):
+        """Create H05 body_type=18 for Modbus test result.
+
+        result_code: 0=OK, -1=TIMEOUT, -2=ERROR
+        registers: list of U16 values (for read results)
+        """
+        header = self.create_header(
+            VERSION_H05, DEVICE_INVERTER, device_number, 0,
+            BODY_TYPE_MODBUS_RESULT, 0, sequence
+        )
+        reg_count = len(registers) if registers else 0
+        body = struct.pack('>BBHbH', fc, slave_id, address,
+                           result_code, reg_count)
+        if registers:
+            body += struct.pack(f'>{reg_count}H', *registers)
+        seq = struct.unpack('>xH', header[:3])[0]
+        return header + body, seq
 
     # =========================================================================
     # H04 Control Response

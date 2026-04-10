@@ -100,7 +100,9 @@ def _alarm_score(reg: RegisterRow) -> int:
     """알람 레지스터 우선순위 — 상태정의(Appendix 비트필드)가 있는 레지스터 우선
     PDF 정의 순서대로 alarm1/2/3 매칭. 같은 score면 주소순.
     """
-    defn_lower = reg.definition.lower()
+    # 정규화: 소문자 + underscore→space (enrichment 후 FAULT_ALARM_TIME_YEAR 같은
+    # 형태도 'fault alarm time year' 로 매칭되도록)
+    defn_lower = (reg.definition or '').lower().replace('_', ' ')
     addr = reg.address if isinstance(reg.address, int) else 0
 
     # ── 제외 (score 99) ──
@@ -110,13 +112,17 @@ def _alarm_score(reg: RegisterRow) -> int:
     # Goodwe는 주소 500+ 유효, EKOS SPD는 0x000B=11
     # Sungrow Appendix: 주소 0~600 범위의 fault code 값
     if 0 < addr < 2000 and not any(k in defn_lower for k in [
-            'error_code', 'error code', 'error message',
+            'error code', 'error message',
             'fault code', 'faultcode', 'fault/alarm code', 'alarm code',
             'fault status', 'hw fault', 'sw fault',
             'dsp alarm', 'dsp error', 'arm alarm',
             'warning code', 'warningcode',
             'ground fault', 'leak fault', 'oth fault',
-            'internal error', 'arc fault']):
+            'internal error', 'arc fault',
+            # CPS-Comm: Fault0/1/2/3/4/PFault/Warning Alarm Register (저주소)
+            'alarm register', 'fault register',
+            'pfault', 'fault0', 'fault1', 'fault2', 'fault3', 'fault4',
+            'fault word', 'fault flag']):
         return 99
     # Work State 값 테이블 항목 (레지스터가 아닌 상태 값)
     if any(k in defn_lower for k in ['communicate fault', 'alarm run', 'derating run',
@@ -125,22 +131,48 @@ def _alarm_score(reg: RegisterRow) -> int:
        (defn_lower.strip() in ('fault', 'stop', 'run', 'standby') and addr < 2000):
         return 99
     # Fault/Alarm time — 시간 정보, 알람 레지스터 아님
-    if any(k in defn_lower for k in ['fault/alarm time', 'alarm time', 'fault time']):
+    # underscore 정규화 덕분에 FAULT_ALARM_TIME_YEAR 도 매칭됨
+    if any(k in defn_lower for k in ['fault/alarm time', 'alarm time', 'fault time',
+                                      'fault alarm time']):
+        return 99
+    # External/Power/Monitoring/Auxiliary 알람 — 인버터 자체 fault 가 아님 (Huawei)
+    # [Remotesignal]Alarm 1/2/3 만 가져가도록 차단
+    if any(k in defn_lower for k in ['external] poweralarm', '[external]poweralarm',
+                                      'external poweralarm', 'external power alarm',
+                                      'monitoringalarm', 'monitoring alarm',
+                                      'monitoralarm', 'monitor alarm',
+                                      'optimizer fault', 'optimizerfault',
+                                      'collector fault', 'collectorfault',
+                                      'numberof', 'number of critical', 'number of major',
+                                      'number of minor', 'number of warning',
+                                      'alarm clearance', 'historicalalarm',
+                                      'latest active alarm', 'historical alarm']):
         return 99
 
     # ── 우선순위 ──
     # 0: 명확한 에러/폴트 코드 (정의 테이블 있음)
-    if any(k in defn_lower for k in ['error_code', 'error code', 'fault code', 'faultcode',
+    if any(k in defn_lower for k in ['error code', 'fault code', 'faultcode',
                                       'fault/alarm code', 'alarm code',
                                       'sw fault', 'dsp error', 'dsp alarm',
-                                      'error message', 'warningcode', 'warning code']):
+                                      'error message', 'warningcode', 'warning code',
+                                      'inverter fault code', 'inverter warning code']):
         return 0
-    # 1: HW Fault / PID / 번호 붙은 Alarm (Alarm 1, Alarm 2 — Huawei)
+    # 1: 번호 붙은 [Remotesignal]Alarm N — Huawei
+    # (외부/모니터링 alarm 은 위에서 99 로 차단됨)
+    if 'remotesignal]alarm' in defn_lower or '[remotesignal]alarm' in defn_lower:
+        return 1
+    # 1: Fault0/1/2 Alarm Register — CPS-Comm
+    import re as _re
+    if _re.search(r'\bfault\d\b.*alarm.*register', defn_lower) or \
+       _re.search(r'pfault.*alarm.*register', defn_lower) or \
+       _re.search(r'warning.*alarm.*register', defn_lower):
+        return 1
+    # 1: HW Fault / PID 알람
     if any(k in defn_lower for k in ['hw fault', 'hardware fault']):
         return 1
     if 'pid' in defn_lower and 'alarm' in defn_lower:
         return 1
-    import re as _re
+    # 1: 일반 번호 붙은 Alarm (Alarm 1, Alarm 2)
     if _re.search(r'\balarm\s*\d', defn_lower):
         return 1
     # 2: Grid Status / ARM alarm
@@ -158,6 +190,7 @@ def distribute_alarms(alarm_regs: List[RegisterRow]) -> Dict[str, List[RegisterR
     §2-2: 알람 레지스터를 H01 alarm1/2/3에 배분
     V2: score 99(제외) 레지스터는 alarm 슬롯에 넣지 않음 → N/A
     """
+    import re as _re
     # 우선순위 점수로 정렬 (같으면 주소순)
     scored = sorted(alarm_regs,
                     key=lambda r: (_alarm_score(r),
@@ -165,13 +198,96 @@ def distribute_alarms(alarm_regs: List[RegisterRow]) -> Dict[str, List[RegisterR
     # score 99 제외 (Appendix 코드값, Work State 값 등)
     valid = [r for r in scored if _alarm_score(r) < 99]
     result = {'alarm1': [], 'alarm2': [], 'alarm3': [], 'dropped': []}
-
     slots = ['alarm1', 'alarm2', 'alarm3']
+
+    if not valid:
+        return result
+
+    # ── 1) 번호 붙은 시퀀스 그룹 식별 ──
+    # 시퀀스 우선순위 (높을수록 선호):
+    #   1. Huawei [Remotesignal]Alarm 1/2/3
+    #   2. CPS-Comm FaultN Alarm Register
+    #   3. Growatt Inverter fault code + Inverter Warning code (+ System fault word 0 보충)
+    #   4. Growatt System fault word 0/1/2
+    SEQ_PRIORITY = ['remotesignal_alarm', 'faultN_alarm_register',
+                    'inverter_code', 'system_fault_word']
+
+    def _seq_key(reg):
+        d = (reg.definition or '').lower().replace('_', ' ')
+        m = _re.search(r'remotesignal\]?\s*alarm\s*(\d+)', d)
+        if m:
+            return ('remotesignal_alarm', int(m.group(1)))
+        m = _re.search(r'\bfault(\d)\b.*alarm.*register', d)
+        if m:
+            return ('faultN_alarm_register', int(m.group(1)))
+        if 'inverter fault code' in d:
+            return ('inverter_code', 1)
+        if 'inverter warning code' in d:
+            return ('inverter_code', 2)
+        m = _re.search(r'system\s*fault\s*word\s*(\d+)', d)
+        if m:
+            return ('system_fault_word', int(m.group(1)))
+        return None
+
+    seq_groups = {}
+    for r in valid:
+        sk = _seq_key(r)
+        if sk:
+            key, idx = sk
+            seq_groups.setdefault(key, []).append((idx, r))
+
+    chosen_seq = None
+    chosen_key = None
+    for key in SEQ_PRIORITY:
+        if key in seq_groups:
+            items = sorted(seq_groups[key], key=lambda t: t[0])
+            chosen_seq = [t[1] for t in items]
+            chosen_key = key
+            break
+
+    if chosen_seq:
+        # 시퀀스 채우기
+        for i in range(min(3, len(chosen_seq))):
+            result[slots[i]].append(chosen_seq[i])
+        # 부족하면 보충 — inverter_code(2개)는 system_fault_word 첫 항목으로 alarm3 보충
+        if len(chosen_seq) < 3 and chosen_key == 'inverter_code':
+            sfw = sorted(seq_groups.get('system_fault_word', []), key=lambda t: t[0])
+            if sfw:
+                result['alarm3'].append(sfw[0][1])
+        # 그래도 부족하면 alarm1 으로 alias
+        for s in slots:
+            if not result[s] and result['alarm1']:
+                result[s].append(result['alarm1'][0])
+        used = {id(r) for r in chosen_seq}
+        for r in valid:
+            if id(r) not in used:
+                result['dropped'].append(r)
+        return result
+
+    # ── 2) 시퀀스 없음 — score 0 우선 + alias ──
+    score0 = [r for r in valid if _alarm_score(r) == 0]
+    if score0:
+        for i in range(3):
+            if i < len(score0):
+                result[slots[i]].append(score0[i])
+            else:
+                # 부족 시 alarm1 으로 alias
+                result[slots[i]].append(score0[0])
+        for r in valid:
+            if r not in score0[:3]:
+                result['dropped'].append(r)
+        return result
+
+    # ── 3) score 0 도 없음 — 일반 정렬, 부족 시 alias ──
     for i, reg in enumerate(valid):
         if i < 3:
             result[slots[i]].append(reg)
         else:
             result['dropped'].append(reg)
+    if result['alarm1'] and not result['alarm2']:
+        result['alarm2'].append(result['alarm1'][0])
+    if result['alarm1'] and not result['alarm3']:
+        result['alarm3'].append(result['alarm1'][0])
 
     return result
 

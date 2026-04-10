@@ -130,23 +130,11 @@ sys.path.append(libdir)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import importlib as _importlib
-from common.Solarize_PV_50kw_registers import RegisterMap, InverterMode, SCALE, registers_to_u32
+from common.Solarize_50_3_registers import RegisterMap, InverterMode, SCALE, registers_to_u32
 
-# --- Solarize_PV_50kw_registers 모듈 참조 (fallback 용) ---
-import common.Solarize_PV_50kw_registers as _default_reg_module
-from common.Kstar_PV_60kw_registers import (
-    RegisterMap as KstarRegisters, KstarSystemStatus, KstarStatusConverter, SCALE as KSTAR_SCALE,
-    calc_pv_total_power, calc_ac_total_power, get_mppt_data,
-    get_string_currents, get_cumulative_energy_wh,
-)
-from common.Huawei_PV_50kw_registers import (
-    RegisterMap as HuaweiRegisters, HuaweiStatusConverter, SCALE as HUAWEI_SCALE,
-    get_pv_string_data, get_mppt_from_strings,
-    get_string_currents as huawei_get_string_currents,
-    get_cumulative_energy_wh as huawei_get_cumulative_energy_wh,
-    registers_to_s32 as huawei_registers_to_s32,
-    s16 as huawei_s16,
-)
+# --- Solarize_50_3_registers 모듈 참조 (fallback 용) ---
+import common.Solarize_50_3_registers as _default_reg_module
+# Kstar/Huawei 전용 import 제거됨 — 범용 핸들러가 동적 로딩으로 처리
 from common.REF_relay_registers import KDU300RegisterMap, registers_to_float, H01_RELAY_FIELD_MAP
 from common.REF_weather_registers import (
     SEM5046RegisterMap,
@@ -187,10 +175,36 @@ except (ImportError, FileNotFoundError, OSError, Exception) as e:
 
 # Check for pymodbus (PC or standard serial)
 try:
-    from pymodbus.client import ModbusSerialClient
+    from pymodbus.client import ModbusSerialClient, ModbusTcpClient
     PYMODBUS_AVAILABLE = True
 except ImportError:
     PYMODBUS_AVAILABLE = False
+
+# pymodbus 2.x: slave=, 3.x: device_id=, older variants: address=
+# 첫 호출 시 detection 후 _PYMODBUS_KW에 캐시
+_PYMODBUS_KW = None  # 'slave' | 'device_id'
+
+
+def _pymodbus_call(method, addr, count, slave_id):
+    """pymodbus read_holding_registers/read_input_registers 호환 래퍼.
+    버전별 keyword 차이(slave/device_id)를 한 번만 detect 후 캐시."""
+    global _PYMODBUS_KW
+    if _PYMODBUS_KW == 'slave':
+        return method(addr, count=count, slave=slave_id)
+    if _PYMODBUS_KW == 'device_id':
+        return method(addr, count=count, device_id=slave_id)
+    # First call: detect
+    try:
+        result = method(addr, count=count, device_id=slave_id)
+        _PYMODBUS_KW = 'device_id'
+        return result
+    except TypeError:
+        try:
+            result = method(addr, count=count, slave=slave_id)
+            _PYMODBUS_KW = 'slave'
+            return result
+        except TypeError:
+            return method(address=addr, count=count, slave=slave_id)
 
 
 # =========================================================================
@@ -279,6 +293,34 @@ def _normalize_scale(raw_scale: dict) -> dict:
     return normalized
 
 
+# ── H01 Converter Functions ──────────────────────────────────────────────
+# raw register value * SCALE → H01 정수 변환
+# float32 타입은 이미 물리값이므로 _H01_FLOAT_CONVERTERS 사용
+_H01_CONVERTERS = {
+    'voltage_to_V':      lambda raw, sc: int(raw * sc.get('voltage', 0.1)),
+    'current_to_01A':    lambda raw, sc: int(raw * sc.get('current', 0.01) * 10),
+    'frequency_to_01Hz': lambda raw, sc: int(raw * sc.get('frequency', 0.01) * 10),
+    'power_to_W':        lambda raw, sc: int(raw * sc.get('power', 0.1)),
+    'pf_raw':            lambda raw, sc: int(raw),
+    'energy_kwh_to_Wh':  lambda raw, sc: int(raw * sc.get('energy_to_kwh', 1.0) * 1000),
+    'raw':               lambda raw, sc: int(raw),
+}
+_H01_FLOAT_CONVERTERS = {
+    'voltage_to_V':      lambda v: int(v),
+    'current_to_01A':    lambda v: int(v * 10),
+    'frequency_to_01Hz': lambda v: int(v * 10),
+    'power_to_W':        lambda v: int(v),
+    'pf_raw':            lambda v: int(v * 1000),
+    # FLOAT32 cumulative energy is already stored in kWh — convert to Wh
+    'energy_kwh_to_Wh':  lambda v: int(v * 1000),
+    'raw':               lambda v: int(v),
+}
+_H01_DEFAULTS = {
+    'frequency': 600, 'power_factor': 1000,
+    'alarm1': 0, 'alarm2': 0, 'alarm3': 0,
+}
+
+
 def _init_reg_attrs(handler, reg_module):
     """핸들러 인스턴스에 레지스터 모듈 속성을 바인딩하는 공통 헬퍼.
 
@@ -292,7 +334,17 @@ def _init_reg_attrs(handler, reg_module):
     handler.scale = _normalize_scale(getattr(mod, 'SCALE', SCALE))
     handler.InvMode = getattr(mod, 'InverterMode', InverterMode)
     handler.reg_to_u32 = getattr(mod, 'registers_to_u32', registers_to_u32)
-    handler.reg_to_float32 = getattr(mod, 'registers_to_float32', None)
+
+    def _default_registers_to_float32(lo, hi):
+        """Universal IEEE-754 float32 decoder fallback when the register
+        module doesn't supply one. Words are passed as (lo, hi)."""
+        import struct as _s
+        try:
+            return _s.unpack('>f', _s.pack('>HH', int(hi) & 0xFFFF, int(lo) & 0xFFFF))[0]
+        except (TypeError, ValueError, _s.error):
+            return 0.0
+
+    handler.reg_to_float32 = getattr(mod, 'registers_to_float32', None) or _default_registers_to_float32
     handler.reg_data_types = getattr(mod, 'DATA_TYPES', None)
     # Find StatusConverter: scan module for any class ending with 'StatusConverter'.
     # This handles both {Brand}StatusConverter and {Brand}{N}StatusConverter patterns
@@ -307,22 +359,28 @@ def _init_reg_attrs(handler, reg_module):
     # DATA_PARSER / READ_BLOCKS — Stage 3 생성 파일에 포함된 경우 바인딩
     handler.data_parser = getattr(mod, 'DATA_PARSER', None)
     handler.read_blocks = getattr(mod, 'READ_BLOCKS', None)
+    # use_block_read: READ_BLOCKS + DATA_PARSER가 tuple 형식 (blk_idx, offset, dtype, scale)일 때만
+    # Stage3가 생성하는 DATA_PARSER는 문자열 형식 → block read 미사용
+    _dp = handler.data_parser
+    _dp_is_tuple = (_dp and isinstance(next(iter(_dp.values()), None), (tuple, list)))
+    handler.use_block_read = bool(handler.read_blocks and _dp_is_tuple)
 
-    # Detect non-Solarize register layout: if AC_POWER address differs from
-    # the hardcoded Solarize default (0x1037), use dynamic register reading.
-    rm = handler.RegMap
-    solarize_ac_power = 0x1037
+    # U32 워드 순서 + H01 필드 매핑 + FC 코드
+    handler.u32_word_order = getattr(mod, 'U32_WORD_ORDER', 'LH')
+    handler.h01_field_map = getattr(mod, 'H01_FIELD_MAP', None)
+    handler.rtu_fc_code = getattr(mod, 'RTU_FC_CODE', 3)
+
+    # H01_FIELD_MAP이 있으면 범용 dynamic read 사용 (모든 프로토콜 통합)
     handler.use_dynamic_read = (
         not handler.use_block_read
-        and handler.reg_data_types is not None
-        and hasattr(rm, 'AC_POWER')
-        and rm.AC_POWER != solarize_ac_power
+        and handler.h01_field_map is not None
     )
     _log = logging.getLogger('modbus_handler')
+    _rm = handler.RegMap
     _log.info(f"_init_reg_attrs: slave={getattr(handler, 'slave_id', '?')} "
               f"block={handler.use_block_read} "
-              f"data_types={handler.reg_data_types is not None} "
-              f"AC_POWER={hex(rm.AC_POWER) if hasattr(rm, 'AC_POWER') else 'N/A'} "
+              f"h01_map={handler.h01_field_map is not None} "
+              f"u32_order={handler.u32_word_order} "
               f"dynamic={handler.use_dynamic_read}")
 
 
@@ -494,35 +552,90 @@ class ModbusHandlerHAT:
         """Read all READ_BLOCKS and return {addr: value} cache.
 
         Only caches registers that were successfully read.
+        Per-block 예외는 무시 (개별 read fallback 가능).
         """
         cache = {}
         for blk in read_blocks:
-            start = blk['start']
-            count = blk['count']
-            fc = blk.get('fc', 3)
-            result = self._read_block(start, count, fc)
-            if result:
-                for i, v in enumerate(result):
-                    cache[start + i] = v
+            try:
+                start = blk['start']
+                count = blk['count']
+                fc = blk.get('fc', 3)
+                # 주소 범위 검증
+                if start < 0 or start + count > 65536:
+                    continue
+                result = self._read_block(start, count, fc)
+                if result:
+                    for i, v in enumerate(result):
+                        cache[start + i] = v
+            except Exception as e:
+                self.logger.debug(f"_build_reg_cache block skip: {e}")
+                continue
         return cache
+
+    # Aliases for which DATA_TYPES is sometimes missing in MM v2 generated files.
+    _DTYPE_ALIAS_FALLBACKS = {
+        'R_PHASE_VOLTAGE': ('L1_VOLTAGE',), 'R_VOLTAGE': ('L1_VOLTAGE',),
+        'S_PHASE_VOLTAGE': ('L2_VOLTAGE',), 'S_VOLTAGE': ('L2_VOLTAGE',),
+        'T_PHASE_VOLTAGE': ('L3_VOLTAGE', 'L2_VOLTAGE'),
+        'T_VOLTAGE': ('L3_VOLTAGE', 'L2_VOLTAGE'),
+        'R_PHASE_CURRENT': ('L1_CURRENT',), 'R_CURRENT': ('L1_CURRENT',),
+        'S_PHASE_CURRENT': ('L2_CURRENT',), 'S_CURRENT': ('L2_CURRENT',),
+        'T_PHASE_CURRENT': ('L3_CURRENT', 'L2_CURRENT'),
+        'T_CURRENT': ('L3_CURRENT', 'L2_CURRENT'),
+        'TOTAL_ENERGY': ('CUMULATIVE_ENERGY',),
+        'CUMULATIVE_ENERGY_LOW': ('CUMULATIVE_ENERGY',),
+    }
+
+    def _resolve_dtype(self, field_name):
+        """Look up the data type for a register attribute, walking through
+        aliases when DATA_TYPES is missing or None for the requested field.
+
+        Returns lowercase dtype string ('u16', 'u32', 's16', 's32',
+        'float32') — never None — so callers can safely call .lower().
+        """
+        dtypes = self.reg_data_types or {}
+        dt = dtypes.get(field_name)
+        if not dt:
+            for alt in self._DTYPE_ALIAS_FALLBACKS.get(field_name, ()):
+                dt = dtypes.get(alt)
+                if dt:
+                    break
+        return (dt or 'u16').lower()
 
     def _get_typed_from_cache(self, field_name, addr, cache):
         """Extract a typed value from the register cache.
 
         Returns converted Python value (int or float), or None if not cached.
         Handles FLOAT32/U32/S32/S16/U16 via DATA_TYPES.
+        U32/S32는 u32_word_order에 따라 워드 순서 결정.
         """
-        dtype = (self.reg_data_types or {}).get(field_name, 'u16').lower()
+        dtype = self._resolve_dtype(field_name)
         if dtype == 'float32':
-            lo = cache.get(addr)
-            hi = cache.get(addr + 1)
-            if lo is not None and hi is not None and self.reg_to_float32:
-                return self.reg_to_float32(lo, hi)
+            w0 = cache.get(addr)
+            w1 = cache.get(addr + 1)
+            if (w0 is None or w1 is None):
+                direct = self._read_reg(addr, 2)
+                if direct and len(direct) >= 2:
+                    w0, w1 = direct[0], direct[1]
+            if w0 is not None and w1 is not None and self.reg_to_float32:
+                if getattr(self, 'u32_word_order', 'LH') == 'HL':
+                    return self.reg_to_float32(w1, w0)
+                return self.reg_to_float32(w0, w1)
             return None
         elif dtype in ('u32', 's32'):
-            lo = cache.get(addr)
-            hi = cache.get(addr + 1)
-            if lo is not None and hi is not None:
+            w0 = cache.get(addr)
+            w1 = cache.get(addr + 1)
+            # Cache may not cover addr+1 when the READ_BLOCK ends exactly on
+            # the U32's low word — fall back to a direct 2-register read.
+            if w0 is None or w1 is None:
+                direct = self._read_reg(addr, 2)
+                if direct and len(direct) >= 2:
+                    w0, w1 = direct[0], direct[1]
+            if w0 is not None and w1 is not None:
+                if getattr(self, 'u32_word_order', 'LH') == 'HL':
+                    lo, hi = w1, w0
+                else:
+                    lo, hi = w0, w1
                 if dtype == 'u32':
                     return self.reg_to_u32(lo, hi)
                 else:
@@ -542,22 +655,31 @@ class ModbusHandlerHAT:
 
         Returns the converted Python value (int or float), or None on failure.
         Uses reg_data_types to determine Float32/U32/S32/S16/U16 handling.
+        U32/S32는 u32_word_order에 따라 워드 순서 결정.
         """
-        dtype = (self.reg_data_types or {}).get(field_name, 'u16')
+        dtype = self._resolve_dtype(field_name)
 
         if dtype == 'float32':
             result = self._read_reg(addr, 2)
             if result and len(result) >= 2:
-                return self.reg_to_float32(result[0], result[1])
+                w0, w1 = result[0], result[1]
+                if getattr(self, 'u32_word_order', 'LH') == 'HL':
+                    w0, w1 = w1, w0
+                return self.reg_to_float32(w0, w1)
             return None
         elif dtype in ('u32', 's32'):
             result = self._read_reg(addr, 2)
             if result and len(result) >= 2:
-                if dtype == 'u32':
-                    return self.reg_to_u32(result[0], result[1])
+                w0, w1 = result[0], result[1]
+                if getattr(self, 'u32_word_order', 'LH') == 'HL':
+                    lo, hi = w1, w0
                 else:
-                    from common.Solarize_PV_50kw_registers import registers_to_s32 as _s32
-                    return _s32(result[0], result[1])
+                    lo, hi = w0, w1
+                if dtype == 'u32':
+                    return self.reg_to_u32(lo, hi)
+                else:
+                    val = self.reg_to_u32(lo, hi)
+                    return val - 0x100000000 if val >= 0x80000000 else val
             return None
         elif dtype == 's16':
             result = self._read_reg(addr, 1)
@@ -572,18 +694,17 @@ class ModbusHandlerHAT:
             return None
 
     def _read_inverter_data_dynamic(self):
-        """Generic register-map-driven inverter data reading.
+        """H01_FIELD_MAP 기반 범용 인버터 데이터 읽기.
 
-        Used for non-Solarize protocols (EKOS, Sungrow, etc.) where register
-        addresses differ from the hardcoded Solarize layout.
+        모든 프로토콜 (Solarize, Huawei, Kstar 등)을 RegisterMap + H01_FIELD_MAP +
+        DATA_TYPES + SCALE + U32_WORD_ORDER로 통합 처리.
 
         Strategy:
-          1. If reg_module has READ_BLOCKS → batch-read all monitoring blocks once,
-             build {addr: value} cache, then parse every field from cache.
-          2. Otherwise fall back to per-field reads (legacy behaviour).
-
-        All RegisterMap attribute accesses use getattr(..., None) to prevent
-        AttributeError from crashing the whole read cycle.
+          1. READ_BLOCKS → batch cache 구축 (한 번의 일괄 읽기)
+          2. H01_FIELD_MAP 순회 → 스칼라 필드 변환
+          3. MPPT{N}_VOLTAGE/CURRENT 패턴 → mppt 배열
+          4. STRING{N}_CURRENT 패턴 → strings 배열
+          5. StatusConverter → mode/status 변환
 
         Returns:
             dict compatible with H01 inverter body, or None on failure.
@@ -596,58 +717,62 @@ class ModbusHandlerHAT:
             rm = self.RegMap
             scale = self.scale
             dtypes = self.reg_data_types or {}
+            h01_map = self.h01_field_map or {}
 
             # ── helper: read one field by address ──────────────────────────
             def _read_field(field, addr, cache):
-                """Return typed value from cache (batch) or via individual read."""
                 if cache is not None:
                     return self._get_typed_from_cache(field, addr, cache)
                 return self._read_typed_value(field, addr)
 
-            # ── batch read via READ_BLOCKS if available ─────────────────────
+            def _convert(val, conv_key, field_name):
+                """raw register value → H01 정수."""
+                if val is None:
+                    return _H01_DEFAULTS.get(field_name, 0)
+                dtype = self._resolve_dtype(field_name)
+                if dtype == 'float32':
+                    fn = _H01_FLOAT_CONVERTERS.get(conv_key, _H01_FLOAT_CONVERTERS['raw'])
+                    return fn(val)
+                fn = _H01_CONVERTERS.get(conv_key, _H01_CONVERTERS['raw'])
+                return fn(val, scale)
+
+            # ── batch read via READ_BLOCKS ──────────────────────────────────
             read_blocks = getattr(self.reg_module, 'READ_BLOCKS', None)
             cache = self._build_reg_cache(read_blocks) if read_blocks else None
-            if cache is not None:
-                self.logger.debug(f"[Dynamic] Batch cache: {len(cache)} regs from "
-                                  f"{len(read_blocks)} blocks")
 
             data = {}
 
-            # ── AC Phase Voltages → integer V ──────────────────────────────
-            for ph, field in [('r', 'R_PHASE_VOLTAGE'), ('s', 'S_PHASE_VOLTAGE'),
-                               ('t', 'T_PHASE_VOLTAGE')]:
-                addr = getattr(rm, field, None)
-                val = _read_field(field, addr, cache) if addr is not None else None
-                if val is not None:
-                    dtype = dtypes.get(field, 'u16').lower()
-                    data[f'{ph}_voltage'] = (int(val) if dtype == 'float32'
-                                             else int(val * scale.get('voltage', 0.1)))
-                else:
-                    data[f'{ph}_voltage'] = 0
+            # ── H01_FIELD_MAP 스칼라 필드 처리 ──────────────────────────────
+            # Note: H01_FIELD_MAP keys may have trailing spaces (Excel padding artifact);
+            # strip them so create_h01_inverter() can look them up correctly.
+            for h01_key, (reg_attr, conv_key) in h01_map.items():
+                key = h01_key.strip()
+                addr = getattr(rm, reg_attr, None)
+                if addr is None:
+                    data[key] = _H01_DEFAULTS.get(key, 0)
+                    continue
+                val = _read_field(reg_attr, addr, cache)
+                data[key] = _convert(val, conv_key, reg_attr)
 
-            # ── AC Phase Currents → integer 0.1A ───────────────────────────
-            for ph, field in [('r', 'R_PHASE_CURRENT'), ('s', 'S_PHASE_CURRENT'),
-                               ('t', 'T_PHASE_CURRENT')]:
-                addr = getattr(rm, field, None)
-                val = _read_field(field, addr, cache) if addr is not None else None
-                if val is not None:
-                    dtype = dtypes.get(field, 'u16').lower()
-                    data[f'{ph}_current'] = (int(val * 10) if dtype == 'float32'
-                                             else int(val * scale.get('current', 0.01) * 10))
-                else:
-                    data[f'{ph}_current'] = 0
-
-            # ── Frequency → integer 0.1Hz ───────────────────────────────────
-            addr = getattr(rm, 'FREQUENCY', None)
-            val = _read_field('FREQUENCY', addr, cache) if addr is not None else None
-            if val is not None:
-                dtype = dtypes.get('FREQUENCY', 'u16').lower()
-                data['frequency'] = (int(val * 10) if dtype == 'float32'
-                                     else int(val * scale.get('frequency', 0.01) * 10))
+            # ── Inverter Mode / Status 변환 ─────────────────────────────────
+            raw_mode = data.get('mode', 0)
+            if self.status_converter and hasattr(self.status_converter, 'to_inverter_mode'):
+                mode = self.status_converter.to_inverter_mode(raw_mode)
             else:
-                data['frequency'] = 600
+                mode = raw_mode
+            data['mode'] = mode
+            if mode == self.InvMode.ON_GRID:
+                data['status'] = INV_STATUS_ON_GRID
+            elif mode in (getattr(self.InvMode, 'STANDBY', 1),
+                          getattr(self.InvMode, 'INITIAL', 0),
+                          getattr(self.InvMode, 'SHUTDOWN', 9)):
+                data['status'] = INV_STATUS_STANDBY
+            elif mode == getattr(self.InvMode, 'FAULT', 5):
+                data['status'] = INV_STATUS_FAULT
+            else:
+                data['status'] = INV_STATUS_STANDBY
 
-            # ── MPPT Data ───────────────────────────────────────────────────
+            # ── MPPT Data (direct from MPPT{N}_VOLTAGE/CURRENT regs) ─────────
             mppt_data = []
             for i in range(1, 17):
                 v_field = f'MPPT{i}_VOLTAGE'
@@ -658,13 +783,61 @@ class ModbusHandlerHAT:
                 c_addr = getattr(rm, c_field, None)
                 v_val = _read_field(v_field, v_addr, cache)
                 c_val = _read_field(c_field, c_addr, cache) if c_addr is not None else None
-                v_dtype = dtypes.get(v_field, 'u16').lower()
-                c_dtype = dtypes.get(c_field, 'u16').lower()
+                v_dtype = self._resolve_dtype(v_field)
+                c_dtype = self._resolve_dtype(c_field)
                 mppt_v = (int((v_val or 0) * 10) if v_dtype == 'float32'
                           else int(v_val) if v_val else 0)
                 mppt_c = (int((c_val or 0) * 100) if c_dtype == 'float32'
                           else int(c_val) if c_val else 0)
                 mppt_data.append({'voltage': mppt_v, 'current': mppt_c})
+
+            # ── String data (voltage + current) ──────────────────────────────
+            # Some inverters (Huawei, Ekos) have only per-string registers.
+            # Store both voltage and current for optional MPPT aggregation below.
+            strings = []           # per-H01 output: string current array
+            string_details = []    # internal: (v_raw, c_raw) per string
+            for i in range(1, 33):
+                c_field = f'STRING{i}_CURRENT'
+                v_field = f'STRING{i}_VOLTAGE'
+                c_addr = getattr(rm, c_field, None)
+                if c_addr is None:
+                    break
+                v_addr = getattr(rm, v_field, None)
+                c_val = _read_field(c_field, c_addr, cache)
+                c_dtype = self._resolve_dtype(c_field)
+                c_raw = (int((c_val or 0) * 100) if c_dtype == 'float32'
+                         else int(c_val) if c_val else 0)
+                strings.append(c_raw)
+                # Read voltage for aggregation (may alias to MPPT voltage)
+                if v_addr is not None:
+                    v_val = _read_field(v_field, v_addr, cache)
+                    v_dtype = self._resolve_dtype(v_field)
+                    v_raw = (int((v_val or 0) * 10) if v_dtype == 'float32'
+                             else int(v_val) if v_val else 0)
+                else:
+                    v_raw = 0
+                string_details.append({'voltage': v_raw, 'current': c_raw})
+            data['strings'] = strings
+
+            # ── MPPT from strings (Huawei/Ekos pattern) ──────────────────────
+            # If register file exposes strings but not MPPT, compute MPPT data
+            # by aggregating strings: voltage = average of strings on this
+            # MPPT, current = sum of string currents (parallel connection).
+            strings_per_mppt = getattr(self.reg_module, 'STRINGS_PER_MPPT', 0)
+            if (not mppt_data and string_details and strings_per_mppt > 0
+                    and len(string_details) >= strings_per_mppt):
+                num_mppt = len(string_details) // strings_per_mppt
+                for mi in range(num_mppt):
+                    group = string_details[mi*strings_per_mppt:(mi+1)*strings_per_mppt]
+                    # Only count connected strings (voltage > 10V raw = 1.0V) for avg
+                    active = [s for s in group if s['voltage'] > 100]
+                    if active:
+                        avg_v = sum(s['voltage'] for s in active) // len(active)
+                    else:
+                        avg_v = sum(s['voltage'] for s in group) // max(1, len(group))
+                    sum_i = sum(s['current'] for s in group)
+                    mppt_data.append({'voltage': avg_v, 'current': sum_i})
+
             data['mppt'] = mppt_data
 
             if mppt_data:
@@ -672,98 +845,19 @@ class ModbusHandlerHAT:
                 data['pv_voltage'] = (int(sum(m['voltage'] for m in connected)
                                          / len(connected) / 10) if connected else 0)
                 data['pv_current'] = int(sum(m['current'] for m in mppt_data) / 10)
+            elif string_details:
+                # Single-MPPT central type with no MPPT aggregation: compute
+                # pv_voltage = average string voltage, pv_current = sum string currents.
+                active = [s for s in string_details if s['voltage'] > 100]
+                if active:
+                    data['pv_voltage'] = int(sum(s['voltage'] for s in active)
+                                              / len(active) / 10)
+                else:
+                    data['pv_voltage'] = 0
+                data['pv_current'] = int(sum(s['current'] for s in string_details) / 10)
             else:
                 data['pv_voltage'] = 0
                 data['pv_current'] = 0
-
-            # ── String Currents ─────────────────────────────────────────────
-            strings = []
-            for i in range(1, 33):
-                s_field = f'STRING{i}_CURRENT'
-                s_addr = getattr(rm, s_field, None)
-                if s_addr is None:
-                    break
-                s_val = _read_field(s_field, s_addr, cache)
-                s_dtype = dtypes.get(s_field, 'u16').lower()
-                strings.append(int((s_val or 0) * 100) if s_dtype == 'float32'
-                               else int(s_val) if s_val else 0)
-            data['strings'] = strings
-
-            # ── PV Power → integer W ────────────────────────────────────────
-            pv_addr = getattr(rm, 'PV_POWER', None)
-            val = _read_field('PV_POWER', pv_addr, cache) if pv_addr is not None else None
-            if val is not None:
-                dtype = dtypes.get('PV_POWER', 'u32').lower()
-                data['pv_power'] = (int(val) if dtype == 'float32'
-                                    else int(val * scale.get('power', 1.0)))
-            else:
-                data['pv_power'] = 0
-
-            # ── AC Power → integer W ────────────────────────────────────────
-            ac_addr = getattr(rm, 'AC_POWER', None)
-            val = _read_field('AC_POWER', ac_addr, cache) if ac_addr is not None else None
-            if val is not None:
-                dtype = dtypes.get('AC_POWER', 'u32').lower()
-                data['ac_power'] = (int(val) if dtype == 'float32'
-                                    else int(val * scale.get('power', 1.0)))
-            else:
-                data['ac_power'] = 0
-
-            # ── Power Factor → integer 0.001 ────────────────────────────────
-            pf_addr = getattr(rm, 'POWER_FACTOR', None)
-            val = _read_field('POWER_FACTOR', pf_addr, cache) if pf_addr is not None else None
-            if val is not None:
-                dtype = dtypes.get('POWER_FACTOR', 's16').lower()
-                data['power_factor'] = (int(val * 1000) if dtype == 'float32'
-                                        else int(val))
-            else:
-                data['power_factor'] = 1000
-
-            # ── Inverter Mode / Status ──────────────────────────────────────
-            mode_addr = getattr(rm, 'INVERTER_MODE', None)
-            val = _read_field('INVERTER_MODE', mode_addr, cache) if mode_addr is not None else None
-            if val is not None:
-                raw_mode = int(val)
-                if self.status_converter and hasattr(self.status_converter, 'to_inverter_mode'):
-                    mode = self.status_converter.to_inverter_mode(raw_mode)
-                else:
-                    mode = raw_mode
-                data['mode'] = mode
-                if mode == self.InvMode.ON_GRID:
-                    data['status'] = INV_STATUS_ON_GRID
-                elif mode in (self.InvMode.STANDBY, self.InvMode.INITIAL,
-                              self.InvMode.SHUTDOWN):
-                    data['status'] = INV_STATUS_STANDBY
-                elif mode == self.InvMode.FAULT:
-                    data['status'] = INV_STATUS_FAULT
-                else:
-                    data['status'] = INV_STATUS_STANDBY
-            else:
-                data['mode'] = self.InvMode.ON_GRID
-                data['status'] = INV_STATUS_ON_GRID
-
-            # ── Error Codes ─────────────────────────────────────────────────
-            for ec_i, ec_key in [(1, 'alarm1'), (2, 'alarm2'), (3, 'alarm3')]:
-                ec_field = f'ERROR_CODE{ec_i}'
-                ec_addr = getattr(rm, ec_field, None)
-                if ec_addr is not None:
-                    v = _read_field(ec_field, ec_addr, cache)
-                    data[ec_key] = int(v) if v is not None else 0
-                else:
-                    data[ec_key] = 0
-
-            # ── Cumulative Energy → integer Wh ──────────────────────────────
-            te_addr = getattr(rm, 'TOTAL_ENERGY', None)
-            val = _read_field('TOTAL_ENERGY', te_addr, cache) if te_addr is not None else None
-            if val is not None:
-                dtype = dtypes.get('TOTAL_ENERGY', 'u32').lower()
-                if dtype == 'float32':
-                    data['cumulative_energy'] = int(val)      # already Wh
-                else:
-                    # U32 assumed kWh × 1000 (Solarize/Sungrow convention)
-                    data['cumulative_energy'] = int(val * 1000)
-            else:
-                data['cumulative_energy'] = 0
 
             if hasattr(self, '_check_stats_log'):
                 self._check_stats_log()
@@ -905,8 +999,15 @@ class ModbusHandlerHAT:
 
             # 블록 단위 읽기
             block_data: dict = {}
-            for i, (start_addr, count) in enumerate(read_blocks):
-                if fc == 4:
+            for i, blk in enumerate(read_blocks):
+                if isinstance(blk, dict):
+                    start_addr = blk['start']
+                    count = blk['count']
+                    blk_fc = blk.get('fc', fc)
+                else:
+                    start_addr, count = blk[0], blk[1]
+                    blk_fc = fc
+                if blk_fc == 4:
                     result = self.master.read_input_registers(
                         start_addr, count, self.slave_id)
                 else:
@@ -1122,30 +1223,41 @@ class ModbusHandlerHAT:
             return False
         
         try:
+            # Helper: try multiple alias names (DER_* FIRST for sim/standard DER-AVM).
+            # Resolution order (first match wins):
+            #   1. DER-AVM Solarize-standard aliases (0x07D0-0x07D3, 0x0834)
+            #   2. Vendor-specific register names (ACTIVE_POWER_PCT etc.)
+            # DER_* first ensures sim+RTU round-trip works across all 11 inverter
+            # protocols because the simulator always initializes DER-AVM block,
+            # whereas vendor-specific control registers (e.g. Solis 0x0BED) may
+            # collide with monitoring space or be uninitialized in the sim.
+            def _get(*names, default=None):
+                for n in names:
+                    v = getattr(self.RegMap, n, None)
+                    if v is not None:
+                        return v
+                return default
+
             reg_map = {
-                CTRL_INV_ON_OFF: getattr(self.RegMap, 'INVERTER_ON_OFF', None),
-                CTRL_INV_ACTIVE_POWER: getattr(self.RegMap, 'ACTIVE_POWER_PCT', None),
-                CTRL_INV_POWER_FACTOR: getattr(self.RegMap, 'POWER_FACTOR_SET', None),
-                CTRL_INV_REACTIVE_POWER: getattr(self.RegMap, 'REACTIVE_POWER_SET', None),
-                CTRL_INV_IV_SCAN: getattr(self.RegMap, 'IV_SCAN_COMMAND', None),
+                CTRL_INV_ON_OFF: _get('INVERTER_ON_OFF', default=0x0834),
+                CTRL_INV_ACTIVE_POWER: _get('DER_ACTIVE_POWER_PCT', 'ACTIVE_POWER_PCT', default=0x07D3),
+                CTRL_INV_POWER_FACTOR: _get('DER_POWER_FACTOR_SET', 'POWER_FACTOR_SET', default=0x07D0),
+                CTRL_INV_REACTIVE_POWER: _get('DER_REACTIVE_POWER_PCT', 'REACTIVE_POWER_SET', default=0x07D2),
+                CTRL_INV_IV_SCAN: _get('IV_SCAN_COMMAND', default=0x600D),
             }
 
             if control_type == CTRL_INV_CONTROL_INIT:
                 # Control Init: Reset all control values to default
                 # ON_OFF: 0=Run(ON), 1=Stop(OFF) in register
                 success = True
-                if getattr(self.RegMap, 'INVERTER_ON_OFF', None) is not None:
-                    success &= self.master.write_single_register(
-                        self.RegMap.INVERTER_ON_OFF, 0, self.slave_id)  # 0=Run(ON)
-                if getattr(self.RegMap, 'ACTIVE_POWER_PCT', None) is not None:
-                    success &= self.master.write_single_register(
-                        self.RegMap.ACTIVE_POWER_PCT, 1000, self.slave_id)
-                if getattr(self.RegMap, 'POWER_FACTOR_SET', None) is not None:
-                    success &= self.master.write_single_register(
-                        self.RegMap.POWER_FACTOR_SET, 1000, self.slave_id)
-                if getattr(self.RegMap, 'REACTIVE_POWER_SET', None) is not None:
-                    success &= self.master.write_single_register(
-                        self.RegMap.REACTIVE_POWER_SET, 0, self.slave_id)
+                on_off_reg = _get('INVERTER_ON_OFF', default=0x0834)
+                active_reg = _get('DER_ACTIVE_POWER_PCT', 'ACTIVE_POWER_PCT', default=0x07D3)
+                pf_reg = _get('DER_POWER_FACTOR_SET', 'POWER_FACTOR_SET', default=0x07D0)
+                q_reg = _get('DER_REACTIVE_POWER_PCT', 'REACTIVE_POWER_SET', default=0x07D2)
+                success &= self.master.write_single_register(on_off_reg, 0, self.slave_id)
+                success &= self.master.write_single_register(active_reg, 1000, self.slave_id)
+                success &= self.master.write_single_register(pf_reg, 1000, self.slave_id)
+                success &= self.master.write_single_register(q_reg, 0, self.slave_id)
                 return success
 
             reg = reg_map.get(control_type)
@@ -1177,13 +1289,26 @@ class ModbusHandlerHAT:
         
         try:
             status = {}
-            
+
+            # Prefer DER-AVM aliases (0x07D0-0x07D3, 0x0834) over vendor-specific
+            # registers so sim-mode read/write round-trip works for every protocol.
+            # Vendor-specific registers (POWER_FACTOR_SET etc.) are a fallback
+            # used only when the register file lacks the DER_* alias.
+            def _reg(*names, default=None):
+                for n in names:
+                    v = getattr(self.RegMap, n, None)
+                    if v is not None:
+                        return v
+                return default
+
             # ON/OFF: 0=ON(기동), 1=OFF(정지)
-            result = self.master.read_holding_registers(self.RegMap.INVERTER_ON_OFF, 1, self.slave_id)
+            on_off_reg = _reg('INVERTER_ON_OFF', default=0x0834)
+            result = self.master.read_holding_registers(on_off_reg, 1, self.slave_id)
             status['on_off'] = result[0] if result else 0  # 0=ON, 1=OFF (no conversion needed)
 
             # Power Factor (signed, raw value -1000~1000)
-            result = self.master.read_holding_registers(self.RegMap.POWER_FACTOR_SET, 1, self.slave_id)
+            pf_reg = _reg('DER_POWER_FACTOR_SET', 'POWER_FACTOR_SET', default=0x07D0)
+            result = self.master.read_holding_registers(pf_reg, 1, self.slave_id)
             if result:
                 pf = result[0]
                 if pf > 32767:
@@ -1193,11 +1318,13 @@ class ModbusHandlerHAT:
                 status['power_factor'] = 1000
 
             # Operation Mode
-            result = self.master.read_holding_registers(self.RegMap.OPERATION_MODE, 1, self.slave_id)
+            mode_reg = _reg('DER_ACTION_MODE', 'OPERATION_MODE', default=0x07D1)
+            result = self.master.read_holding_registers(mode_reg, 1, self.slave_id)
             status['operation_mode'] = result[0] if result else 0
 
             # Reactive Power % (signed, raw value -1000~1000)
-            result = self.master.read_holding_registers(self.RegMap.REACTIVE_POWER_SET, 1, self.slave_id)
+            rp_reg = _reg('DER_REACTIVE_POWER_PCT', 'REACTIVE_POWER_SET', default=0x07D2)
+            result = self.master.read_holding_registers(rp_reg, 1, self.slave_id)
             if result:
                 rp = result[0]
                 if rp > 32767:
@@ -1207,15 +1334,20 @@ class ModbusHandlerHAT:
                 status['reactive_power_pct'] = 0
 
             # Active Power % (raw value 0~1000)
-            result = self.master.read_holding_registers(self.RegMap.ACTIVE_POWER_PCT, 1, self.slave_id)
+            ap_reg = _reg('DER_ACTIVE_POWER_PCT', 'ACTIVE_POWER_PCT', default=0x07D3)
+            result = self.master.read_holding_registers(ap_reg, 1, self.slave_id)
             status['active_power_pct'] = result[0] if result else 1000
 
             # IV Scan Status (0x600D): 0=Idle, 1=Running, 2=Finished
-            iv_scan_reg = getattr(self.RegMap, 'IV_SCAN_STATUS', None)
-            if iv_scan_reg is not None:
+            # Some MM v2 register files don't expose IV_SCAN_STATUS as a constant —
+            # fall back to IV_SCAN_COMMAND (Solarize uses the same register), or
+            # finally to the hard-coded 0x600D Solarize convention.
+            iv_scan_reg = getattr(self.RegMap, 'IV_SCAN_STATUS',
+                                  getattr(self.RegMap, 'IV_SCAN_COMMAND', 0x600D))
+            try:
                 result = self.master.read_holding_registers(iv_scan_reg, 1, self.slave_id)
                 status['iv_scan_status'] = result[0] if result else 0
-            else:
+            except Exception:
                 status['iv_scan_status'] = 0
             
             return status
@@ -1243,7 +1375,7 @@ class ModbusHandlerHAT:
         try:
             _get_iv = getattr(self.reg_module, 'get_iv_string_mapping', None)
             if _get_iv is None:
-                from common.Solarize_PV_50kw_registers import get_iv_string_mapping as _get_iv
+                from common.Solarize_50_3_registers import get_iv_string_mapping as _get_iv
 
             # Get register mapping for this string
             mappings = _get_iv()
@@ -1313,58 +1445,67 @@ class ModbusHandlerHAT:
             return None
         
         try:
-            # Guard: DEA registers may not exist in non-Solarize register modules
-            if not hasattr(self.RegMap, 'DEA_L1_CURRENT_LOW'):
-                self.logger.debug("read_monitor_data: DEA registers not available in this register module")
+            # Guard: DEA registers may not exist in register module
+            dea_start = getattr(self.RegMap, 'DEA_L1_CURRENT',
+                                getattr(self.RegMap, 'DEA_L1_CURRENT_LOW', None))
+            if dea_start is None:
+                self.logger.debug("read_monitor_data: DEA registers not available")
                 return None
 
             # Read entire DEA block at once (0x03E8 ~ 0x03FD = 22 registers)
-            result = self.master.read_holding_registers(
-                self.RegMap.DEA_L1_CURRENT_LOW, 22, self.slave_id
-            )
-            
+            result = self._read_reg(dea_start, 22)
+
             if not result or len(result) < 22:
-                self.logger.error(f"Failed to read DEA block: result={result}, len={len(result) if result else 0}")
+                self.logger.warning(f"read_monitor_data: DEA block read failed (got {len(result) if result else 0}/22)")
                 return None
             
             # Parse the block
-            # Helper to combine two 16-bit registers into signed 32-bit
-            def to_s32(low, high):
+            # Helper to combine two 16-bit registers into signed 32-bit,
+            # honoring the module's U32_WORD_ORDER. Block layout (offset i, i+1)
+            # is always (LOW_addr, HIGH_addr) — HL means the value at LOW_addr
+            # is the high word, at HIGH_addr is the low word.
+            _word_order = getattr(self.reg_module, 'U32_WORD_ORDER', 'LH')
+
+            def to_s32(r0, r1):
+                if _word_order == 'HL':
+                    high, low = r0, r1
+                else:
+                    low, high = r0, r1
                 raw = (high << 16) | low
                 if raw > 0x7FFFFFFF:
                     raw = raw - 0x100000000
                 return raw
-            
+
             data = {}
-            
+
             # Phase Currents (scale 0.1A)
             # Offset: 0=L1_LOW, 1=L1_HIGH, 2=L2_LOW, 3=L2_HIGH, 4=L3_LOW, 5=L3_HIGH
             data['current_r'] = to_s32(result[0], result[1]) / 10.0
             data['current_s'] = to_s32(result[2], result[3]) / 10.0
             data['current_t'] = to_s32(result[4], result[5]) / 10.0
-            
+
             # Phase Voltages (scale 0.1V)
             # Offset: 6=V1_LOW, 7=V1_HIGH, 8=V2_LOW, 9=V2_HIGH, 10=V3_LOW, 11=V3_HIGH
             data['voltage_rs'] = to_s32(result[6], result[7]) / 10.0
             data['voltage_st'] = to_s32(result[8], result[9]) / 10.0
             data['voltage_tr'] = to_s32(result[10], result[11]) / 10.0
-            
+
             # Active Power (scale 0.1kW)
             # Offset: 12=P_LOW, 13=P_HIGH
             data['active_power_kw'] = to_s32(result[12], result[13]) / 10.0
-            
+
             # Reactive Power (scale 1 Var)
             # Offset: 14=Q_LOW, 15=Q_HIGH
             data['reactive_power_var'] = to_s32(result[14], result[15])
-            
+
             # Power Factor (scale 0.001)
             # Offset: 16=PF_LOW, 17=PF_HIGH
             data['power_factor'] = to_s32(result[16], result[17]) / 1000.0
-            
+
             # Frequency (scale 0.1Hz)
             # Offset: 18=F_LOW, 19=F_HIGH
             data['frequency'] = to_s32(result[18], result[19]) / 10.0
-            
+
             # Status Flags
             # Offset: 20=STS_LOW, 21=STS_HIGH
             data['status_flags'] = to_s32(result[20], result[21])
@@ -1682,457 +1823,6 @@ class ModbusHandlerHAT:
             return None
 
 
-class KstarModbusHandler(ModbusHandlerHAT):
-    """
-    Kstar KSG-60KT-M1 전용 Modbus 핸들러.
-    ModbusHandlerHAT을 상속하여 connect/disconnect는 그대로 사용하고
-    read_inverter_data()만 Kstar FC04 레지스터 맵으로 오버라이드.
-    """
-
-    VERSION = "1.0.0"
-
-    def read_inverter_data(self):
-        """Kstar KSG-60KT-M1 데이터 읽기 (FC04 Input Registers)"""
-        if not self.connected or not self.master:
-            return None
-
-        try:
-            data = {}
-
-            # ── Block1: FC04, 3000~3059 ─────────────────────────────────────
-            b1 = self.master.read_input_registers(
-                KstarRegisters.BLOCK1_START,
-                KstarRegisters.BLOCK1_COUNT,
-                self.slave_id
-            )
-            if not b1:
-                self.logger.warning(f"Kstar Block1 read failed (slave={self.slave_id})")
-                return None
-
-            # PV 합산 전력 (W)
-            pv_power_w = calc_pv_total_power(b1)
-            data['pv_power'] = pv_power_w  # W
-
-            # MPPT 데이터 (3개)
-            base = KstarRegisters.BLOCK1_START
-            mppt_data = []
-            for mppt_num in range(1, 4):
-                m = get_mppt_data(b1, mppt_num)
-                mppt_data.append({
-                    'voltage': b1[(KstarRegisters.PV1_VOLTAGE + mppt_num - 1) - base],  # raw 0.1V
-                    'current': b1[(KstarRegisters.PV1_CURRENT + mppt_num - 1) - base],  # raw 0.01A
-                })
-            data['mppt'] = mppt_data
-
-            # PV voltage = average of connected MPPTs (>= 100V = 1000 raw in 0.1V)
-            # PV current = sum of all MPPT currents
-            connected = [m for m in mppt_data if m['voltage'] >= 1000]
-            data['pv_voltage'] = int(sum(m['voltage'] for m in connected) / len(connected) / 10) if connected else 0
-            data['pv_current'] = int(sum(m['current'] for m in mppt_data) / 10)
-
-            # 스트링 전류 (9개, MPPT 전류 균등 분배)
-            strings_info = get_string_currents(b1, strings_per_mppt=3)
-            data['strings'] = [s['raw_current'] for s in strings_info]  # raw 0.01A
-
-            # 에너지
-            data['cumulative_energy'] = get_cumulative_energy_wh(b1)  # Wh
-
-            # 상태
-            raw_status = b1[KstarRegisters.SYSTEM_STATUS - base]
-            solarize_mode = KstarStatusConverter.to_solarize(raw_status)
-            data['mode'] = solarize_mode
-            if solarize_mode == 0x03:
-                data['status'] = INV_STATUS_ON_GRID
-            elif solarize_mode == 0x05:
-                data['status'] = INV_STATUS_FAULT
-            else:
-                data['status'] = INV_STATUS_STANDBY
-
-            # 알람/에러 코드
-            alarm_l = b1[KstarRegisters.DSP_ALARM_CODE_L - base]
-            alarm_h = b1[KstarRegisters.DSP_ALARM_CODE_H - base]
-            err_l   = b1[KstarRegisters.DSP_ERROR_CODE_L - base]
-            data['alarm1'] = alarm_l & 0xFFFF
-            data['alarm2'] = alarm_h & 0xFFFF
-            data['alarm3'] = err_l  & 0xFFFF
-
-            # ── Block2: FC04, 3060~3124 ─────────────────────────────────────
-            b2 = self.master.read_input_registers(
-                KstarRegisters.BLOCK2_START,
-                KstarRegisters.BLOCK2_COUNT,
-                self.slave_id
-            )
-            if b2:
-                base2 = KstarRegisters.BLOCK2_START
-                raw_freq = b2[KstarRegisters.GRID_FREQUENCY - base2]
-                data['frequency'] = raw_freq // 10      # x0.01Hz → 0.1Hz (H01 Scale 10)
-
-                raw_r_v = b2[KstarRegisters.INV_R_VOLTAGE - base2]
-                raw_r_i = b2[KstarRegisters.INV_R_CURRENT - base2]
-                data['r_voltage'] = raw_r_v // 10       # x0.1V → V
-                data['r_current'] = raw_r_i // 10       # x0.01A → 0.1A
-            else:
-                data['frequency'] = 600
-                data['r_voltage'] = data['r_current'] = 0
-
-            # ── Block3: FC04, 3125~3149 ─────────────────────────────────────
-            b3 = self.master.read_input_registers(
-                KstarRegisters.BLOCK3_START,
-                KstarRegisters.BLOCK3_COUNT,
-                self.slave_id
-            )
-            if b3:
-                base3 = KstarRegisters.BLOCK3_START
-
-                raw_s_v = b3[KstarRegisters.INV_S_VOLTAGE - base3]
-                raw_s_i = b3[KstarRegisters.INV_S_CURRENT - base3]
-                raw_t_v = b3[KstarRegisters.INV_T_VOLTAGE - base3]
-                raw_t_i = b3[KstarRegisters.INV_T_CURRENT - base3]
-                data['s_voltage'] = raw_s_v // 10
-                data['s_current'] = raw_s_i // 10
-                data['t_voltage'] = raw_t_v // 10
-                data['t_current'] = raw_t_i // 10
-
-                # AC 합산 전력 (R+S+T, signed W)
-                ac_total = calc_ac_total_power(b3)
-                data['ac_power'] = ac_total             # W
-
-                # 역률 계산: PF = P / (√3 × V × I)
-                v_avg = (data['r_voltage'] + data['s_voltage'] + data['t_voltage']) / 3.0
-                i_avg = (data['r_current'] + data['s_current'] + data['t_current']) / 3.0
-                apparent = 1.732 * v_avg * i_avg * 0.1  # 전류가 0.1A 단위이므로 /10
-                if apparent > 0:
-                    pf = int(round((ac_total / apparent) * 1000))
-                    data['power_factor'] = max(-1000, min(1000, pf))
-                else:
-                    data['power_factor'] = 1000
-            else:
-                data['s_voltage'] = data['s_current'] = 0
-                data['t_voltage'] = data['t_current'] = 0
-                data['ac_power'] = 0
-                data['power_factor'] = 1000
-
-            self._check_stats_log()
-            return data
-
-        except Exception as e:
-            self.logger.error(f"Kstar read error: {e}")
-            return None
-
-    def read_monitor_data(self):
-        """Kstar H05 Body Type 14 모니터링 데이터 (FC04 실시간 레지스터)
-
-        Solarize는 DEA 레지스터(0x03E8~0x03FD, FC03)를 사용하지만
-        Kstar에는 해당 레지스터가 없으므로 FC04 Block2/Block3에서 직접 조합.
-
-        Returns dict:
-          current_r/s/t (A), voltage_rs/st/tr (V),
-          active_power_kw, reactive_power_var, power_factor,
-          frequency (Hz), status_flags
-        """
-        if not self.connected or not self.master:
-            return None
-
-        try:
-            # Block2: FC04, 3060~3124 — R상 전압/전류/주파수
-            b2 = self.master.read_input_registers(
-                KstarRegisters.BLOCK2_START,
-                KstarRegisters.BLOCK2_COUNT,
-                self.slave_id
-            )
-            # Block3: FC04, 3125~3149 — S/T상 전압/전류/전력
-            b3 = self.master.read_input_registers(
-                KstarRegisters.BLOCK3_START,
-                KstarRegisters.BLOCK3_COUNT,
-                self.slave_id
-            )
-
-            if not b2 or not b3:
-                self.logger.warning("Kstar read_monitor_data: block read failed")
-                return None
-
-            base2 = KstarRegisters.BLOCK2_START
-            base3 = KstarRegisters.BLOCK3_START
-
-            def s16(v):
-                return v - 65536 if v > 32767 else v
-
-            # ── 계통/인버터 선간전압 (0.1V → V) ──────────────────────────
-            v_r = b2[KstarRegisters.GRID_R_VOLTAGE - base2] * 0.1    # 3097 계통 R상
-            v_s = b3[KstarRegisters.GRID_S_VOLTAGE - base3] * 0.1    # 3127 계통 S상
-            v_t = b3[KstarRegisters.GRID_T_VOLTAGE - base3] * 0.1    # 3134 계통 T상
-
-            # ── 인버터 출력 전류 (0.01A → A) ─────────────────────────────
-            i_r = b2[KstarRegisters.INV_R_CURRENT - base2] * 0.01    # 3124
-            i_s = b3[KstarRegisters.INV_S_CURRENT - base3] * 0.01    # 3132
-            i_t = b3[KstarRegisters.INV_T_CURRENT - base3] * 0.01    # 3139
-
-            # ── 상별 유효전력 (W, S16) ────────────────────────────────────
-            p_r = s16(b3[KstarRegisters.INV_R_POWER - base3])        # 3126
-            p_s = s16(b3[KstarRegisters.INV_S_POWER - base3])        # 3133
-            p_t = s16(b3[KstarRegisters.INV_T_POWER - base3])        # 3140
-            total_w = p_r + p_s + p_t
-
-            # ── 주파수 (0.01Hz → Hz) ──────────────────────────────────────
-            freq = b2[KstarRegisters.GRID_FREQUENCY - base2] * 0.01  # 3098
-
-            # ── 역률 계산: PF = P / (√3 × V_avg × I_avg) ─────────────────
-            v_avg = (v_r + v_s + v_t) / 3.0
-            i_avg = (i_r + i_s + i_t) / 3.0
-            apparent_w = 1.732 * v_avg * i_avg
-            if apparent_w > 0:
-                pf = max(-1.0, min(1.0, total_w / apparent_w))
-            else:
-                pf = 1.0
-
-            self.logger.debug(
-                f"Kstar monitor: P={total_w}W V={v_avg:.1f}V I={i_avg:.2f}A f={freq:.2f}Hz")
-
-            return {
-                'current_r':         i_r,
-                'current_s':         i_s,
-                'current_t':         i_t,
-                'voltage_rs':        v_r,      # 계통 R상 선간전압
-                'voltage_st':        v_s,      # 계통 S상 선간전압
-                'voltage_tr':        v_t,      # 계통 T상 선간전압
-                'active_power_kw':   total_w / 1000.0,
-                'reactive_power_var': 0,        # Kstar FC04에 무효전력 레지스터 없음
-                'power_factor':      pf,
-                'frequency':         freq,
-                'status_flags':      0,
-            }
-
-        except Exception as e:
-            self.logger.error(f"Kstar read_monitor_data error: {e}")
-            return None
-
-    def read_control_status(self):
-        """Kstar 제어 레지스터 읽기 (Solarize 동일 주소, IV Scan 없음)
-
-        DER-AVM 제어 레지스터 주소는 Solarize와 동일:
-          0x07D0 DER_POWER_FACTOR_SET
-          0x07D1 DER_ACTION_MODE
-          0x07D2 DER_REACTIVE_POWER_PCT
-          0x07D3 DER_ACTIVE_POWER_PCT
-          0x0834 INVERTER_ON_OFF
-        """
-        if not self.connected or not self.master:
-            return None
-
-        try:
-            status = {}
-
-            # ON/OFF: 0=운전(ON), 1=정지(OFF)
-            result = self.master.read_holding_registers(
-                KstarRegisters.INVERTER_ON_OFF, 1, self.slave_id)
-            status['on_off'] = result[0] if result else 0
-
-            # 역률 (S16, raw value -1000~1000)
-            result = self.master.read_holding_registers(
-                KstarRegisters.DER_POWER_FACTOR_SET, 1, self.slave_id)
-            if result:
-                pf = result[0]
-                if pf > 32767:
-                    pf -= 65536
-                status['power_factor'] = pf
-            else:
-                status['power_factor'] = 1000
-
-            # DER-AVM 동작 모드 (0=자립, 2=DER-AVM, 5=Q(V))
-            result = self.master.read_holding_registers(
-                KstarRegisters.DER_ACTION_MODE, 1, self.slave_id)
-            status['operation_mode'] = result[0] if result else 0
-
-            # 무효전력 설정 % (S16, raw value -1000~1000)
-            result = self.master.read_holding_registers(
-                KstarRegisters.DER_REACTIVE_POWER_PCT, 1, self.slave_id)
-            if result:
-                rp = result[0]
-                if rp > 32767:
-                    rp -= 65536
-                status['reactive_power_pct'] = rp
-            else:
-                status['reactive_power_pct'] = 0
-
-            # 유효전력 설정 % (U16, raw value 0~1000)
-            result = self.master.read_holding_registers(
-                KstarRegisters.DER_ACTIVE_POWER_PCT, 1, self.slave_id)
-            status['active_power_pct'] = result[0] if result else 1000
-
-            # Kstar IV Scan status: register 3126 (FC04)
-            # Low byte: 0=idle, 1=scanning; High byte: 0-100 progress%
-            try:
-                result = self.master.read_input_registers(
-                    KstarRegisters.IV_SCAN_STATUS, 1, self.slave_id)
-                if result:
-                    low_byte = result[0] & 0xFF
-                    # 0=idle, 1=scanning, 2=finished
-                    status['iv_scan_status'] = low_byte if low_byte <= 2 else 0
-                else:
-                    status['iv_scan_status'] = 0
-            except Exception:
-                status['iv_scan_status'] = 0
-
-            return status
-
-        except Exception as e:
-            self.logger.error(f"Kstar read_control_status error: {e}")
-            return None
-
-    def write_control(self, control_type: int, value: int):
-        """Kstar DER-AVM 제어 쓰기 (Solarize 동일 레지스터, FC06)
-
-        Solarize와 동일한 내부 레지스터 주소 사용:
-          15 (CTRL_INV_ON_OFF)        → 0x0834
-          16 (CTRL_INV_ACTIVE_POWER)  → 0x07D3
-          17 (CTRL_INV_POWER_FACTOR)  → 0x07D0
-          18 (CTRL_INV_REACTIVE_POWER)→ 0x07D2
-        """
-        if not self.connected or not self.master:
-            self.logger.warning("Kstar write_control: not connected")
-            return False
-
-        try:
-            # IV Scan trigger: write any value to register 4035 (FC06)
-            if control_type == CTRL_INV_IV_SCAN:
-                return self.master.write_single_register(
-                    KstarRegisters.IV_SCAN_COMMAND, value if value else 1, self.slave_id)
-
-            reg_map = {
-                CTRL_INV_ON_OFF:        KstarRegisters.INVERTER_ON_OFF,
-                CTRL_INV_ACTIVE_POWER:  KstarRegisters.DER_ACTIVE_POWER_PCT,
-                CTRL_INV_POWER_FACTOR:  KstarRegisters.DER_POWER_FACTOR_SET,
-                CTRL_INV_REACTIVE_POWER:KstarRegisters.DER_REACTIVE_POWER_PCT,
-            }
-
-            if control_type == CTRL_INV_CONTROL_INIT:
-                success = True
-                success &= self.master.write_single_register(
-                    KstarRegisters.INVERTER_ON_OFF, 0, self.slave_id)       # 0=운전
-                success &= self.master.write_single_register(
-                    KstarRegisters.DER_ACTIVE_POWER_PCT, 1000, self.slave_id)
-                success &= self.master.write_single_register(
-                    KstarRegisters.DER_POWER_FACTOR_SET, 1000, self.slave_id)
-                success &= self.master.write_single_register(
-                    KstarRegisters.DER_REACTIVE_POWER_PCT, 0, self.slave_id)
-                return success
-
-            reg = reg_map.get(control_type)
-            if reg is None:
-                self.logger.warning(f"Kstar: unsupported control_type={control_type}")
-                return False
-
-            self.logger.info(
-                f"Kstar WRITE: Reg=0x{reg:04X} Value={value} (ctrl={control_type})")
-            return self.master.write_single_register(reg, value, self.slave_id)
-
-        except Exception as e:
-            self.logger.error(f"Kstar write_control error: {e}")
-            return False
-
-    def get_iv_scan_data(self, string_num):
-        """Kstar IV Scan 데이터 읽기 — V/I interleaved pairs from FC04.
-
-        Kstar layout: register 5000 + (string_num-1)*200, 200 regs per string
-        Even offset = voltage (U16, 0.1V), Odd offset = current (S16, 0.01A)
-        Returns list of (voltage_raw, current_raw) tuples.
-        """
-        if not self.connected or not self.master:
-            self.logger.warning("Kstar get_iv_scan_data: not connected")
-            return []
-        try:
-            base = KstarRegisters.IV_DATA_BASE + (string_num - 1) * KstarRegisters.IV_REGS_PER_STRING
-            count = KstarRegisters.IV_REGS_PER_STRING  # 200 regs
-
-            # Read in chunks of 125 (Modbus limit)
-            all_regs = []
-            remaining = count
-            addr = base
-            while remaining > 0:
-                chunk = min(remaining, 125)
-                result = self.master.read_input_registers(addr, chunk, self.slave_id)
-                if not result:
-                    break
-                all_regs.extend(result)
-                addr += chunk
-                remaining -= chunk
-
-            if len(all_regs) < count:
-                self.logger.warning(f"Kstar IV data incomplete: got {len(all_regs)}/{count}")
-                return []
-
-            # Parse V/I interleaved pairs
-            points = []
-            for i in range(0, count, 2):
-                v_raw = all_regs[i]
-                i_raw = all_regs[i + 1]
-                if v_raw == 0xFFFF:  # Invalid data marker
-                    break
-                points.append((v_raw, i_raw))
-
-            self.logger.info(f"Kstar IV string {string_num}: {len(points)} points from 0x{base:04X}")
-            return points
-
-        except Exception as e:
-            self.logger.error(f"Kstar get_iv_scan_data error: {e}")
-            return []
-
-    def read_model_info(self):
-        """Kstar 장비 정보 읽기 (FC03 Block4 + FC04 Block5)"""
-        if not self.connected or not self.master:
-            return {}
-        info = {}
-        try:
-            # FC03: 모델명 (3200~3207, 8 regs ASCII)
-            b4 = self.master.read_holding_registers(
-                KstarRegisters.MODEL_NAME_BASE, 8, self.slave_id
-            )
-            if b4:
-                model_chars = []
-                for reg in b4:
-                    h = (reg >> 8) & 0xFF
-                    l = reg & 0xFF
-                    if h:
-                        model_chars.append(chr(h))
-                    if l:
-                        model_chars.append(chr(l))
-                info['model'] = ''.join(model_chars).strip('\x00').strip()
-            else:
-                info['model'] = 'KSG-60KT'
-
-            # FC03: ARM/DSP 버전
-            b4v = self.master.read_holding_registers(
-                KstarRegisters.ARM_VERSION, 2, self.slave_id
-            )
-            if b4v:
-                info['arm_version'] = b4v[0]
-                info['dsp_version'] = b4v[1] if len(b4v) > 1 else 0
-
-            # FC04: 시리얼번호 (3228~3238, 11 regs ASCII)
-            b5 = self.master.read_input_registers(
-                KstarRegisters.SERIAL_NUMBER_BASE, 11, self.slave_id
-            )
-            if b5:
-                sn_chars = []
-                for reg in b5:
-                    h = (reg >> 8) & 0xFF
-                    l = reg & 0xFF
-                    if h:
-                        sn_chars.append(chr(h))
-                    if l:
-                        sn_chars.append(chr(l))
-                info['serial'] = ''.join(sn_chars).strip('\x00').strip()
-
-        except Exception as e:
-            self.logger.error(f"Kstar model info error: {e}")
-        return info
-
-
-# CM4 UART 연결 + Kstar FC04 읽기: ModbusHandlerCM4 정의 후 선언
-# (ModbusHandlerCM4 forward-reference를 피하기 위해 파일 하단에 실제 정의)
-# KstarModbusHandlerCM4 는 ModbusHandlerCM4 클래스 정의 직후에 선언됨
-
-
 class ModbusHandlerCM4(ModbusHandlerHAT):
     """
     Modbus RTU Master using CM4 native UART (pyserial).
@@ -2205,6 +1895,7 @@ class ModbusHandlerCM4(ModbusHandlerHAT):
             self.rs485_channel.close()
 
 
+<<<<<<< HEAD
 class KstarModbusHandlerCM4(KstarModbusHandler, ModbusHandlerCM4):
     """Kstar FC04 읽기 + CM4 UART 연결 조합 핸들러.
     MRO: KstarModbusHandlerCM4 → KstarModbusHandler → ModbusHandlerCM4 → ModbusHandlerHAT
@@ -2488,17 +2179,20 @@ class HuaweiModbusHandlerCM4(HuaweiModbusHandler, ModbusHandlerCM4):
     VERSION = "1.0.0"
 
 
+=======
+>>>>>>> 9837d06791ee1e2c66fd4a43108878afbb4ff0a1
 class ModbusHandlerSerial:
     """Modbus RTU Master using pymodbus (standard serial)"""
 
     def __init__(self, port: str = '/dev/ttyUSB0', baudrate: int = 9600, slave_id: int = 1,
-                 reg_module=None):
+                 reg_module=None, shared_client=None):
         self.port = port
         self.baudrate = baudrate
         self.slave_id = slave_id
         self.client = None
         self.connected = False
         self.logger = logging.getLogger(__name__)
+        self._shared_client = shared_client
 
         # Dynamic register module binding
         _init_reg_attrs(self, reg_module)
@@ -2506,8 +2200,19 @@ class ModbusHandlerSerial:
         self._sim_energy = 1000000  # Initial 1000kWh
         self._sim_start = time.time()
 
+        # HAT 호환 통계 속성 (read_inverter_data_dynamic에서 참조)
+        self._read_count = 0
+        self._last_stats_log = 0
+        self._stats_log_interval = 100
+
     def connect(self):
         """Connect via pymodbus"""
+        if self._shared_client is not None:
+            self.client = self._shared_client
+            self.master = PymodbusAdapter(self.client)
+            self.connected = True
+            self.logger.info(f"Serial: reusing shared client for {self.port} (slave={self.slave_id})")
+            return True
         if not PYMODBUS_AVAILABLE:
             self.logger.error("pymodbus not available")
             return False
@@ -2540,38 +2245,50 @@ class ModbusHandlerSerial:
     
     def _read_reg(self, addr, count=1):
         """Read holding registers (FC03) via pymodbus, returns list of U16 values or None."""
-        result = self.client.read_holding_registers(addr, count, slave=self.slave_id)
-        if result.isError():
+        # 주소 범위 보호: Modbus 16-bit 한계
+        if addr < 0 or addr + count > 65536:
+            return None
+        result = _pymodbus_call(self.client.read_holding_registers, addr, count, self.slave_id)
+        if result is None or result.isError():
             return None
         return result.registers
 
     def _read_input_reg(self, addr, count=1):
         """Read input registers (FC04) via pymodbus, returns list of U16 values or None."""
-        result = self.client.read_input_registers(addr, count, slave=self.slave_id)
-        if result.isError():
+        if addr < 0 or addr + count > 65536:
+            return None
+        result = _pymodbus_call(self.client.read_input_registers, addr, count, self.slave_id)
+        if result is None or result.isError():
             return None
         return result.registers
 
     def _read_typed_value(self, field_name, addr):
         """Read a register value using the correct data type from DATA_TYPES.
-
-        Returns the converted Python value (int or float), or None on failure.
+        U32/S32는 u32_word_order에 따라 워드 순서 결정.
         """
         dtype = (self.reg_data_types or {}).get(field_name, 'u16')
 
         if dtype == 'float32':
             result = self._read_reg(addr, 2)
             if result and len(result) >= 2:
-                return self.reg_to_float32(result[0], result[1])
+                w0, w1 = result[0], result[1]
+                if getattr(self, 'u32_word_order', 'LH') == 'HL':
+                    w0, w1 = w1, w0
+                return self.reg_to_float32(w0, w1)
             return None
         elif dtype in ('u32', 's32'):
             result = self._read_reg(addr, 2)
             if result and len(result) >= 2:
-                if dtype == 'u32':
-                    return self.reg_to_u32(result[0], result[1])
+                w0, w1 = result[0], result[1]
+                if getattr(self, 'u32_word_order', 'LH') == 'HL':
+                    lo, hi = w1, w0
                 else:
-                    from common.Solarize_PV_50kw_registers import registers_to_s32 as _s32
-                    return _s32(result[0], result[1])
+                    lo, hi = w0, w1
+                if dtype == 'u32':
+                    return self.reg_to_u32(lo, hi)
+                else:
+                    val = self.reg_to_u32(lo, hi)
+                    return val - 0x100000000 if val >= 0x80000000 else val
             return None
         elif dtype == 's16':
             result = self._read_reg(addr, 1)
@@ -2585,10 +2302,32 @@ class ModbusHandlerSerial:
                 return result[0]
             return None
 
+    def _read_block(self, start, count, fc=3):
+        """Read contiguous register block (FC03/FC04) — HAT 호환."""
+        if fc == 4:
+            return self._read_input_reg(start, count)
+        return self._read_reg(start, count)
+
+    # Reuse the alias-aware dtype resolver from HAT class so dynamic reads
+    # can handle MM v2 register files where DATA_TYPES is missing for some
+    # alias attributes (e.g. T_PHASE_VOLTAGE → L2_VOLTAGE).
+    _DTYPE_ALIAS_FALLBACKS = ModbusHandlerHAT._DTYPE_ALIAS_FALLBACKS
+    _resolve_dtype = ModbusHandlerHAT._resolve_dtype
+
+    def _build_reg_cache(self, read_blocks):
+        """Read all READ_BLOCKS and return {addr: value} cache."""
+        return ModbusHandlerHAT._build_reg_cache(self, read_blocks)
+
+    def _get_typed_from_cache(self, field_name, addr, cache):
+        """Extract typed value from register cache — HAT 로직 위임."""
+        return ModbusHandlerHAT._get_typed_from_cache(self, field_name, addr, cache)
+
+    def _check_stats_log(self):
+        """통계 로깅 — HAT 호환."""
+        self._read_count += 1
+
     def _read_inverter_data_dynamic(self):
-        """Generic register-map-driven inverter data reading for pymodbus Serial.
-        Delegates to the HAT version's logic via the same algorithm."""
-        # Reuse HAT's dynamic reader -- it calls self._read_reg / self._read_typed_value
+        """범용 RegisterMap 기반 인버터 데이터 읽기 — HAT 로직 위임."""
         return ModbusHandlerHAT._read_inverter_data_dynamic(self)
 
     def _read_inverter_data_blocks(self):
@@ -2598,6 +2337,22 @@ class ModbusHandlerSerial:
     def _format_h01_from_raw(self, physical):
         """물리값 → H01 형식 변환 (Serial 버전 — HAT 로직 위임)."""
         return ModbusHandlerHAT._format_h01_from_raw(self, physical)
+
+    def read_control_status(self):
+        """DER-AVM 제어 상태 읽기 — HAT 로직 위임."""
+        return ModbusHandlerHAT.read_control_status(self)
+
+    def read_monitor_data(self):
+        """DER-AVM 모니터링 데이터 읽기 — HAT 로직 위임."""
+        return ModbusHandlerHAT.read_monitor_data(self)
+
+    def write_control(self, control_type: int, value: int):
+        """제어 명령 쓰기 — HAT 로직 위임."""
+        return ModbusHandlerHAT.write_control(self, control_type, value)
+
+    def get_iv_scan_data(self, string_num):
+        """IV Scan 데이터 읽기 — HAT 로직 위임."""
+        return ModbusHandlerHAT.get_iv_scan_data(self, string_num)
 
     def read_inverter_data(self):
         """Read inverter data via pymodbus (same logic as HAT version)"""
@@ -2747,95 +2502,185 @@ class ModbusHandlerSerial:
             return None
     
     def write_control(self, control_type: int, value: int):
-        """Write control to inverter via pymodbus"""
+        """Write control to inverter via pymodbus (Serial/TCP)."""
         if not self.connected:
             return False
-        
+
+        # pymodbus 2.x/3.x compatible single register write
+        def _write_reg(addr, val):
+            try:
+                try:
+                    r = self.client.write_register(addr, value=val, slave=self.slave_id)
+                except TypeError:
+                    try:
+                        r = self.client.write_register(addr, value=val, device_id=self.slave_id)
+                    except TypeError:
+                        r = self.client.write_register(addr, val, slave=self.slave_id)
+                return r is not None and not r.isError()
+            except Exception as e:
+                self.logger.error(f"write_register error addr={hex(addr)} val={val}: {e}")
+                return False
+
         try:
+            def _get(*names, default=None):
+                for n in names:
+                    v = getattr(self.RegMap, n, None)
+                    if v is not None:
+                        return v
+                return default
+
             reg_map = {
-                CTRL_INV_ON_OFF: getattr(self.RegMap, 'INVERTER_ON_OFF', None),
-                CTRL_INV_ACTIVE_POWER: getattr(self.RegMap, 'ACTIVE_POWER_PCT', None),
-                CTRL_INV_POWER_FACTOR: getattr(self.RegMap, 'POWER_FACTOR_SET', None),
-                CTRL_INV_REACTIVE_POWER: getattr(self.RegMap, 'REACTIVE_POWER_SET', None),
-                CTRL_INV_IV_SCAN: getattr(self.RegMap, 'IV_SCAN_COMMAND', None),
+                CTRL_INV_ON_OFF: _get('INVERTER_ON_OFF', default=0x0834),
+                CTRL_INV_ACTIVE_POWER: _get('ACTIVE_POWER_PCT', 'DER_ACTIVE_POWER_PCT', default=0x07D3),
+                CTRL_INV_POWER_FACTOR: _get('POWER_FACTOR_SET', 'DER_POWER_FACTOR_SET', default=0x07D0),
+                CTRL_INV_REACTIVE_POWER: _get('REACTIVE_POWER_SET', 'DER_REACTIVE_POWER_PCT', default=0x07D2),
+                CTRL_INV_IV_SCAN: _get('IV_SCAN_COMMAND', default=0x600D),
             }
 
             if control_type == CTRL_INV_CONTROL_INIT:
-                # Control Init: Reset all control values
-                # ON_OFF: 0=Run(ON), 1=Stop(OFF) in register
                 results = []
-                if getattr(self.RegMap, 'INVERTER_ON_OFF', None) is not None:
-                    results.append(self.client.write_register(
-                        self.RegMap.INVERTER_ON_OFF, 0, slave=self.slave_id))
-                if getattr(self.RegMap, 'ACTIVE_POWER_PCT', None) is not None:
-                    results.append(self.client.write_register(
-                        self.RegMap.ACTIVE_POWER_PCT, 1000, slave=self.slave_id))
-                if getattr(self.RegMap, 'POWER_FACTOR_SET', None) is not None:
-                    results.append(self.client.write_register(
-                        self.RegMap.POWER_FACTOR_SET, 1000, slave=self.slave_id))
-                if getattr(self.RegMap, 'REACTIVE_POWER_SET', None) is not None:
-                    results.append(self.client.write_register(
-                        self.RegMap.REACTIVE_POWER_SET, 0, slave=self.slave_id))
-                return all(not r.isError() for r in results) if results else True
-            
+                results.append(_write_reg(_get('INVERTER_ON_OFF', default=0x0834), 0))
+                results.append(_write_reg(_get('ACTIVE_POWER_PCT', 'DER_ACTIVE_POWER_PCT', default=0x07D3), 1000))
+                results.append(_write_reg(_get('POWER_FACTOR_SET', 'DER_POWER_FACTOR_SET', default=0x07D0), 1000))
+                results.append(_write_reg(_get('REACTIVE_POWER_SET', 'DER_REACTIVE_POWER_PCT', default=0x07D2), 0))
+                return all(results)
+
             reg = reg_map.get(control_type)
-            if reg:
-                result = self.client.write_register(reg, value, slave=self.slave_id)
-                return not result.isError()
+            if reg is not None:
+                self.logger.info(f"Modbus WRITE: Reg=0x{reg:04X} Value={value} (ctrl_type={control_type})")
+                ok = _write_reg(reg, value)
+                self.logger.info(f"Modbus WRITE result: {ok}")
+                return ok
             return False
-        except:
+        except Exception as e:
+            self.logger.error(f"write_control error: {e}")
             return False
     
     def read_model_info(self):
-        """Read inverter model information via pymodbus"""
+        """Read inverter model information via pymodbus (FC03 or FC04)."""
         if not self.connected:
             return None
 
-        # Guard: register module must have device info registers
-        if not hasattr(self.RegMap, 'DEVICE_MODEL'):
+        # Multi-name lookup helper (different register files use different names)
+        def _addr(*names):
+            for n in names:
+                a = getattr(self.RegMap, n, None)
+                if a is not None and isinstance(a, int):
+                    return a
+            return None
+
+        device_model_addr = _addr('DEVICE_MODEL', 'DEVICE_MODEL_NAME', 'MODEL')
+        serial_addr = _addr('SERIAL_NUMBER', 'DEVICE_SERIAL_NUMBER', 'SERIAL_NUMBER_BASE')
+        mppt_count_addr = _addr('MPPT_COUNT')
+        np_lo_addr = _addr('NOMINAL_POWER_LOW', 'NOMINAL_POWER_L', 'NOMINAL_POWER')
+        np_hi_addr = _addr('NOMINAL_POWER_HIGH', 'NOMINAL_POWER_H')
+
+        # Guard: bail out only when NEITHER model nor serial is known.
+        # Some protocols expose only a serial number and use a U16 code for
+        # the model (Sungrow, Solis, Growatt, Sunways) — we still want to
+        # return the serial in that case.
+        if device_model_addr is None and serial_addr is None:
             return {'model': '', 'serial': '', 'mppt_count': 4,
                     'string_count': 8, 'nominal_power': 50000}
+
+        # FC03 (holding) vs FC04 (input) — driven by register module
+        use_fc04 = getattr(self, 'rtu_fc_code', 3) == 4
+        if use_fc04:
+            read_fn = self.client.read_input_registers
+        else:
+            read_fn = self.client.read_holding_registers
+
+        def _read(addr, count):
+            """pymodbus 2.x/3.x compatible read (count + slave kw variations)."""
+            try:
+                # pymodbus 3.7+: device_id (count keyword-only)
+                return read_fn(addr, count=count, device_id=self.slave_id)
+            except TypeError:
+                pass
+            try:
+                # pymodbus 3.0-3.6: slave (count keyword-only)
+                return read_fn(addr, count=count, slave=self.slave_id)
+            except TypeError:
+                pass
+            try:
+                # pymodbus 2.x: unit, positional count
+                return read_fn(addr, count, unit=self.slave_id)
+            except Exception as e:
+                self.logger.error(f"read_model_info read error addr={hex(addr)}: {e}")
+                return None
 
         try:
             info = {}
 
-            # Model name (16 registers = 32 bytes)
-            result = self.client.read_holding_registers(self.RegMap.DEVICE_MODEL, 16, slave=self.slave_id)
-            if not result.isError():
-                model_bytes = b''
-                for reg in result.registers:
-                    model_bytes += bytes([(reg >> 8) & 0xFF, reg & 0xFF])
-                info['model'] = model_bytes.rstrip(b'\x00').decode('utf-8', errors='ignore')
+            # Register counts come from the register file's *_SIZE attributes
+            # when present so each inverter's actual PDF width is honored
+            # (e.g. Huawei model is 15 regs, Kstar model is 5 regs).
+            model_regs = getattr(self.RegMap, 'DEVICE_MODEL_SIZE', None) or 16
+            serial_regs = getattr(self.RegMap, 'DEVICE_SERIAL_NUMBER_SIZE', None) or 8
+
+            # Model name. When DEVICE_MODEL_SIZE == 1 the register holds a
+            # single U16 type code (Sungrow/Solis/Growatt/Sunways PDFs do
+            # not expose an ASCII model string). Resolve it through the
+            # register file's MODEL_CODE_MAP {code: name} lookup; if the
+            # code is unknown, format it as hex so the dashboard still
+            # shows something traceable to the PDF Appendix tables.
+            if device_model_addr is not None:
+                result = _read(device_model_addr, model_regs)
+                if result is not None and not result.isError():
+                    if model_regs == 1:
+                        code = result.registers[0] & 0xFFFF
+                        code_map = getattr(self.reg_module, 'MODEL_CODE_MAP', {}) or {}
+                        info['model'] = code_map.get(code, f'CODE_0x{code:04X}')
+                    else:
+                        model_bytes = b''
+                        for reg in result.registers:
+                            model_bytes += bytes([(reg >> 8) & 0xFF, reg & 0xFF])
+                        info['model'] = model_bytes.rstrip(b'\x00').decode('utf-8', errors='ignore')
+                else:
+                    info['model'] = ''
             else:
                 info['model'] = ''
 
-            # Serial number (8 registers = 16 bytes)
-            result = self.client.read_holding_registers(self.RegMap.SERIAL_NUMBER, 8, slave=self.slave_id)
-            if not result.isError():
-                serial_bytes = b''
-                for reg in result.registers:
-                    serial_bytes += bytes([(reg >> 8) & 0xFF, reg & 0xFF])
-                info['serial'] = serial_bytes.rstrip(b'\x00').decode('utf-8', errors='ignore')
+            # Serial number
+            if serial_addr is not None:
+                result = _read(serial_addr, serial_regs)
+                if result is not None and not result.isError():
+                    serial_bytes = b''
+                    for reg in result.registers:
+                        serial_bytes += bytes([(reg >> 8) & 0xFF, reg & 0xFF])
+                    info['serial'] = serial_bytes.rstrip(b'\x00').decode('utf-8', errors='ignore')
+                else:
+                    info['serial'] = ''
             else:
                 info['serial'] = ''
 
             # MPPT count
-            result = self.client.read_holding_registers(self.RegMap.MPPT_COUNT, 1, slave=self.slave_id)
-            info['mppt_count'] = result.registers[0] if not result.isError() else 4
+            if mppt_count_addr is not None:
+                result = _read(mppt_count_addr, 1)
+                info['mppt_count'] = (result.registers[0]
+                                      if (result is not None and not result.isError())
+                                      else 4)
+            else:
+                info['mppt_count'] = 4
 
             # String count (managed via config file, use default)
             info['string_count'] = 8
 
-            # Nominal power
-            result_low = self.client.read_holding_registers(self.RegMap.NOMINAL_POWER_LOW, 1, slave=self.slave_id)
-            result_high = self.client.read_holding_registers(self.RegMap.NOMINAL_POWER_HIGH, 1, slave=self.slave_id)
-            if not result_low.isError() and not result_high.isError():
-                info['nominal_power'] = self.reg_to_u32(result_low.registers[0], result_high.registers[0])
+            # Nominal power (U32, low+high words)
+            if np_lo_addr is not None and np_hi_addr is not None:
+                result_low = _read(np_lo_addr, 1)
+                result_high = _read(np_hi_addr, 1)
+                if (result_low is not None and not result_low.isError()
+                        and result_high is not None and not result_high.isError()):
+                    info['nominal_power'] = self.reg_to_u32(
+                        result_low.registers[0], result_high.registers[0])
+                else:
+                    info['nominal_power'] = 50000
             else:
                 info['nominal_power'] = 50000
-            
+
             return info
-            
+
         except Exception as e:
             self.logger.error(f"Read model info error: {e}")
             return None
@@ -2940,10 +2785,14 @@ class ModbusHandlerSerial:
         
         try:
             data = {}
-            
+
+            def _rd(addr, count):
+                """pymodbus 2.x/3.x 호환 read helper for relay/weather."""
+                return _pymodbus_call(self.client.read_holding_registers, addr, count, slave_id)
+
             # Read block 1: Phase voltage V1,V2,V3 + Current A1,A2,A3 (addr 6-17, 12 regs)
-            result = self.client.read_holding_registers(KDU300RegisterMap.V1, 12, slave=slave_id)
-            if not result.isError() and len(result.registers) >= 12:
+            result = _rd(KDU300RegisterMap.V1, 12)
+            if result is not None and not result.isError() and len(result.registers) >= 12:
                 data['r_voltage'] = registers_to_float(result.registers[0], result.registers[1])
                 data['s_voltage'] = registers_to_float(result.registers[2], result.registers[3])
                 data['t_voltage'] = registers_to_float(result.registers[4], result.registers[5])
@@ -2953,10 +2802,10 @@ class ModbusHandlerSerial:
             else:
                 self.logger.error("Failed to read relay voltage/current")
                 return None
-            
+
             # Read block 2: Active power W1,W2,W3,Total (addr 18-25, 8 regs)
-            result = self.client.read_holding_registers(KDU300RegisterMap.W1, 8, slave=slave_id)
-            if not result.isError() and len(result.registers) >= 8:
+            result = _rd(KDU300RegisterMap.W1, 8)
+            if result is not None and not result.isError() and len(result.registers) >= 8:
                 data['r_active_power'] = registers_to_float(result.registers[0], result.registers[1])
                 data['s_active_power'] = registers_to_float(result.registers[2], result.registers[3])
                 data['t_active_power'] = registers_to_float(result.registers[4], result.registers[5])
@@ -2964,35 +2813,35 @@ class ModbusHandlerSerial:
             else:
                 self.logger.error("Failed to read relay power")
                 return None
-            
+
             # Read block 3: Avg PF, Frequency (addr 48-51, 4 regs)
-            result = self.client.read_holding_registers(KDU300RegisterMap.AVG_PF, 4, slave=slave_id)
-            if not result.isError() and len(result.registers) >= 4:
+            result = _rd(KDU300RegisterMap.AVG_PF, 4)
+            if result is not None and not result.isError() and len(result.registers) >= 4:
                 data['avg_power_factor'] = registers_to_float(result.registers[0], result.registers[1])
                 data['frequency'] = registers_to_float(result.registers[2], result.registers[3])
             else:
                 self.logger.error("Failed to read relay PF/frequency")
                 return None
-            
+
             # Read block 4: Energy +Wh, -Wh (addr 52-55, 4 regs)
-            result = self.client.read_holding_registers(KDU300RegisterMap.POSITIVE_WH, 4, slave=slave_id)
-            if not result.isError() and len(result.registers) >= 4:
+            result = _rd(KDU300RegisterMap.POSITIVE_WH, 4)
+            if result is not None and not result.isError() and len(result.registers) >= 4:
                 data['received_energy'] = registers_to_float(result.registers[0], result.registers[1])
                 data['sent_energy'] = registers_to_float(result.registers[2], result.registers[3])
             else:
                 self.logger.error("Failed to read relay energy")
                 return None
-            
+
             # Read block 5: DO status (addr 92, 1 reg)
-            result = self.client.read_holding_registers(KDU300RegisterMap.DO_STATUS, 1, slave=slave_id)
-            if not result.isError() and len(result.registers) >= 1:
+            result = _rd(KDU300RegisterMap.DO_STATUS, 1)
+            if result is not None and not result.isError() and len(result.registers) >= 1:
                 data['do_status'] = result.registers[0]
             else:
                 data['do_status'] = 0
-            
+
             # Read block 6: DI1 status (addr 98, 1 reg)
-            result = self.client.read_holding_registers(KDU300RegisterMap.DI1, 1, slave=slave_id)
-            if not result.isError() and len(result.registers) >= 1:
+            result = _rd(KDU300RegisterMap.DI1, 1)
+            if result is not None and not result.isError() and len(result.registers) >= 1:
                 data['di_status'] = result.registers[0]
             else:
                 data['di_status'] = 0
@@ -3026,10 +2875,13 @@ class ModbusHandlerSerial:
         
         try:
             data = {}
-            
+
+            def _rd(addr, count):
+                return _pymodbus_call(self.client.read_holding_registers, addr, count, slave_id)
+
             # Read block 1: Air temp, humidity, pressure, wind speed, direction (addr 1-5, 5 regs)
-            result = self.client.read_holding_registers(SEM5046RegisterMap.AIR_TEMP, 5, slave=slave_id)
-            if not result.isError() and len(result.registers) >= 5:
+            result = _rd(SEM5046RegisterMap.AIR_TEMP, 5)
+            if result is not None and not result.isError() and len(result.registers) >= 5:
                 data['air_temp'] = raw_to_air_temp(result.registers[0])
                 data['air_humidity'] = raw_to_humidity(result.registers[1])
                 data['air_pressure'] = raw_to_pressure(result.registers[2])
@@ -3038,29 +2890,29 @@ class ModbusHandlerSerial:
             else:
                 self.logger.error("Failed to read weather basic data")
                 return None
-            
+
             # Read block 2: Module temp 1, Horizontal radiation, accum (addr 6-8, 3 regs)
-            result = self.client.read_holding_registers(SEM5046RegisterMap.MODULE_TEMP_1, 3, slave=slave_id)
-            if not result.isError() and len(result.registers) >= 3:
+            result = _rd(SEM5046RegisterMap.MODULE_TEMP_1, 3)
+            if result is not None and not result.isError() and len(result.registers) >= 3:
                 data['module_temp_1'] = raw_to_module_temp(result.registers[0])
                 data['horizontal_radiation'] = result.registers[1]
                 data['horizontal_accum'] = raw_to_accum_radiation(result.registers[2])
             else:
                 self.logger.error("Failed to read weather radiation data")
                 return None
-            
+
             # Read block 3: Inclined radiation, accum (addr 13-14, 2 regs)
-            result = self.client.read_holding_registers(SEM5046RegisterMap.INCLINED_RADIATION, 2, slave=slave_id)
-            if not result.isError() and len(result.registers) >= 2:
+            result = _rd(SEM5046RegisterMap.INCLINED_RADIATION, 2)
+            if result is not None and not result.isError() and len(result.registers) >= 2:
                 data['inclined_radiation'] = result.registers[0]
                 data['inclined_accum'] = raw_to_accum_radiation(result.registers[1])
             else:
                 self.logger.error("Failed to read weather inclined radiation")
                 return None
-            
+
             # Read block 4: Module temp 2,3,4 (addr 17-19, 3 regs)
-            result = self.client.read_holding_registers(SEM5046RegisterMap.MODULE_TEMP_2, 3, slave=slave_id)
-            if not result.isError() and len(result.registers) >= 3:
+            result = _rd(SEM5046RegisterMap.MODULE_TEMP_2, 3)
+            if result is not None and not result.isError() and len(result.registers) >= 3:
                 data['module_temp_2'] = raw_to_module_temp(result.registers[0])
                 data['module_temp_3'] = raw_to_module_temp(result.registers[1])
                 data['module_temp_4'] = raw_to_module_temp(result.registers[2])
@@ -3108,10 +2960,20 @@ class PymodbusAdapter:
         self._total = 0
         self._ok = 0
 
+    def _call_pymodbus(self, fn, address, count, slave_id):
+        """pymodbus 2.x/3.x 호환 호출."""
+        try:
+            return fn(address, count=count, slave=slave_id)
+        except TypeError:
+            try:
+                return fn(address, count=count, device_id=slave_id)
+            except TypeError:
+                return fn(address=address, count=count, slave=slave_id)
+
     def read_holding_registers(self, address: int, count: int, slave_id: int):
         """FC03 — 성공 시 list[int], 실패 시 None"""
         try:
-            resp = self._client.read_holding_registers(address, count, slave=slave_id)
+            resp = self._call_pymodbus(self._client.read_holding_registers, address, count, slave_id)
             if resp is None or resp.isError():
                 self._total += 1
                 return None
@@ -3125,7 +2987,7 @@ class PymodbusAdapter:
     def read_input_registers(self, address: int, count: int, slave_id: int):
         """FC04 — 성공 시 list[int], 실패 시 None"""
         try:
-            resp = self._client.read_input_registers(address, count, slave=slave_id)
+            resp = self._call_pymodbus(self._client.read_input_registers, address, count, slave_id)
             if resp is None or resp.isError():
                 self._total += 1
                 return None
@@ -3139,7 +3001,13 @@ class PymodbusAdapter:
     def write_single_register(self, address: int, value: int, slave_id: int) -> bool:
         """FC06 — 성공 시 True"""
         try:
-            resp = self._client.write_register(address, value, slave=slave_id)
+            try:
+                resp = self._client.write_register(address, value=value, slave=slave_id)
+            except TypeError:
+                try:
+                    resp = self._client.write_register(address, value=value, device_id=slave_id)
+                except TypeError:
+                    resp = self._client.write_register(address, value, slave=slave_id)
             ok = resp is not None and not resp.isError()
             self._total += 1
             if ok:
@@ -3158,143 +3026,45 @@ class PymodbusAdapter:
         return s
 
 
-class KstarModbusHandlerSerial(KstarModbusHandler, ModbusHandlerSerial):
-    """Kstar KSG-60KT-M1 전용 핸들러 — PC / USB-RS485 어댑터용 (pymodbus).
+class ModbusHandlerTcp(ModbusHandlerSerial):
+    """Modbus TCP master — 테스트 모드 전용.
 
-    MRO: KstarModbusHandlerSerial → KstarModbusHandler → ModbusHandlerHAT
-                                  → ModbusHandlerSerial
-
-    - read_inverter_data / read_monitor_data / read_control_status / write_control:
-        KstarModbusHandler 버전 사용 (self.master API 기반, FC04/FC03/FC06)
-    - connect / disconnect: 본 클래스에서 오버라이드 (pymodbus + PymodbusAdapter)
+    시뮬레이터(equipment_simulator.py --tcp-port)와 TCP 통신.
+    ModbusHandlerSerial을 상속하여 read/write 메서드 재사용,
+    connect()만 오버라이드하여 TcpClient 사용.
     """
-    VERSION = "1.0.0"
 
-    def __init__(self, port: str, baudrate: int = 9600, slave_id: int = 1,
-                 shared_client=None):
-        # ModbusHandlerSerial 초기화 (self.port, self.baudrate, self.slave_id, client=None)
-        ModbusHandlerSerial.__init__(self, port, baudrate, slave_id)
-        # KstarModbusHandler 메서드가 사용하는 HAT 속성
-        self.master = None
-        self.connected = False
-        self.channel = 1   # 더미값 (HAT 없음)
-        # ModbusHandlerHAT.__init__() 가 설정하는 통계 속성
-        # (KstarModbusHandler.read_inverter_data → _check_stats_log 에서 참조)
-        self._read_count = 0
-        self._last_stats_log = 0
-        self._stats_log_interval = 100
-        # PC 모드에서 먼저 연결된 ModbusSerialClient 를 공유받아 포트 재오픈 방지
-        self._shared_client = shared_client
+    def __init__(self, host: str = '127.0.0.1', port: int = 5020, slave_id: int = 1,
+                 reg_module=None, shared_client=None):
+        # ModbusHandlerSerial init: fake port/baudrate
+        super().__init__(port=f'tcp://{host}:{port}', baudrate=9600, slave_id=slave_id,
+                         reg_module=reg_module, shared_client=shared_client)
+        self._tcp_host = host
+        self._tcp_port = port
 
-    def connect(self) -> bool:
-        """pymodbus 직렬 포트 연결 후 PymodbusAdapter를 self.master 로 설정.
-
-        shared_client 가 주어진 경우 기존 연결을 재사용 (PC 단일 COM 포트 환경).
-        """
-        if self._shared_client is not None:
-            # 이미 열린 포트 재사용 — 새 connect() 없이 slave_id 만 변경
-            self.client = self._shared_client
-            self.master = PymodbusAdapter(self.client)
-            self.connected = True
-            self.logger.info(
-                f"KstarSerial: reusing shared client for {self.port} "
-                f"(slave={self.slave_id})")
-            return True
-        if not PYMODBUS_AVAILABLE:
-            self.logger.error("KstarSerial: pymodbus not available")
-            return False
-        try:
-            self.client = ModbusSerialClient(
-                port=self.port, baudrate=self.baudrate,
-                bytesize=8, parity='N', stopbits=1, timeout=1,
-            )
-            if self.client.connect():
-                self.master = PymodbusAdapter(self.client)
-                self.connected = True
-                self.logger.info(
-                    f"KstarSerial: connected to {self.port} @ {self.baudrate}bps "
-                    f"(slave={self.slave_id})")
-                return True
-            self.logger.error(f"KstarSerial: failed to open {self.port}")
-            return False
-        except Exception as e:
-            self.logger.error(f"KstarSerial connect error: {e}")
-            return False
-
-    def disconnect(self):
-        # 공유 클라이언트인 경우 포트를 닫지 않음 (다른 핸들러가 사용 중)
-        if not self._shared_client and self.client:
-            self.client.close()
-        self.connected = False
-        self.master = None
-
-
-class HuaweiModbusHandlerSerial(HuaweiModbusHandler, ModbusHandlerSerial):
-    """Huawei SUN2000-50KTL 전용 핸들러 — PC / USB-RS485 어댑터용 (pymodbus).
-
-    MRO: HuaweiModbusHandlerSerial → HuaweiModbusHandler → ModbusHandlerHAT
-                                   → ModbusHandlerSerial
-
-    - read_inverter_data: HuaweiModbusHandler 버전 (FC03 Holding Register)
-    - read_monitor_data:  HuaweiModbusHandler 버전 (Huawei AC 레지스터)
-    - connect / disconnect: 본 클래스에서 오버라이드 (pymodbus + PymodbusAdapter)
-    """
-    VERSION = "1.0.0"
-
-    def __init__(self, port: str, baudrate: int = 9600, slave_id: int = 1,
-                 shared_client=None):
-        ModbusHandlerSerial.__init__(self, port, baudrate, slave_id)
-        self.master = None
-        self.connected = False
-        self.channel = 1   # 더미값
-        # ModbusHandlerHAT.__init__() 가 설정하는 통계 속성
-        # (HuaweiModbusHandler.read_inverter_data → _check_stats_log 에서 참조)
-        self._read_count = 0
-        self._last_stats_log = 0
-        self._stats_log_interval = 100
-        # PC 모드에서 먼저 연결된 ModbusSerialClient 를 공유받아 포트 재오픈 방지
-        self._shared_client = shared_client
-
-    def connect(self) -> bool:
-        """pymodbus 직렬 포트 연결 후 PymodbusAdapter를 self.master 로 설정.
-
-        shared_client 가 주어진 경우 기존 연결을 재사용 (PC 단일 COM 포트 환경).
-        """
+    def connect(self):
+        """TCP 연결 후 PymodbusAdapter로 self.master 설정."""
         if self._shared_client is not None:
             self.client = self._shared_client
             self.master = PymodbusAdapter(self.client)
             self.connected = True
-            self.logger.info(
-                f"HuaweiSerial: reusing shared client for {self.port} "
-                f"(slave={self.slave_id})")
+            self.logger.info(f"TCP: reusing shared client (slave={self.slave_id})")
             return True
         if not PYMODBUS_AVAILABLE:
-            self.logger.error("HuaweiSerial: pymodbus not available")
+            self.logger.error("TCP: pymodbus not available")
             return False
         try:
-            self.client = ModbusSerialClient(
-                port=self.port, baudrate=self.baudrate,
-                bytesize=8, parity='N', stopbits=1, timeout=1,
-            )
+            self.client = ModbusTcpClient(self._tcp_host, port=self._tcp_port, timeout=2)
             if self.client.connect():
                 self.master = PymodbusAdapter(self.client)
                 self.connected = True
-                self.logger.info(
-                    f"HuaweiSerial: connected to {self.port} @ {self.baudrate}bps "
-                    f"(slave={self.slave_id})")
+                self.logger.info(f"TCP: connected to {self._tcp_host}:{self._tcp_port} (slave={self.slave_id})")
                 return True
-            self.logger.error(f"HuaweiSerial: failed to open {self.port}")
+            self.logger.error(f"TCP: failed to connect {self._tcp_host}:{self._tcp_port}")
             return False
         except Exception as e:
-            self.logger.error(f"HuaweiSerial connect error: {e}")
+            self.logger.error(f"TCP connect error: {e}")
             return False
-
-    def disconnect(self):
-        # 공유 클라이언트인 경우 포트를 닫지 않음 (다른 핸들러가 사용 중)
-        if not self._shared_client and self.client:
-            self.client.close()
-        self.connected = False
-        self.master = None
 
 
 class ModbusHandlerSimulation:
@@ -3377,14 +3147,26 @@ class ModbusHandlerSimulation:
         # P = √3 × V × I × PF, for single phase: I = P / V
         phase_current = int(ac_p / 3 / 380) if ac_p > 0 else 0
         
+        # MPPT: raw register 형식 (voltage=0.1V, current=0.01A)
+        mppt_count = getattr(self.reg_module, 'MPPT_CHANNELS', 4)
         mppt = []
-        for i in range(4):
+        pv_per_mppt = pv_p / max(mppt_count, 1) if pv_p > 0 else 0
+        for i in range(mppt_count):
+            mppt_v_phys = 380 + i * 5 + sun * 20  # V (물리값)
+            mppt_c_phys = pv_per_mppt / mppt_v_phys if mppt_v_phys > 0 else 0  # A
             mppt.append({
-                'voltage': 380 + i*5 + sun*20,
-                'current': 12*sun + i*0.5
+                'voltage': int(mppt_v_phys * 10),   # 0.1V raw
+                'current': int(mppt_c_phys * 100),   # 0.01A raw
             })
-        
-        strings = [8.5*sun + i*0.2 for i in range(8)]
+
+        # String: raw 0.01A 단위
+        str_count = getattr(self.reg_module, 'STRING_CHANNELS', 8)
+        strings_per_mppt = max(str_count // max(mppt_count, 1), 1)
+        strings = []
+        for i in range(str_count):
+            mppt_idx = min(i // strings_per_mppt, mppt_count - 1)
+            str_c = mppt[mppt_idx]['current'] / strings_per_mppt if mppt_count > 0 else 0
+            strings.append(int(str_c))
         
         return {
             'pv_voltage': pv_v,
@@ -3542,15 +3324,22 @@ class ModbusHandlerSimulation:
         threading.Thread(target=scan_thread, daemon=True).start()
     
     def read_control_status(self):
-        """Read current control status (for H05 Body Type 13)"""
+        """Read current control status (for H05 Body Type 13).
+
+        Must return RAW register-scale values (not physical floats) to match
+        protocol_handler.create_h05_control_check which packs int() values
+        via '>HhHhH'. HAT/Serial handlers return raw values (pf/rp: -1000..1000,
+        ap: 0..1000); Simulation must match for parity.
+        """
         pf = self._power_factor if self._power_factor < 32768 else self._power_factor - 65536
-        
+        rp = self._reactive_power if self._reactive_power < 32768 else self._reactive_power - 65536
+
         return {
             'on_off': self._on_off,
-            'power_factor': pf / 1000.0,
+            'power_factor': pf,          # raw -1000..1000 (was pf/1000.0)
             'operation_mode': 0,
-            'reactive_power_pct': self._reactive_power / 10.0,  # %
-            'active_power_pct': self._power_limit / 10.0,  # %
+            'reactive_power_pct': rp,    # raw -1000..1000 (was rp/10.0 %)
+            'active_power_pct': self._power_limit,  # raw 0..1000 (was /10 %)
             'iv_scan_status': self._iv_scan_status  # 0=Idle, 1=Running, 2=Finished
         }
     
@@ -3630,14 +3419,33 @@ class ModbusHandlerSimulation:
         }
     
     def read_model_info(self):
-        """Read simulated model info"""
+        """Read simulated model info (per-protocol)"""
+        # Per-protocol display name + nominal power
+        _PROTO_MODEL = {
+            'solarize':  ('SRPV-3-50-KS-SIM',  50000),
+            'huawei':    ('SUN2000-50KTL-SIM', 50000),
+            'kstar':     ('KSG-60K-DM-SIM',    60000),
+            'sungrow':   ('SG50CX-SIM',        50000),
+            'ekos':      ('EKOS-10K-SIM',      10000),
+            'senergy':   ('SE-50K-SIM',        50000),
+            'sofar':     ('SOFAR-70KTL-SIM',   70000),
+            'solis':     ('SOLIS-50K-SIM',     50000),
+            'growatt':   ('MOD-30KTL3-SIM',    30000),
+            'cps':       ('CPS-50KTL-SIM',     50000),
+            'sunways':   ('STT-30KTL-SIM',     30000),
+        }
+        proto = (self.protocol or 'solarize').lower()
+        model_name, nominal = _PROTO_MODEL.get(proto, ('SRPV-3-50-KS-SIM', 50000))
+        # Stable serial: protocol prefix + slave_id zero-padded
+        prefix = proto[:3].upper()
+        serial = f"{prefix}{self.slave_id:08d}"
         return {
-            'model': 'SRPV-3-50-KS-SIM',
-            'serial': 'SIM001234',
-            'firmware': 'V1.4.0-SIM',
-            'nominal_power': 50000,
+            'model': model_name,
+            'serial': serial,
+            'firmware': 'V2.0.0-SIM',
+            'nominal_power': nominal,
             'mppt_count': 4,
-            'string_count': 8
+            'string_count': self.string_count,
         }
     
     def read_device_info(self):
@@ -3735,13 +3543,18 @@ class MultiDeviceHandler:
 
     def __init__(self, use_hat: bool = True, use_cm4: bool = False,
                  channel: int = 1, serial_port: str = '/dev/ttyUSB0',
-                 baudrate: int = 9600, simulation_mode: bool = False):
+                 baudrate: int = 9600, simulation_mode: bool = False,
+                 tcp_host: str = None, tcp_port: int = None):
         self.use_hat = use_hat
         self.use_cm4 = use_cm4
         self.channel = channel
         self.serial_port = serial_port
         self.baudrate = baudrate
         self.simulation_mode = simulation_mode
+        # Modbus TCP test mode
+        self.tcp_host = tcp_host
+        self.tcp_port = tcp_port
+        self.use_tcp = bool(tcp_host and tcp_port)
         self.handlers = {}
         self.logger = logging.getLogger(__name__)
         # PC serial 모드에서 첫 번째로 연결된 ModbusSerialClient 를 공유
@@ -3778,6 +3591,10 @@ class MultiDeviceHandler:
 
         if use_simulation:
             return ModbusHandlerSimulation(slave_id), "SIM"
+        elif self.use_tcp:
+            # TCP test mode — relay/weather over the same simulator endpoint
+            return ModbusHandlerTcp(self.tcp_host, self.tcp_port, slave_id,
+                                    shared_client=self._shared_pc_client), "TCP"
         elif self.use_cm4:
             return ModbusHandlerCM4(ch, br, slave_id), "CM4"
         elif self.use_hat:
@@ -3894,54 +3711,32 @@ class MultiDeviceHandler:
         
         # Per-device simulation mode takes priority
         use_simulation = simulation or self.simulation_mode
-        _proto_lower = protocol.lower()
-        is_kstar  = 'kstar' in _proto_lower
-        is_huawei = 'huawei' in _proto_lower
 
-        # Solarize 계열 (kstar/huawei 제외): 동적 레지스터 로딩
-        reg_mod = None
-        if not is_kstar and not is_huawei:
-            reg_mod = load_register_module(protocol)
+        # 모든 프로토콜에 대해 동적 레지스터 모듈 로딩
+        reg_mod = load_register_module(protocol)
 
         if use_simulation:
             handler = ModbusHandlerSimulation(
                 slave_id, reg_module=reg_mod,
                 protocol=protocol, string_count=string_count,
                 iv_scan_data_points=iv_scan_data_points)
-        elif is_kstar:
-            # Kstar 전용 핸들러: FC04 read_inverter_data / DER-AVM 오버라이드
-            if self.use_cm4:
-                handler = KstarModbusHandlerCM4(channel, baudrate, slave_id)
-            elif self.use_hat:
-                handler = KstarModbusHandler(channel, baudrate, slave_id)
-            else:   # PC serial mode (USB-RS485 어댑터)
-                # 동일 COM 포트를 재open 하지 않도록 공유 클라이언트 전달
-                handler = KstarModbusHandlerSerial(
-                    self.serial_port, baudrate, slave_id,
-                    shared_client=self._shared_pc_client)
-        elif is_huawei:
-            # Huawei SUN2000 전용 핸들러: FC03 Holding Register 맵 오버라이드
-            if self.use_cm4:
-                handler = HuaweiModbusHandlerCM4(channel, baudrate, slave_id)
-            elif self.use_hat:
-                handler = HuaweiModbusHandler(channel, baudrate, slave_id)
-            else:   # PC serial mode (USB-RS485 어댑터)
-                handler = HuaweiModbusHandlerSerial(
-                    self.serial_port, baudrate, slave_id,
-                    shared_client=self._shared_pc_client)
+        elif self.use_tcp:
+            handler = ModbusHandlerTcp(self.tcp_host, self.tcp_port, slave_id,
+                                        reg_module=reg_mod,
+                                        shared_client=self._shared_pc_client)
         elif self.use_cm4:
             handler = ModbusHandlerCM4(channel, baudrate, slave_id, reg_module=reg_mod)
         elif self.use_hat:
             handler = ModbusHandlerHAT(channel, baudrate, slave_id, reg_module=reg_mod)
         else:
             handler = ModbusHandlerSerial(self.serial_port, baudrate, slave_id,
-                                          reg_module=reg_mod)
+                                          reg_module=reg_mod,
+                                          shared_client=self._shared_pc_client)
 
         if handler.connect():
             self._save_shared_pc_client(handler)   # PC 모드: 첫 연결 클라이언트 저장
-            proto_tag = f"/{protocol}" if (is_kstar or is_huawei) else ""
-            mode = "SIM" if use_simulation else ("CM4" if self.use_cm4 else ("HAT" if self.use_hat else "Serial"))
-            self.logger.info(f"add_device: {device_type}{proto_tag} slave={slave_id}, mode={mode}")
+            mode = "SIM" if use_simulation else ("TCP" if self.use_tcp else ("CM4" if self.use_cm4 else ("HAT" if self.use_hat else "Serial")))
+            self.logger.info(f"add_device: {device_type}/{protocol} slave={slave_id}, mode={mode}")
 
             # Register handler in handlers dict for read_monitor_data etc.
             if device_type == 'inverter':

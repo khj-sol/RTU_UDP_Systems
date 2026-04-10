@@ -18,11 +18,16 @@ import os
 import re
 import time
 import logging
+<<<<<<< HEAD
 import ipaddress
+=======
+from starlette.requests import Request
+from starlette.responses import StreamingResponse
+>>>>>>> 9837d06791ee1e2c66fd4a43108878afbb4ff0a1
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, UploadFile, Query
+from fastapi import APIRouter, HTTPException, UploadFile, Query, WebSocket
 from pydantic import BaseModel
 
 import sys
@@ -605,6 +610,78 @@ async def control_rtu_info(cmd: ControlCommand):
 
 
 # =========================================================================
+# Modbus Test Endpoints
+# =========================================================================
+
+class ModbusTestCommand(BaseModel):
+    rtu_id: int
+    slave_id: int              # 1-247
+    function_code: int         # 3, 4, 6, or 16
+    register_address: int      # 0-65535
+    count: int = 1             # For FC03/04: 1-125 registers to read
+    values: list = []          # For FC06: [single_value], FC16: [v1, v2, ...]
+
+
+@router.post("/control/modbus_test")
+async def control_modbus_test(cmd: ModbusTestCommand):
+    """Send raw Modbus read/write test command to RTU."""
+    if cmd.slave_id < 1 or cmd.slave_id > 247:
+        raise HTTPException(400, "slave_id must be 1-247")
+    if cmd.function_code not in (3, 4, 6, 16):
+        raise HTTPException(400, "function_code must be 3, 4, 6, or 16")
+    if cmd.function_code in (3, 4) and (cmd.count < 1 or cmd.count > 125):
+        raise HTTPException(400, "count must be 1-125 for read operations")
+    if cmd.function_code == 6 and len(cmd.values) != 1:
+        raise HTTPException(400, "FC06 requires exactly 1 value")
+    if cmd.function_code == 16 and len(cmd.values) < 1:
+        raise HTTPException(400, "FC16 requires at least 1 value")
+    # For write, count = number of values
+    count = cmd.count
+    values = None
+    if cmd.function_code in (6, 16):
+        values = [int(v) & 0xFFFF for v in cmd.values]
+        count = len(values)
+
+    if not engine:
+        raise HTTPException(503, "UDP engine not running")
+    result = engine.send_h03_modbus_test(
+        cmd.rtu_id, cmd.function_code, cmd.slave_id,
+        cmd.register_address, count, values)
+    if not result.get('ok'):
+        raise HTTPException(404, f"RTU {cmd.rtu_id} not connected")
+    tx_hex = result.get('packet_hex', '')
+
+    op = 'WRITE' if values else 'READ'
+    # Save event
+    try:
+        await database.save_event(
+            cmd.rtu_id, f"MODBUS_TEST_{op}",
+            f"FC{cmd.function_code:02d} slave={cmd.slave_id} "
+            f"addr=0x{cmd.register_address:04X} count={count}")
+    except Exception:
+        pass
+
+    return {"status": "sent", "rtu_id": cmd.rtu_id,
+            "function_code": cmd.function_code,
+            "slave_id": cmd.slave_id,
+            "address": f"0x{cmd.register_address:04X}",
+            "count": count,
+            "tx_packet": tx_hex}
+
+
+@router.get("/modbus_test/result/{rtu_id}")
+async def modbus_test_result(rtu_id: int):
+    """Get latest Modbus test result for an RTU (polling fallback)."""
+    if not engine:
+        return {"result": None}
+    results = getattr(engine, '_modbus_test_results', {})
+    result = results.get(rtu_id)
+    if not result:
+        return {"result": None}
+    return {"result": result}
+
+
+# =========================================================================
 # Firmware Endpoints
 # =========================================================================
 
@@ -1097,4 +1174,387 @@ async def get_stats():
         stats.get('h05_received', 0) + stats.get('h06_sent', 0) +
         stats.get('h08_received', 0)
     )
+
+    # ── Server resource metrics ──────────────────────────────────────
+    import psutil, shutil
+    proc = psutil.Process()
+
+    # CPU / memory (system-wide)
+    stats['cpu_percent'] = psutil.cpu_percent(interval=0)
+    mem = psutil.virtual_memory()
+    stats['mem_total_mb'] = round(mem.total / 1048576)
+    stats['mem_used_mb'] = round(mem.used / 1048576)
+    stats['mem_percent'] = mem.percent
+
+    # Process memory (dashboard only)
+    pmem = proc.memory_info()
+    stats['proc_mem_mb'] = round(pmem.rss / 1048576, 1)
+
+    # Disk free
+    disk = shutil.disk_usage('.')
+    stats['disk_total_gb'] = round(disk.total / 1073741824, 1)
+    stats['disk_free_gb'] = round(disk.free / 1073741824, 1)
+    stats['disk_percent'] = round((disk.total - disk.free) / disk.total * 100, 1)
+
+    # DB file size
+    db_path = database.db_path if database else 'web_server_prod/rtu_dashboard.db'
+    db_size = 0
+    for ext in ('', '-wal', '-shm'):
+        try:
+            db_size += os.path.getsize(db_path + ext)
+        except OSError:
+            pass
+    stats['db_size_mb'] = round(db_size / 1048576, 2)
+
+    # DB table row counts
+    if database and database.db:
+        try:
+            table_counts = {}
+            for table in ('inverter_data', 'relay_data', 'weather_data',
+                          'event_log', 'control_status', 'control_monitor',
+                          'rtu_registry'):
+                async with database.db.execute(
+                        f"SELECT COUNT(*) FROM {table}") as cur:
+                    row = await cur.fetchone()
+                    table_counts[table] = row[0] if row else 0
+            stats['db_tables'] = table_counts
+        except Exception:
+            stats['db_tables'] = {}
+
+    # WebSocket clients
+    if ws:
+        stats['ws_clients'] = len(ws.active_connections)
+
     return stats
+
+
+# =========================================================================
+# Model Maker v2 Process Management
+# =========================================================================
+import subprocess, signal
+
+_mm2_process: subprocess.Popen | None = None
+_MM2_PORT = 8082
+_MM2_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                         'inverter_model_maker')
+
+
+def _mm2_is_running() -> bool:
+    global _mm2_process
+    if _mm2_process and _mm2_process.poll() is None:
+        return True
+    _mm2_process = None
+    return False
+
+
+@router.get("/mm2/status")
+async def mm2_status():
+    """Check if Model Maker v2 server is running."""
+    return {"running": _mm2_is_running(), "port": _MM2_PORT}
+
+
+@router.post("/mm2/start")
+async def mm2_start():
+    """Start Model Maker v2 server on port 8082."""
+    global _mm2_process
+    if _mm2_is_running():
+        return {"status": "already_running", "port": _MM2_PORT}
+    try:
+        _mm2_log = open(os.path.join(_MM2_DIR, 'mm2_server.log'), 'w', encoding='utf-8')
+        _mm2_process = subprocess.Popen(
+            [sys.executable, "-m", "uvicorn",
+             "model_maker_web_v2.backend.main:app",
+             "--host", "0.0.0.0", "--port", str(_MM2_PORT)],
+            cwd=_MM2_DIR,
+            stdout=_mm2_log, stderr=_mm2_log,
+            env={**os.environ, 'PYTHONIOENCODING': 'utf-8'},
+        )
+        # Give it a moment to start
+        import asyncio
+        await asyncio.sleep(1.5)
+        if _mm2_process.poll() is not None:
+            return {"status": "failed", "returncode": _mm2_process.returncode}
+        return {"status": "started", "port": _MM2_PORT, "pid": _mm2_process.pid}
+    except Exception as e:
+        return {"status": "error", "detail": str(e)}
+
+
+@router.get("/mm2/ai-settings")
+async def mm2_ai_settings_get():
+    """Read AI settings from config/ai_settings.ini."""
+    import configparser
+    cfg_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            'config', 'ai_settings.ini')
+    cp = configparser.ConfigParser()
+    cp.read(cfg_path, encoding='utf-8')
+    key = cp.get('claude_api', 'api_key', fallback='')
+    model = cp.get('claude_api', 'model', fallback='claude-sonnet-4-6')
+    has_key = bool(key and key != 'YOUR_ANTHROPIC_API_KEY_HERE')
+    # Return masked key for display (only last 8 chars visible)
+    masked = ('*' * max(0, len(key) - 8) + key[-8:]) if has_key else ''
+    # modelmaker flag: YES=show tab, NO=hide tab
+    mm_flag = cp.get('claude_api', 'modelmaker', fallback='NO').strip().upper()
+    mt_flag = cp.get('claude_api', 'modbustest', fallback='NO').strip().upper()
+    return {"has_key": has_key, "masked_key": masked, "model": model,
+            "modelmaker_enabled": mm_flag == 'YES',
+            "modbustest_enabled": mt_flag == 'YES'}
+
+
+@router.post("/mm2/ai-settings")
+async def mm2_ai_settings_save(request: Request):
+    """Save AI settings to config/ai_settings.ini."""
+    import configparser
+    data = await request.json()
+    api_key = data.get('api_key', '').strip()
+    model = data.get('model', 'claude-sonnet-4-6').strip()
+    if not api_key:
+        raise HTTPException(status_code=400, detail="API key is required")
+    cfg_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            'config', 'ai_settings.ini')
+    cp = configparser.ConfigParser()
+    cp.read(cfg_path, encoding='utf-8')
+    if not cp.has_section('claude_api'):
+        cp.add_section('claude_api')
+    cp.set('claude_api', 'api_key', api_key)
+    cp.set('claude_api', 'model', model)
+    with open(cfg_path, 'w', encoding='utf-8') as f:
+        cp.write(f)
+    return {"status": "saved", "model": model}
+
+
+@router.post("/mm2/ai-generate")
+async def mm2_ai_generate(request: Request):
+    """AI 1-click: PDF → Claude API → *_registers.py directly.
+
+    Bypasses Stage 1/2/3 entirely. Claude reads the full PDF text and
+    generates the complete register file in one shot.
+    """
+    import anthropic, configparser, tempfile
+    from starlette.datastructures import UploadFile as StarletteUpload
+
+    # Parse multipart form
+    form = await request.form()
+    file: StarletteUpload = form.get('file')
+    mppt_count = int(form.get('mppt_count', 4))
+    string_count = int(form.get('string_count', 8))
+    capacity = form.get('capacity', '50kW')
+
+    if not file:
+        raise HTTPException(400, "No file uploaded")
+
+    # Read AI settings
+    cfg_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            'config', 'ai_settings.ini')
+    cp = configparser.ConfigParser()
+    cp.read(cfg_path, encoding='utf-8')
+    api_key = cp.get('claude_api', 'api_key', fallback='')
+    model = cp.get('claude_api', 'model', fallback='claude-sonnet-4-6')
+    if not api_key or api_key == 'YOUR_ANTHROPIC_API_KEY_HERE':
+        raise HTTPException(400, "Claude API key not configured")
+
+    # Save uploaded file temporarily
+    content = await file.read()
+    fname = file.filename or 'upload.pdf'
+    manufacturer = fname.split('-')[0].split('_')[0].replace('PV', '').strip()
+
+    # Extract text from PDF
+    import fitz
+    doc = fitz.open(stream=content, filetype='pdf')
+    pdf_text = '\n\n'.join(
+        f'--- Page {i+1} ---\n{page.get_text()}'
+        for i, page in enumerate(doc) if i < 80
+    )[:200000]
+    doc.close()
+
+    # Call Claude API
+    client = anthropic.Anthropic(api_key=api_key)
+
+    # Read Solarize register file as reference template
+    ref_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            'common', 'Solarize_50_3_MPPT4_STR8_registers.py')
+    ref_code = ''
+    if os.path.exists(ref_path):
+        with open(ref_path, 'r', encoding='utf-8') as f:
+            ref_code = f.read()[:15000]
+
+    prompt = f"""You are a Modbus protocol expert. Generate a complete Python register file for an RTU system.
+
+INVERTER: {manufacturer} {capacity}, 3-phase, {mppt_count} MPPT, {string_count} strings
+PDF FILENAME: {fname}
+
+REQUIREMENTS:
+1. Output a COMPLETE Python file (class RegisterMap, InverterMode, StatusConverter, SCALE, DATA_TYPES, H01_FIELD_MAP, etc.)
+2. Follow the EXACT same structure as the reference template below
+3. Map ALL registers from the PDF: monitoring, status, error codes, device info, control, DER-AVM
+4. MPPT_CHANNELS = {mppt_count}, STRING_CHANNELS = {string_count}
+5. Use Solarize SCALE convention: voltage=0.1, current=0.01, power=0.1, frequency=0.01, power_factor=0.001
+6. Include DER-AVM block (0x03E8-0x03FD) and DER control (0x07D0-0x07D3, 0x0834)
+7. ErrorCode BITS dict: extract actual alarm bit definitions from PDF if available
+8. U32_WORD_ORDER: detect from PDF (HL or LH)
+9. RTU_FC_CODE: detect from PDF (3 for FC03, 4 for FC04)
+
+REFERENCE TEMPLATE (Solarize — follow this structure exactly):
+```python
+{ref_code}
+```
+
+PDF DOCUMENT TEXT:
+{pdf_text}
+
+OUTPUT: Complete Python register file. ONLY Python code, no markdown fences, no explanation."""
+
+    response = client.messages.create(
+        model=model,
+        max_tokens=32000,
+        thinking={"type": "adaptive"},
+        messages=[{"role": "user", "content": prompt}],
+    )
+
+    # Extract Python code from response
+    code = ''
+    for block in response.content:
+        if block.type == 'text':
+            code += block.text
+
+    # Clean up markdown fences if present
+    if '```python' in code:
+        code = code.split('```python', 1)[1]
+        if '```' in code:
+            code = code.rsplit('```', 1)[0]
+    code = code.strip()
+
+    # Validate syntax
+    try:
+        compile(code, '<ai_generated>', 'exec')
+    except SyntaxError as e:
+        raise HTTPException(422, f"AI generated code has syntax error: {e}")
+
+    # Determine output filename
+    proto_name = f"{manufacturer}_{capacity.replace('kW','')}_3_MPPT{mppt_count}_STR{string_count}"
+    output_name = f"{proto_name}_registers.py"
+
+    # Save to results/
+    results_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                               'inverter_model_maker', 'model_maker_web_v2', 'results', manufacturer)
+    os.makedirs(results_dir, exist_ok=True)
+    output_path = os.path.join(results_dir, output_name)
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write(code)
+
+    # Also save to common/ (if not protected)
+    common_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'common')
+    common_path = os.path.join(common_dir, output_name)
+    deployed = False
+    protected = output_name in {
+        'Solarize_50_3_MPPT4_STR8_registers.py', 'Sungrow_50_3_MPPT4_STR8_registers.py',
+        'Kstar_60_3_MPPT3_STR9_registers.py', 'Huawei_50_3_MPPT4_STR8_registers.py',
+        'Ekos_10_3_MPPT1_STR2_registers.py', 'Senergy_50_3_MPPT4_STR8_registers.py',
+        'Sofar_50_3_MPPT4_STR8_registers.py', 'Solis_50_3_MPPT4_STR8_registers.py',
+        'Growatt_30_3_MPPT3_STR6_registers.py', 'CPS_50_3_MPPT3_STR9_registers.py',
+        'Sunways_30_3_MPPT3_STR6_registers.py',
+    }
+    if not protected:
+        import shutil
+        shutil.copy2(output_path, common_path)
+        deployed = True
+
+    tokens_in = response.usage.input_tokens
+    tokens_out = response.usage.output_tokens
+
+    return {
+        "status": "success",
+        "output_name": output_name,
+        "output_path": output_path,
+        "deployed": deployed,
+        "protected": protected,
+        "lines": len(code.split('\n')),
+        "tokens": f"{tokens_in}+{tokens_out}",
+        "model": model,
+    }
+
+
+@router.post("/mm2/stop")
+async def mm2_stop():
+    """Stop Model Maker v2 server."""
+    global _mm2_process
+    if not _mm2_is_running():
+        return {"status": "not_running"}
+    try:
+        _mm2_process.terminate()
+        _mm2_process.wait(timeout=5)
+    except Exception:
+        _mm2_process.kill()
+    _mm2_process = None
+    return {"status": "stopped"}
+
+
+# ── MM2 Reverse Proxy ──────────────────────────────────────────────────
+# Proxy /mm2-app/* to localhost:8082/* so the iframe works through the
+# same origin (port 8080) without requiring port 8082 to be forwarded
+# through the router/NAT. This avoids the "connection refused" error
+# when accessing the dashboard via a DDNS hostname.
+import httpx
+
+_mm2_http_client: httpx.AsyncClient | None = None
+
+def _get_mm2_client():
+    global _mm2_http_client
+    if _mm2_http_client is None:
+        _mm2_http_client = httpx.AsyncClient(base_url=f"http://127.0.0.1:{_MM2_PORT}", timeout=30.0)
+    return _mm2_http_client
+
+@router.websocket("/mm2-app/api/ws/{session_id}")
+async def mm2_ws_proxy(websocket: WebSocket, session_id: str):
+    """WebSocket reverse proxy to MM2 server."""
+    import websockets
+    await websocket.accept()
+    mm2_ws_url = f"ws://127.0.0.1:{_MM2_PORT}/api/ws/{session_id}"
+    try:
+        async with websockets.connect(mm2_ws_url) as mm2_ws:
+            import asyncio
+            async def forward_to_client():
+                async for msg in mm2_ws:
+                    await websocket.send_text(msg)
+            async def forward_to_mm2():
+                while True:
+                    data = await websocket.receive_text()
+                    await mm2_ws.send(data)
+            await asyncio.gather(forward_to_client(), forward_to_mm2())
+    except Exception:
+        pass
+    finally:
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+
+
+@router.api_route("/mm2-app/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
+async def mm2_proxy(request: Request, path: str = ""):
+    """Reverse-proxy all requests to the local MM2 server."""
+    if not _mm2_is_running():
+        raise HTTPException(status_code=503, detail="Model Maker v2 is not running. Start it first.")
+    client = _get_mm2_client()
+    url = f"/{path}"
+    if request.query_params:
+        url += f"?{request.query_params}"
+    try:
+        body = await request.body()
+        resp = await client.request(
+            method=request.method,
+            url=url,
+            headers={k: v for k, v in request.headers.items()
+                     if k.lower() not in ('host', 'content-length', 'transfer-encoding')},
+            content=body if body else None,
+        )
+        excluded = {'content-encoding', 'content-length', 'transfer-encoding'}
+        headers = {k: v for k, v in resp.headers.items() if k.lower() not in excluded}
+        return StreamingResponse(
+            content=iter([resp.content]),
+            status_code=resp.status_code,
+            headers=headers,
+        )
+    except httpx.ConnectError:
+        raise HTTPException(status_code=502, detail="Cannot connect to MM2 server on port 8082")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
