@@ -155,6 +155,9 @@ class RegisterMap:
     DER_REACTIVE_POWER_PCT                   = 0x07D2
     DER_ACTIVE_POWER_PCT                     = 0x07D3
     INVERTER_ON_OFF                          = 0x0834
+    MPPT_COUNT                               = 3
+    NOMINAL_POWER_LOW                        = 0x0017
+    NOMINAL_POWER_HIGH                       = 0x0018
 
 
     # Device info (FC03) — Sunways PV Protocol V00.07

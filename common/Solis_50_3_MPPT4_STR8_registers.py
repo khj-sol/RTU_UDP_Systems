@@ -133,6 +133,9 @@ class RegisterMap:
     # which the simulator initializes. Real Solis hardware would need a
     # specialized handler that issues FC06 writes of 0xBE/0xDE to 3007.
     INVERTER_ON_OFF                          = 0x0834
+    MPPT_COUNT                               = 4
+    NOMINAL_POWER_LOW                        = 0x0017
+    NOMINAL_POWER_HIGH                       = 0x0018
     ACTIVE_POWER_LIMIT                       = 0x0BEC  # 3052 (10000=100%) — real hw only
     POWER_LIMIT_ENABLE                       = 0x0BFE  # 3070 0xAA=enable
     REACTIVE_POWER_LIMIT                     = 0x0BEB  # 3051

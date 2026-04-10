@@ -162,6 +162,9 @@ class RegisterMap:
     DER_REACTIVE_POWER_PCT                   = 0x07D2
     DER_ACTIVE_POWER_PCT                     = 0x07D3
     INVERTER_ON_OFF                          = 0x0834
+    MPPT_COUNT                               = 4
+    NOMINAL_POWER_LOW                        = 0x0017
+    NOMINAL_POWER_HIGH                       = 0x0018
 
     # H01 aliases
     L1_VOLTAGE                               = PHASE_A_VOLTAGE
@@ -194,6 +197,7 @@ class RegisterMap:
     DEVICE_MODEL                             = 0x7530
     DEVICE_MODEL_SIZE                        = 15
     DEVICE_SERIAL_NUMBER                     = 0x753F
+    SERIAL_NUMBER = DEVICE_SERIAL_NUMBER                    
     DEVICE_SERIAL_NUMBER_SIZE                = 10
 
 

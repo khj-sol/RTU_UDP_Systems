@@ -55,6 +55,9 @@ class RegisterMap:
     # =========================================================================
     POWER_FACTOR                             = 0x0000  # U16
     PV_STRING_COUNT                          = 0x0002  # U16
+    MPPT_COUNT                               = 4
+    NOMINAL_POWER_LOW                        = 0x0017
+    NOMINAL_POWER_HIGH                       = 0x0018
     REACTIVE_POWER                           = 0x0003  # U16
     DC_DC_START                              = 0x0004  # U16
     INVERTER_START                           = 0x0005  # U16

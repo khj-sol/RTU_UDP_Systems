@@ -119,6 +119,9 @@ class RegisterMap:
     DER_REACTIVE_POWER_PCT                   = 0x07D2
     DER_ACTIVE_POWER_PCT                     = 0x07D3
     INVERTER_ON_OFF                          = 0x0834
+    MPPT_COUNT                               = 4
+    NOMINAL_POWER_LOW                        = 0x0017
+    NOMINAL_POWER_HIGH                       = 0x0018
 
     # Device info: Sofar 1-70KTL G1/G2 PDF v1.01 does NOT document model name
     # or serial number registers. Allocate synthetic simulator-only addresses
@@ -129,6 +132,7 @@ class RegisterMap:
     DEVICE_MODEL                             = 0x1A00
     DEVICE_MODEL_SIZE                        = 16
     DEVICE_SERIAL_NUMBER                     = 0x1A10
+    SERIAL_NUMBER = DEVICE_SERIAL_NUMBER                    
     DEVICE_SERIAL_NUMBER_SIZE                = 8
 
 

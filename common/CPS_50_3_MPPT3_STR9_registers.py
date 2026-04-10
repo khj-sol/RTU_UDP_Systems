@@ -138,6 +138,10 @@ class RegisterMap:
 
     # Control (FC06)
     INVERTER_ON_OFF                          = 0x6001  # 0=on, 1=shutdown
+    MPPT_COUNT                               = 3
+    NOMINAL_POWER_LOW                        = 0x0017
+    NOMINAL_POWER_HIGH                       = 0x0018
+    SERIAL_NUMBER = DEVICE_SERIAL_NUMBER                    
     ACTIVE_POWER_LIMIT                       = 0x5104  # 10..1000 = 1.0..100.0%
     REACTIVE_POWER_PCT                       = 0x5114  # 1..1000
     POWER_FACTOR_SET                         = 0x5031  # S16, [-1000,-800]u[800,1000]

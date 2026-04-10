@@ -813,7 +813,8 @@ function ControlTab({
     'h04_response', 'H03_SENT',
     'control_check', 'control_result',
     'iv_scan_success', 'iv_scan_data', 'iv_scan_complete',
-    'rtu_info',
+    'rtu_info', 'inverter_model',
+    'modbus_test_result',
   ]);
   // Deduplicate: track last logged event per type to suppress repeats
   const lastLoggedRef = useRef({});

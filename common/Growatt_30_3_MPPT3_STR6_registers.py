@@ -147,6 +147,9 @@ class RegisterMap:
     # Control (synthetic 0x6000+ to avoid collision with input 0x0000-area)
     # PDF holding addresses are 0x0000(OnOff)/0x0003(P%)/0x0004(Q%)/0x0005(PF)
     INVERTER_ON_OFF                          = 0x6000
+    MPPT_COUNT                               = 3
+    NOMINAL_POWER_LOW                        = 0x0017
+    NOMINAL_POWER_HIGH                       = 0x0018
     ACTIVE_POWER_LIMIT                       = 0x6003
     REACTIVE_POWER_LIMIT                     = 0x6004
     POWER_FACTOR_SET                         = 0x6005
