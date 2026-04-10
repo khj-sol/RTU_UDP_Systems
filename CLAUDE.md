@@ -12,6 +12,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - pyc 캐시 삭제도 자동 실행
 - **모델메이커 자동테스트는 반드시 main 디렉토리에서 실행**: worktree의 `inverter_model_maker/temp`, `results/`, `common/*_registers.py` 가 비어 있어 사용자가 배치파일로 실행한 결과(누적된 세션/캐시 사용)와 어긋남. 코드 수정 → merge 후 `cd /c/Users/kyuch/Solarize/CM4_4RS485/RTU_UDP/V2_0_0/inverter_model_maker` 에서 stage1/2/3 테스트 실행해야 `START_모델메이커_WEB_v2.bat` 과 동일 환경.
 - **모델**: claude-opus-4-6[1m] (Opus 4.6, 1M context) 기본 사용
+- **테스트 환경 원상복구 필수**: 테스트 시 변경한 설정/프로세스는 테스트 완료 후 반드시 원상복구한다.
+  - `START_DASHBOARD.bat` watchdog로 서버가 실행 중이면 `python -m web_server_prod.main`으로 직접 시작하지 말 것 (포트 충돌 → 크래시 반복)
+  - 서버 재시작이 필요하면 기존 프로세스만 kill → bat watchdog가 자동 재시작
+  - RTU config (`config/rtu_config.ini`, `config/rs485_ch*.ini`) 변경 시 원래 값 기록 → 테스트 후 복구
+  - Pi RTU config (SSH `pi@172.30.1.40`) 변경 시 동일하게 복구
+  - 테스트용 임시 파일 (`test_*.py`, `test_*_output*/`) 삭제
+  - DB 직접 수정 (event_log, rtu_registry 삭제 등) 시 사용자에게 보고
 
 ## Project Overview
 
