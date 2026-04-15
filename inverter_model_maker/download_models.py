@@ -12,7 +12,7 @@ import sys
 PHI_REPO = "microsoft/Phi-4-mini-instruct"
 PHI_REVISION = "main"
 
-QWEN_REPO = "Qwen/Qwen3-VL-32B-4bit"
+QWEN_REPO = "QuantTrio/Qwen3-VL-32B-Instruct-AWQ"
 QWEN_REVISION = "main"
 
 MODELS_DIR = "C:/models"
