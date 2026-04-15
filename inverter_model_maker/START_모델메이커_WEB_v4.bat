@@ -13,20 +13,25 @@ echo   Stage 1 -^> Stage 2 -^> Stage 3
 echo ============================================
 echo.
 
-echo [1/4] Clearing pycache...
+echo [1/5] Clearing pycache...
 for /d /r "model_maker_web_v4" %%d in (__pycache__) do @if exist "%%d" rd /s /q "%%d"
 
-echo [2/4] Installing dependencies...
-"%PYTHON%" -m pip install fastapi "uvicorn[standard]" python-multipart openpyxl PyMuPDF transformers torch accelerate bitsandbytes Pillow websockets -q
+echo [2/5] Installing Windows dependencies (Phi + FastAPI)...
+"%PYTHON%" -m pip install fastapi "uvicorn[standard]" python-multipart openpyxl PyMuPDF transformers torch accelerate bitsandbytes Pillow websockets requests -q
 
-echo [3/4] Checking HuggingFace models...
-echo   Note: Phi-4-mini-instruct and Qwen3-VL-32B-4bit should be downloaded to:
-echo   - C:/models/Phi-4-mini-instruct
-echo   - C:/models/Qwen3-VL-32B-4bit
-echo   If not available, models will be downloaded on first use (requires ~30GB disk space).
+echo [3/5] Starting Qwen3-VL WSL inference server (port 8084)...
+echo   Qwen3-VL runs in WSL to avoid gptqmodel/sys.abiflags build error on Windows.
+set "WSL_SCRIPT=/mnt/c/Users/user/Desktop/CODE/RTU_UDP_Systems/inverter_model_maker/model_maker_web_v4/wsl_server/start_server.sh"
+start "QwenVL-WSL-8084" wsl -e bash -c "bash '%WSL_SCRIPT%'"
+echo   WSL server starting in background...
+timeout /t 3 /nobreak > nul
+
+echo [4/5] Checking HuggingFace models...
+echo   Note: Phi-4-mini-instruct should be at C:/models/Phi-4-mini-instruct
+echo   Note: Qwen3-VL-32B-4bit should be at /mnt/c/models/Qwen3-VL-32B-4bit (WSL path)
 echo.
 
-echo [4/4] Starting server...
+echo [5/5] Starting server...
 echo.
 start "" http://localhost:8083
 
