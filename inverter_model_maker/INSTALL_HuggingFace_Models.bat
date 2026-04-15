@@ -1,5 +1,5 @@
 @echo off
-chcp 65001 > /dev/null
+chcp 65001 > nul
 title Model Maker V4 - HuggingFace Models Setup
 cd /d "%~dp0"
 
@@ -13,7 +13,7 @@ echo ================================================
 echo.
 
 echo [1/3] Installing Python dependencies...
-"%PYTHON%" -m pip install transformers torch accelerate bitsandbytes pillow huggingface-hub -q
+"%PYTHON%" -m pip install "transformers>=4.50.0" "torch>=2.3.0" accelerate bitsandbytes pillow "huggingface-hub>=0.24.0" -q
 echo   Done.
 echo.
 

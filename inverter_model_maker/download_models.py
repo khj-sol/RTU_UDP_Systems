@@ -2,72 +2,64 @@
 # -*- coding: utf-8 -*-
 """
 Download Phi-4-mini-instruct and Qwen3-VL-32B-4bit from HuggingFace
+Uses snapshot_download() to avoid model-class import issues.
 Usage: python download_models.py [phi|qwen|all]
 """
 import os
 import sys
 
+# Pinned revisions — update these if a specific commit is required
+PHI_REPO = "microsoft/Phi-4-mini-instruct"
+PHI_REVISION = "main"
+
+QWEN_REPO = "Qwen/Qwen3-VL-32B-4bit"
+QWEN_REVISION = "main"
+
+MODELS_DIR = "C:/models"
+
+
+def _snapshot(repo_id: str, local_dir: str, revision: str):
+    """Download all repo files using huggingface_hub.snapshot_download."""
+    from huggingface_hub import snapshot_download
+    snapshot_download(
+        repo_id=repo_id,
+        local_dir=local_dir,
+        revision=revision,
+        local_dir_use_symlinks=False,
+        ignore_patterns=["*.msgpack", "flax_model*", "tf_model*", "rust_model*"],
+    )
+
+
 def download_phi():
-    """Download Phi-4-mini-instruct model"""
-    from transformers import AutoTokenizer, AutoModelForCausalLM
-
-    models_dir = "C:/models"
-    os.makedirs(models_dir, exist_ok=True)
-
-    phi_path = os.path.join(models_dir, "Phi-4-mini-instruct")
-    if not os.path.exists(phi_path):
-        print("[Downloading] Phi-4-mini-instruct...")
-        try:
-            AutoTokenizer.from_pretrained(
-                "microsoft/Phi-4-mini-instruct",
-                trust_remote_code=True,
-                cache_dir=models_dir
-            )
-            AutoModelForCausalLM.from_pretrained(
-                "microsoft/Phi-4-mini-instruct",
-                trust_remote_code=True,
-                device_map="cpu",
-                torch_dtype="auto",
-                cache_dir=models_dir
-            )
-            print("[Done] Phi-4-mini-instruct downloaded")
-        except Exception as e:
-            print(f"[Error] Phi download failed: {e}")
-            sys.exit(1)
-    else:
+    os.makedirs(MODELS_DIR, exist_ok=True)
+    phi_path = os.path.join(MODELS_DIR, "Phi-4-mini-instruct")
+    if os.path.exists(phi_path) and os.listdir(phi_path):
         print("[Skip] Phi-4-mini-instruct already exists")
+        return
+    print(f"[Downloading] {PHI_REPO} (revision={PHI_REVISION}) ...")
+    try:
+        _snapshot(PHI_REPO, phi_path, PHI_REVISION)
+        print("[Done] Phi-4-mini-instruct downloaded")
+    except Exception as e:
+        print(f"[Error] Phi download failed: {e}")
+        sys.exit(1)
+
 
 def download_qwen():
-    """Download Qwen3-VL-32B-4bit model"""
-    from transformers import AutoProcessor, AutoModelForVision2Seq
-
-    models_dir = "C:/models"
-    os.makedirs(models_dir, exist_ok=True)
-
-    qwen_path = os.path.join(models_dir, "Qwen3-VL-32B-4bit")
-    if not os.path.exists(qwen_path):
-        print("[Downloading] Qwen3-VL-32B-4bit...")
-        try:
-            AutoProcessor.from_pretrained(
-                "Qwen/Qwen3-VL-32B-4bit",
-                trust_remote_code=True,
-                cache_dir=models_dir
-            )
-            AutoModelForVision2Seq.from_pretrained(
-                "Qwen/Qwen3-VL-32B-4bit",
-                trust_remote_code=True,
-                device_map="auto",
-                torch_dtype="auto",
-                cache_dir=models_dir
-            )
-            print("[Done] Qwen3-VL-32B-4bit downloaded")
-        except Exception as e:
-            print(f"[Error] Qwen3-VL download failed: {e}")
-            print("[Info] Try downloading manually from HuggingFace:")
-            print("  https://huggingface.co/Qwen/Qwen3-VL-32B-4bit")
-            sys.exit(1)
-    else:
+    os.makedirs(MODELS_DIR, exist_ok=True)
+    qwen_path = os.path.join(MODELS_DIR, "Qwen3-VL-32B-4bit")
+    if os.path.exists(qwen_path) and os.listdir(qwen_path):
         print("[Skip] Qwen3-VL-32B-4bit already exists")
+        return
+    print(f"[Downloading] {QWEN_REPO} (revision={QWEN_REVISION}) ...")
+    print("  Size: ~22GB — this will take a while")
+    try:
+        _snapshot(QWEN_REPO, qwen_path, QWEN_REVISION)
+        print("[Done] Qwen3-VL-32B-4bit downloaded")
+    except Exception as e:
+        print(f"[Error] Qwen3-VL download failed: {e}")
+        print(f"[Info] Try: https://huggingface.co/{QWEN_REPO}")
+        sys.exit(1)
 
 if __name__ == "__main__":
     mode = sys.argv[1] if len(sys.argv) > 1 else "all"
