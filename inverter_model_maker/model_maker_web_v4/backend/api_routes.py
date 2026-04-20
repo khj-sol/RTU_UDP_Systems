@@ -258,6 +258,11 @@ async def ai_load(body: dict = Body(default={})):
     nem_model_id = cfg.get('nemotron_model_id', 'nvidia/llama-3.1-nemotron-nano-vl-8b-v1')
     sid = body.get('session_id')
 
+    if not nem_path and not nem_api_url:
+        msg = ('Nemotron OCR 미설정 — config/ai_settings.ini [nemotron_ocr] 섹션에 '
+               'model_path (로컬) 또는 api_url (NIM API) 중 하나를 설정하세요.')
+        return {'status': 'not_configured', 'msg': msg}
+
     async def _do_load():
         from .pipeline.ai_nemotron_ocr import get_nemotron_model, get_nemotron_status
         loop = asyncio.get_event_loop()

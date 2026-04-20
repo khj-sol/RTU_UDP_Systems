@@ -503,8 +503,9 @@
       const r = await fetch(`${API}/ai/load`, { method: 'POST' });
       const d = await r.json();
       
-      // WebSocket or polling for progress
-      if (d.status === 'loading') {
+      if (d.status === 'not_configured') {
+        appendLog('s1', `[AI] ⚠ ${d.msg}`, 'err');
+      } else if (d.status === 'loading') {
         appendLog('s1', '[AI] Nemotron OCR 모델 로드 시작됨...', 'ok');
         await new Promise(resolve => setTimeout(resolve, 3000));
         await checkAiStatus();
