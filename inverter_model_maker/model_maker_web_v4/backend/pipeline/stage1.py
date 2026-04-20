@@ -3186,6 +3186,12 @@ def _run_hybrid_ai_extraction(pdf_path: str, ai_settings: dict,
             progress(msg, level)
 
     ai_mode = ai_settings.get('ai_mode', 'full')
+
+    # Nemotron OCR 모드 조기 라우팅
+    if ai_mode in ('nemotron_ocr_en', 'nemotron_ocr_multi'):
+        lang = 'multi' if ai_mode == 'nemotron_ocr_multi' else 'en'
+        return _run_nemotron_ocr_extraction(pdf_path, ai_settings, lang=lang, progress=progress)
+
     phi_path = ai_settings.get('phi_model_path', '')
     phi_device = ai_settings.get('phi_device', 'auto')
     qwen_path = ai_settings.get('qwen_model_path', '')
@@ -3216,23 +3222,24 @@ def _run_hybrid_ai_extraction(pdf_path: str, ai_settings: dict,
         page_counts.append((idx, len(page_regs)))
         for r in page_regs:
             regex_candidates.append({
-                'address': r.get('address', ''),
-                'raw_name': r.get('raw_name') or r.get('name', ''),
-                'data_type': r.get('data_type', 'U16'),
-                'scale': r.get('scale', 1),
-                'unit': r.get('unit', ''),
-                'fc': r.get('fc', 3),
-                'rw': r.get('rw', 'R'),
-                'description': r.get('description') or r.get('comment', ''),
+                'address': r.address_hex or str(r.address),
+                'raw_name': r.definition,
+                'data_type': r.data_type or 'U16',
+                'scale': r.scale or 1,
+                'unit': r.unit or '',
+                'fc': r.fc or 3,
+                'rw': r.rw or 'R',
+                'description': r.comment or '',
             })
     log(f'[Hybrid] regex 후보 {len(regex_candidates)}개')
 
     # ── 3. Phi: JSON 포맷팅 + Critic 검증 ────────────────────────────────
     phi_candidates = regex_candidates
-    if phi_path and ai_mode in ('phi_only', 'full') and regex_candidates:
+    if ai_mode in ('phi_only', 'full') and regex_candidates:
         try:
-            from .ai_phi import get_phi_model
-            phi = get_phi_model(phi_path, phi_device)
+            from .ai_phi import get_phi_model, _phi_instance
+            # 이미 로드된 싱글톤 우선 사용, 없으면 phi_path로 로드
+            phi = _phi_instance if _phi_instance is not None else get_phi_model(phi_path, phi_device)
             if phi:
                 log(f'[Phi] JSON 포맷팅 중... ({len(regex_candidates)}개 후보)')
                 phi_candidates = phi.format_json(regex_candidates)
@@ -3255,13 +3262,14 @@ def _run_hybrid_ai_extraction(pdf_path: str, ai_settings: dict,
             merged[addr] = c
 
     # ── 4 & 5. Qwen3-VL: 희박 페이지 이미지 파싱 ────────────────────────
-    if qwen_path and ai_mode == 'full':
+    if ai_mode == 'full':
         sparse_indices = [idx for idx, cnt in page_counts if cnt < sparse_threshold]
         if sparse_indices:
             log(f'[QwenVL] 희박 페이지 {len(sparse_indices)}개 이미지 파싱 시작...')
             try:
-                from .ai_qwen_vl import get_qwen_vl_model
-                qwen = get_qwen_vl_model(qwen_path, qwen_device, wsl_server_url=qwen_wsl_url)
+                from .ai_qwen_vl import get_qwen_vl_model, _qwen_instance
+                # 이미 로드된 싱글톤 우선 사용, 없으면 qwen_path로 로드
+                qwen = _qwen_instance if _qwen_instance is not None else get_qwen_vl_model(qwen_path, qwen_device, wsl_server_url=qwen_wsl_url)
                 if qwen:
                     qwen_regs = qwen.extract_pages(
                         pdf_path, sparse_indices, dpi=image_dpi, log=log
@@ -3289,6 +3297,77 @@ def _run_hybrid_ai_extraction(pdf_path: str, ai_settings: dict,
     # ── 7. Rule-based 분류 ────────────────────────────────────────────────
     final_registers = _classify_pass1_with_rules(all_candidates, log=log)
     log(f'[Hybrid] 최종 {len(final_registers)}개 레지스터 확정')
+    return final_registers
+
+
+def _run_nemotron_ocr_extraction(pdf_path: str, ai_settings: dict,
+                                 lang: str = 'en',
+                                 progress: 'ProgressCallback' = None) -> List[Dict]:
+    """Nemotron OCR v2 전체 페이지 OCR 추출.
+
+    파이프라인:
+      1. 레지스터 테이블 페이지 필터
+      2. 모든 필터링된 페이지를 NemotronOCR로 이미지 OCR
+      3. Rule-based 분류
+
+    폴백:
+      - Nemotron 로드/API 실패 -> rules-only (빈 목록 반환)
+    """
+    def log(msg, level='info'):
+        if progress:
+            progress(msg, level)
+
+    nemotron_api_url = ai_settings.get('nemotron_api_url', '')
+    nemotron_api_key = ai_settings.get('nemotron_api_key', '')
+    nemotron_model_id = ai_settings.get('nemotron_model_id',
+                                        'nvidia/llama-3.1-nemotron-nano-vl-8b-v1')
+    nemotron_model_path = ai_settings.get('nemotron_model_path', '')
+    nemotron_device = ai_settings.get('nemotron_device', 'auto')
+    image_dpi = int(ai_settings.get('image_dpi', 200))
+
+    # ── 1. 레지스터 테이블 페이지 필터 ───────────────────────────────────────
+    log('[NemotronOCR] PDF 페이지 스캔 중...')
+    all_pages = extract_pdf_text_and_tables(pdf_path, log=log)
+    page_idx_map = {i: p for i, p in enumerate(all_pages) if _is_register_table_page(p)}
+    if not page_idx_map:
+        log('[NemotronOCR] 레지스터 테이블 페이지 감지 실패 -> 전체 페이지 사용', 'warn')
+        page_idx_map = {i: p for i, p in enumerate(all_pages)}
+    log(f'[NemotronOCR] {len(page_idx_map)}/{len(all_pages)} 페이지 OCR 대상')
+
+    # ── 2. Nemotron OCR ──────────────────────────────────────────────────────
+    try:
+        from .ai_nemotron_ocr import get_nemotron_model
+        nem = get_nemotron_model(
+            model_path=nemotron_model_path,
+            device=nemotron_device,
+            api_url=nemotron_api_url,
+            api_key=nemotron_api_key,
+            model_id=nemotron_model_id,
+        )
+        if nem is None:
+            from .ai_nemotron_ocr import _nemotron_error
+            raise RuntimeError(
+                f'NemotronOCR 로드 실패: {_nemotron_error or "api_url 또는 model_path 미설정"}'
+            )
+        ocr_regs = nem.extract_pages(
+            pdf_path,
+            list(page_idx_map.keys()),
+            dpi=image_dpi,
+            lang=lang,
+            log=log,
+        )
+        log(f'[NemotronOCR] 총 {len(ocr_regs)}개 항목 추출')
+    except Exception as e:
+        log(f'[NemotronOCR] 오류: {e} -> 빈 결과 반환', 'warn')
+        return []
+
+    if not ocr_regs:
+        log('[NemotronOCR] 추출 결과 없음', 'warn')
+        return []
+
+    # ── 3. Rule-based 분류 ────────────────────────────────────────────────
+    final_registers = _classify_pass1_with_rules(ocr_regs, log=log)
+    log(f'[NemotronOCR] 최종 {len(final_registers)}개 레지스터 확정')
     return final_registers
 
 

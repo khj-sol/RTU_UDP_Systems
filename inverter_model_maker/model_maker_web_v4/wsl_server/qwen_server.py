@@ -88,7 +88,9 @@ def _load_model():
 async def startup_event():
     import asyncio
     loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, _load_model)
+    # await 없이 백그라운드 실행 → uvicorn이 즉시 요청 수락
+    # /health는 로드 중 503("모델 로드 중"), 완료 후 200 반환
+    loop.run_in_executor(None, _load_model)
 
 
 # ── 요청/응답 모델 ─────────────────────────────────────────────────────────────
