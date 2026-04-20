@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Download Phi-4-mini-instruct and Qwen3-VL-32B-4bit from HuggingFace
+Download Phi-4-mini-instruct, Qwen3-VL-32B-4bit, and Nemotron-Nano-VL-8B from HuggingFace
 Uses snapshot_download() to avoid model-class import issues.
-Usage: python download_models.py [phi|qwen|all]
+Usage: python download_models.py [phi|qwen|nemotron|all]
 """
 import os
 import sys
@@ -14,6 +14,9 @@ PHI_REVISION = "main"
 
 QWEN_REPO = "QuantTrio/Qwen3-VL-32B-Instruct-AWQ"
 QWEN_REVISION = "main"
+
+NEMOTRON_REPO = "nvidia/Llama-3.1-Nemotron-Nano-VL-8B-V1"
+NEMOTRON_REVISION = "main"
 
 MODELS_DIR = "C:/models"
 
@@ -61,6 +64,23 @@ def download_qwen():
         print(f"[Info] Try: https://huggingface.co/{QWEN_REPO}")
         sys.exit(1)
 
+def download_nemotron():
+    os.makedirs(MODELS_DIR, exist_ok=True)
+    nem_path = os.path.join(MODELS_DIR, "Nemotron-Nano-VL-8B")
+    if os.path.exists(nem_path) and os.listdir(nem_path):
+        print("[Skip] Nemotron-Nano-VL-8B already exists")
+        return
+    print(f"[Downloading] {NEMOTRON_REPO} (revision={NEMOTRON_REVISION}) ...")
+    print("  Size: ~16GB — this will take a while")
+    try:
+        _snapshot(NEMOTRON_REPO, nem_path, NEMOTRON_REVISION)
+        print("[Done] Nemotron-Nano-VL-8B downloaded")
+    except Exception as e:
+        print(f"[Error] Nemotron download failed: {e}")
+        print(f"[Info] Try: https://huggingface.co/{NEMOTRON_REPO}")
+        sys.exit(1)
+
+
 if __name__ == "__main__":
     mode = sys.argv[1] if len(sys.argv) > 1 else "all"
 
@@ -68,11 +88,15 @@ if __name__ == "__main__":
         download_phi()
     elif mode == "qwen":
         download_qwen()
+    elif mode == "nemotron":
+        download_nemotron()
     elif mode == "all":
         download_phi()
         print()
         download_qwen()
+        print()
+        download_nemotron()
     else:
         print(f"Unknown mode: {mode}")
-        print("Usage: python download_models.py [phi|qwen|all]")
+        print("Usage: python download_models.py [phi|qwen|nemotron|all]")
         sys.exit(1)
