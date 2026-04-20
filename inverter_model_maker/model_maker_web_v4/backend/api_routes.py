@@ -210,17 +210,21 @@ def _load_ai_settings() -> dict:
         'qwen_wsl_url': cp.get('qwen_vl', 'wsl_server_url', fallback=''),
         'image_dpi': cp.getint('qwen_vl', 'image_dpi', fallback=200),
         'sparse_threshold': cp.getint('qwen_vl', 'sparse_threshold', fallback=3),
+        'nemotron_model_path': cp.get('nemotron_ocr', 'model_path', fallback=''),
+        'nemotron_device': cp.get('nemotron_ocr', 'device', fallback='auto'),
+        'nemotron_api_url': cp.get('nemotron_ocr', 'api_url', fallback=''),
+        'nemotron_api_key': cp.get('nemotron_ocr', 'api_key', fallback=''),
+        'nemotron_model_id': cp.get('nemotron_ocr', 'model_id',
+                                    fallback='nvidia/llama-3.1-nemotron-nano-vl-8b-v1'),
     }
 
 
 @router.get('/ai/status')
 async def ai_status():
-    """HuggingFace 모델 로드 상태 + GPU 메모리 반환."""
-    from .pipeline.ai_phi import get_phi_status
-    from .pipeline.ai_qwen_vl import get_qwen_vl_status
+    """Nemotron OCR 모델 로드 상태 + GPU 메모리 반환."""
+    from .pipeline.ai_nemotron_ocr import get_nemotron_status
 
-    phi_status = get_phi_status()
-    qwen_status = get_qwen_vl_status()
+    nemotron_status = get_nemotron_status()
 
     gpu_info = {}
     try:
@@ -233,62 +237,45 @@ async def ai_status():
         pass
 
     return {
-        'phi': phi_status,
-        'qwen_vl': qwen_status,
+        'nemotron': nemotron_status,
         'gpu_memory_gb': gpu_info,
     }
 
 
 @router.post('/ai/load')
 async def ai_load(body: dict = Body(default={})):
-    """Phi / Qwen-VL 모델 백그라운드 로드.
+    """Nemotron OCR 모델 백그라운드 로드.
 
     body: {
-        phi_model_path?: str,
-        phi_device?: str,
-        qwen_model_path?: str,
-        qwen_device?: str,
         session_id?: str  (WebSocket 진행 스트리밍용)
     }
     """
     cfg = _load_ai_settings()
-    phi_path = body.get('phi_model_path') or cfg.get('phi_model_path', '')
-    phi_device = body.get('phi_device') or cfg.get('phi_device', 'auto')
-    qwen_path = body.get('qwen_model_path') or cfg.get('qwen_model_path', '')
-    qwen_device = body.get('qwen_device') or cfg.get('qwen_device', 'auto')
+    nem_path = cfg.get('nemotron_model_path', '')
+    nem_device = cfg.get('nemotron_device', 'auto')
+    nem_api_url = cfg.get('nemotron_api_url', '')
+    nem_api_key = cfg.get('nemotron_api_key', '')
+    nem_model_id = cfg.get('nemotron_model_id', 'nvidia/llama-3.1-nemotron-nano-vl-8b-v1')
     sid = body.get('session_id')
 
     async def _do_load():
-        from .pipeline.ai_phi import get_phi_model
-        from .pipeline.ai_qwen_vl import get_qwen_vl_model
-
-        if phi_path:
-            if sid:
-                await ws_manager.send_json(sid, {'event': 'log', 'msg': '[AI] Phi 모델 로드 중...'})
-            await asyncio.get_event_loop().run_in_executor(
-                None, get_phi_model, phi_path, phi_device
-            )
-            if sid:
-                from .pipeline.ai_phi import get_phi_status
-                await ws_manager.send_json(sid, {'event': 'log', 'msg': f'[AI] Phi 로드 완료: {get_phi_status()}'})
-
-        if qwen_path:
-            qwen_wsl_url = cfg.get('qwen_wsl_url', '')
-            if sid:
-                mode_label = 'WSL 서버' if qwen_wsl_url else 'local'
-                await ws_manager.send_json(sid, {'event': 'log', 'msg': f'[AI] Qwen-VL 모델 로드 중 ({mode_label})...'})
-            await asyncio.get_event_loop().run_in_executor(
-                None, get_qwen_vl_model, qwen_path, qwen_device, qwen_wsl_url
-            )
-            if sid:
-                from .pipeline.ai_qwen_vl import get_qwen_vl_status
-                await ws_manager.send_json(sid, {'event': 'log', 'msg': f'[AI] Qwen-VL 로드 완료: {get_qwen_vl_status()}'})
+        from .pipeline.ai_nemotron_ocr import get_nemotron_model, get_nemotron_status
+        loop = asyncio.get_event_loop()
 
         if sid:
+            mode_label = 'NIM API' if nem_api_url else 'local'
+            await ws_manager.send_json(sid, {'event': 'log', 'msg': f'[AI] Nemotron OCR 로드 중 ({mode_label})...'})
+
+        await loop.run_in_executor(
+            None, get_nemotron_model, nem_path, nem_device, nem_api_url, nem_api_key, nem_model_id
+        )
+
+        if sid:
+            await ws_manager.send_json(sid, {'event': 'log', 'msg': f'[AI] Nemotron OCR 로드 완료: {get_nemotron_status()}'})
             await ws_manager.send_json(sid, {'event': 'ai_load_done'})
 
     asyncio.create_task(_do_load())
-    return {'status': 'loading', 'phi_path': phi_path, 'qwen_path': qwen_path}
+    return {'status': 'loading', 'nem_path': nem_path, 'nem_api_url': nem_api_url}
 
 
 @router.post('/stage1/run')
@@ -297,9 +284,7 @@ async def stage1_run(body: dict):
     Stage 1 실행
     body: {
         session_id, filename, device_type,
-        ai_mode?: "none" | "phi_only" | "full"  (기본: "full")
-        phi_model_path?: str   (UI 오버라이드, 없으면 ini 사용)
-        qwen_model_path?: str  (UI 오버라이드, 없으면 ini 사용)
+        ai_mode?: "none" | "nemotron_ocr_en" | "nemotron_ocr_multi"  (기본: "nemotron_ocr_en")
     }
     """
     sid = body.get('session_id')
@@ -308,22 +293,17 @@ async def stage1_run(body: dict):
         raise HTTPException(404, 'session not found')
 
     device_type = body.get('device_type', 'inverter')
-    ai_mode = body.get('ai_mode', 'full')  # "none" | "phi_only" | "full"
+    ai_mode = body.get('ai_mode', 'nemotron_ocr_en')  # "none" | "nemotron_ocr_en" | "nemotron_ocr_multi"
     uploaded = s.get('uploaded_file')
     if not uploaded or not os.path.exists(uploaded):
         raise HTTPException(400, 'no file uploaded')
 
     work_dir = SessionStore.get_work_dir(sid)
 
-    # HuggingFace AI 설정 (ai_mode != "none" 일 때만)
+    # AI 설정 (ai_mode != "none" 일 때만)
     ai_settings = {}
     if ai_mode != 'none':
         ai_settings = _load_ai_settings()
-        # UI 오버라이드
-        if body.get('phi_model_path'):
-            ai_settings['phi_model_path'] = body['phi_model_path']
-        if body.get('qwen_model_path'):
-            ai_settings['qwen_model_path'] = body['qwen_model_path']
         ai_settings['ai_mode'] = ai_mode
 
     # 이전 태스크 취소 후 새 태스크 실행
@@ -355,7 +335,7 @@ async def stage1_run(body: dict):
             progress = _make_progress_callback(sid, 's1', asyncio.get_running_loop())
             result = await _run_in_thread(
                 run_stage1, uploaded, work_dir, device_type, progress,
-                ai_settings if use_ai else None)
+                ai_settings if ai_mode != 'none' else None)
 
             # 태스크 취소로 인해 세션이 리셋된 경우 이벤트 전송 생략
             if SessionStore.get(sid) is None:

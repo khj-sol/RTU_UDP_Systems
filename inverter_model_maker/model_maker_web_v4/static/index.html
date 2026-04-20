@@ -7,7 +7,7 @@
   <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0" />
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
-  <title>Model Maker Web V4 — Phi-mini-MoE + Qwen3-VL</title>
+  <title>Model Maker Web V4 — Nemotron OCR</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'Segoe UI', sans-serif; background: #0f1117; color: #e0e0e0; }
@@ -230,7 +230,7 @@
 <body>
 
 <header>
-  <h1>Model Maker V4 — Phi + Qwen3-VL</h1>
+  <h1>Model Maker V4 — Nemotron OCR</h1>
   <span>Inverter Modbus PDF → RTU Register Map  |  Stage 1 → 2 → 3</span>
   <span id="ollama-badge" style="display:none; margin-left:16px; padding:2px 10px; border-radius:4px; font-size:12px; font-weight:600;"></span>
 </header>
@@ -258,19 +258,15 @@
       <label>AI 모드</label>
       <select id="ai-mode-select" onchange="onAiModeChange()" style="border-color:#4c1d95;">
         <option value="off">AI 사용 안 함 (Rule-based)</option>
-        <option value="phi_only">Phi-mini-MoE (JSON 포맷팅 + Critic, 빠름)</option>
-        <option value="full" selected>Phi + Qwen3-VL (이미지 파싱 포함, 권장)</option>
+        <option value="nemotron_ocr_en" selected>Nemotron OCR — 영문 (권장)</option>
+        <option value="nemotron_ocr_multi">Nemotron OCR — 다국어 (한/일/중)</option>
       </select>
       <div id="hf-settings" style="margin-top:8px; padding:10px; background:#12151f; border:1px solid #4c1d95; border-radius:6px;">
         <div style="font-size:11px; font-weight:700; color:#a78bfa; margin-bottom:8px;">⚙ AI 모델 설정</div>
         <div style="font-size:11px; margin-bottom:6px; padding:6px; background:#1f2937; border-radius:4px;">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-            <span style="color:#d1d5db;">Phi-mini-MoE:</span>
-            <span id="phi-status-badge" style="padding:2px 8px; border-radius:3px; font-size:10px; background:#374151; color:#9ca3af;">[로딩 중...]</span>
-          </div>
           <div style="display:flex; justify-content:space-between; align-items:center;">
-            <span style="color:#d1d5db;">Qwen3-VL-32B:</span>
-            <span id="qwen-status-badge" style="padding:2px 8px; border-radius:3px; font-size:10px; background:#374151; color:#9ca3af; opacity:0.6;">[로딩 중...]</span>
+            <span style="color:#d1d5db;">Nemotron-Nano-VL-8B:</span>
+            <span id="nemotron-status-badge" style="padding:2px 8px; border-radius:3px; font-size:10px; background:#374151; color:#9ca3af;">[로딩 중...]</span>
           </div>
         </div>
         <div style="font-size:11px; color:#9ca3af; margin-bottom:6px;">
@@ -420,19 +416,14 @@
   function _aiMode() { return document.getElementById('ai-mode-select').value !== 'off'; }
   function _aiModeValue() {
     const v = document.getElementById('ai-mode-select').value;
-    if (v === 'phi_only' || v === 'full') return v;
+    if (v === 'nemotron_ocr_en' || v === 'nemotron_ocr_multi') return v;
     return 'none';
   }
   function onAiModeChange() {
     const mode = document.getElementById('ai-mode-select').value;
     const settings = document.getElementById('hf-settings');
     if (settings) settings.style.display = mode !== 'off' ? 'block' : 'none';
-    
-    const qwenBadge = document.getElementById('qwen-status-badge');
-    if (qwenBadge) {
-      qwenBadge.style.opacity = mode === 'phi_only' ? '0.4' : '1';
-    }
-    
+
     const badge = document.getElementById('ollama-badge');
     if (!badge) return;
     if (mode === 'off') {
@@ -449,61 +440,41 @@
 
   async function checkAiStatus() {
     const badge = document.getElementById('ollama-badge');
-    const phiBadge = document.getElementById('phi-status-badge');
-    const qwenBadge = document.getElementById('qwen-status-badge');
+    const nemBadge = document.getElementById('nemotron-status-badge');
     const gpuDisplay = document.getElementById('gpu-memory-display');
-    
+
     if (badge) { badge.style.display = 'inline'; badge.textContent = '⏳ AI 상태 확인 중...'; badge.style.background = '#374151'; badge.style.color = '#d1d5db'; }
-    
+
     try {
       const r = await fetch(`${API}/ai/status`);
       const d = await r.json();
-      
-      // Update Phi status
-      let phiText = '[로드됨]';
-      let phiBg = '#14532d';
-      let phiFg = '#4ade80';
-      if (!d.phi || !d.phi.loaded) {
-        phiText = '[미로드]';
-        phiBg = '#374151';
-        phiFg = '#9ca3af';
-      } else {
-        phiText = `[로드됨 — ${d.phi.device}]`;
+
+      // Update Nemotron status
+      let nemText = '[미로드]';
+      let nemBg = '#374151';
+      let nemFg = '#9ca3af';
+      if (d.nemotron && d.nemotron.loaded) {
+        const modeLabel = d.nemotron.mode === 'nim_api' ? 'NIM API' : (d.nemotron.mode || 'local');
+        nemText = `[로드됨 — ${modeLabel}]`;
+        nemBg = '#14532d';
+        nemFg = '#4ade80';
       }
-      if (d.phi && d.phi.error) {
-        phiText = `[오류: ${d.phi.error.slice(0, 30)}...]`;
-        phiBg = '#450a0a';
-        phiFg = '#f87171';
+      if (d.nemotron && d.nemotron.error) {
+        nemText = `[오류: ${d.nemotron.error.slice(0, 30)}...]`;
+        nemBg = '#450a0a';
+        nemFg = '#f87171';
       }
-      if (phiBadge) { phiBadge.textContent = phiText; phiBadge.style.background = phiBg; phiBadge.style.color = phiFg; }
-      
-      // Update Qwen status
-      let qwenText = '[로드됨]';
-      let qwenBg = '#14532d';
-      let qwenFg = '#4ade80';
-      if (!d.qwen_vl || !d.qwen_vl.loaded) {
-        qwenText = '[미로드]';
-        qwenBg = '#374151';
-        qwenFg = '#9ca3af';
-      } else {
-        qwenText = `[로드됨 — ${d.qwen_vl.device}]`;
-      }
-      if (d.qwen_vl && d.qwen_vl.error) {
-        qwenText = `[오류: ${d.qwen_vl.error.slice(0, 30)}...]`;
-        qwenBg = '#450a0a';
-        qwenFg = '#f87171';
-      }
-      if (qwenBadge) { qwenBadge.textContent = qwenText; qwenBadge.style.background = qwenBg; qwenBadge.style.color = qwenFg; }
-      
+      if (nemBadge) { nemBadge.textContent = nemText; nemBadge.style.background = nemBg; nemBadge.style.color = nemFg; }
+
       // Update GPU memory
       if (gpuDisplay && d.gpu_memory_gb) {
-        gpuDisplay.textContent = `Phi: ${d.gpu_memory_gb.phi}GB | Qwen-VL: ${d.gpu_memory_gb.qwen_vl}GB`;
+        gpuDisplay.textContent = `GPU: ${d.gpu_memory_gb.used}GB / ${d.gpu_memory_gb.total}GB`;
       }
-      
+
       // Update main badge
-      const anyLoaded = (d.phi && d.phi.loaded) || (d.qwen_vl && d.qwen_vl.loaded);
+      const loaded = d.nemotron && d.nemotron.loaded;
       if (badge) {
-        if (anyLoaded) {
+        if (loaded) {
           badge.textContent = 'AI 모델 로드됨';
           badge.style.background = '#14532d';
           badge.style.color = '#4ade80';
@@ -534,7 +505,7 @@
       
       // WebSocket or polling for progress
       if (d.status === 'loading') {
-        appendLog('s1', '[AI] 모델 로드 시작됨 (Phi → Qwen3-VL)', 'ok');
+        appendLog('s1', '[AI] Nemotron OCR 모델 로드 시작됨...', 'ok');
         await new Promise(resolve => setTimeout(resolve, 3000));
         await checkAiStatus();
       }
@@ -676,12 +647,9 @@
     // Show AI mode status immediately in log
     const aiMode = _aiModeValue();
     if (aiMode !== 'none') {
-      const modeName = aiMode === 'phi_only' ? 'Phi-mini-MoE' : 'Phi + Qwen3-VL';
+      const modeName = aiMode === 'nemotron_ocr_multi' ? 'Nemotron OCR (다국어)' : 'Nemotron OCR (영문)';
       appendLog('s1', `🤖 AI Mode — ${modeName} 추출 시작`, 'ok');
-      appendLog('s1', '  1. PDF 텍스트/표 추출 → 2. Regex 후보 추출 → 3. Phi JSON 포맷팅 → 4. Critic 검증', 'info');
-      if (aiMode === 'full') {
-        appendLog('s1', '  5. Qwen3-VL 희박 페이지 이미지 파싱 → 6. 결과 병합', 'info');
-      }
+      appendLog('s1', '  1. PDF 텍스트/표 추출 → 2. Regex 후보 추출 → 3. Nemotron OCR 이미지 파싱 → 4. 결과 병합', 'info');
       btn.textContent = '🤖 AI 분석 중...';
       btn.style.background = '#7c3aed';
       // Periodic progress indicator (AI can take 1-5min)
@@ -692,9 +660,8 @@
         elapsed += 5;
         const phases = [
           [0,   'PDF 텍스트/표 추출 중'],
-          [5,   '[Phi] regex 후보 → JSON 포맷팅 중...'],
-          [20,  '[Phi] Critic 검증 중 (무효 레지스터 제거)'],
-          [40,  aiMode === 'full' ? '[Qwen-VL] 희박 페이지 이미지 직접 파싱 중...' : '[Rule] H01 필드 매핑 중'],
+          [10,  '[Rule] Regex 후보 추출 중...'],
+          [30,  '[Nemotron OCR] 이미지 페이지 파싱 중...'],
           [70,  '[Hybrid] 결과 병합 + H01 필드 매핑 중'],
           [100, '거의 완료... 결과 처리 중'],
         ];
