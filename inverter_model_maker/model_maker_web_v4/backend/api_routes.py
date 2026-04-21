@@ -201,6 +201,7 @@ def _load_ai_settings() -> dict:
         'nemotron_api_url': '',
         'nemotron_api_key': '',
         'nemotron_model_id': 'nvidia/llama-3.1-nemotron-nano-vl-8b-v1',
+        'page_timeout': int(s.get('page_timeout', 120)),
     }
 
 

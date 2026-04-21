@@ -152,6 +152,7 @@ class NemotronOCRModel:
         self._api_url = api_url.rstrip("/") if api_url else ""
         self._api_key = api_key
         self._model_id = model_id
+        self._page_timeout: int = 120  # mm_settings.json nemotron_ocr.page_timeout 으로 덮어씀
 
         # ── NIM API 클라이언트 모드 ──────────────────────────────────────────
         if self._api_url:
@@ -238,7 +239,7 @@ class NemotronOCRModel:
         logger.info("[NemotronOCR] 로드 완료")
 
     # ── 내부 헬퍼 ─────────────────────────────────────────────────────────────
-    def _infer_image(self, img_bytes: bytes, prompt: str, max_new_tokens: int = 4096) -> str:
+    def _infer_image(self, img_bytes: bytes, prompt: str, max_new_tokens: int = 1024) -> str:
         """이미지 bytes + 텍스트 프롬프트 -> 모델 생성 텍스트."""
         # ── NIM API 모드 ───────────────────────────────────────────────────
         if self._api_url:
@@ -302,12 +303,20 @@ class NemotronOCRModel:
 
         inputs = self.processor(text=[text], images=[image], return_tensors="pt").to(first_device)
 
-        with torch.no_grad():
-            output_ids = self.model.generate(
-                **inputs,
-                max_new_tokens=max_new_tokens,
-                do_sample=False,
-            )
+        import concurrent.futures as _cf
+
+        def _generate():
+            with torch.no_grad():
+                return self.model.generate(**inputs, max_new_tokens=max_new_tokens, do_sample=False)
+
+        _timeout = getattr(self, "_page_timeout", 120)
+        with _cf.ThreadPoolExecutor(max_workers=1) as _pool:
+            _fut = _pool.submit(_generate)
+            try:
+                output_ids = _fut.result(timeout=_timeout)
+            except _cf.TimeoutError:
+                logger.warning("[NemotronOCR] 추론 타임아웃 (%ds) — 페이지 건너뜀", _timeout)
+                raise TimeoutError(f"Inference timeout after {_timeout}s")
         input_len = inputs["input_ids"].shape[1] if "input_ids" in inputs else 0
         gen_ids = output_ids[0][input_len:]
 
@@ -340,7 +349,7 @@ class NemotronOCRModel:
         template = _PROMPT_MULTI if lang == "multi" else _PROMPT_EN
         prompt = template.format(context=ctx_line)
         try:
-            raw = self._infer_image(img_bytes, prompt, max_new_tokens=4096)
+            raw = self._infer_image(img_bytes, prompt, max_new_tokens=1024)
             parsed = self._extract_json(raw)
             if isinstance(parsed, list):
                 return parsed
@@ -367,7 +376,7 @@ class NemotronOCRModel:
         template = _PROMPT_MULTI if lang == "multi" else _PROMPT_EN
         prompt = template.format(context=ctx_line)
         try:
-            raw = self._infer_image(img_bytes, prompt, max_new_tokens=4096)
+            raw = self._infer_image(img_bytes, prompt, max_new_tokens=1024)
         except Exception as e:
             logger.warning("[NemotronOCR.extract_regions_from_image] 오류: %s", e)
             raw = ""
@@ -441,6 +450,11 @@ class NemotronOCRModel:
                 continue
 
             regs = self.extract_table_from_image(img_bytes, lang=lang)
+            try:
+                import torch as _torch
+                _torch.cuda.empty_cache()
+            except Exception:
+                pass
             if log:
                 log(f"[NemotronOCR] 페이지 {idx + 1}: {len(regs)}개 항목 추출")
 

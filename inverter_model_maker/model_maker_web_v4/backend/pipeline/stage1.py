@@ -3344,6 +3344,8 @@ def _run_nemotron_ocr_extraction(pdf_path: str, ai_settings: dict,
             api_key=nemotron_api_key,
             model_id=nemotron_model_id,
         )
+        if nem is not None:
+            nem._page_timeout = int(ai_settings.get('page_timeout', 120))
         if nem is None:
             from .ai_nemotron_ocr import _nemotron_error
             raise RuntimeError(
