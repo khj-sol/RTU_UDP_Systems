@@ -8,3 +8,8 @@ openpyxl>=3.1.0
 PyMuPDF>=1.24.0
 anthropic>=0.25.0
 websockets>=12.0
+# v4.2 fast OCR/layout extraction
+pymupdf-layout
+rapidocr-onnxruntime
+onnxruntime
+

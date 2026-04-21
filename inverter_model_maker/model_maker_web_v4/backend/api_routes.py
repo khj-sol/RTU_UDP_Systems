@@ -187,32 +187,67 @@ async def stage1_upload(
     return {'saved': dest, 'filename': file.filename}
 
 
-def _load_ai_settings() -> dict:
-    """Nemotron OCR 설정 로드 from mm_settings.json."""
-    if not MM_SETTINGS_PATH.exists():
-        return {}
-    with open(MM_SETTINGS_PATH, 'r', encoding='utf-8') as f:
-        data = json.load(f)
-    s = data.get('nemotron_ocr', {})
+def _default_settings() -> dict:
     return {
-        'nemotron_model_path': s.get('model_path', ''),
-        'nemotron_device': s.get('device', 'auto'),
-        'image_dpi': s.get('image_dpi', 200),
+        'layout': {'enabled': True, 'min_valid_rows': 5, 'min_accept_rows': 30, 'image_dpi': 200},
+        'rapidocr': {'enabled': True, 'det_model_path': '', 'rec_model_path': '', 'rec_keys_path': '', 'lang': 'english', 'device': 'cpu'},
+        'legacy_nemotron': {'enabled': False, 'model_path': 'C:/models/Nemotron-Nano-VL-8B', 'device': 'auto', 'image_dpi': 200, 'page_timeout': 120},
+    }
+
+
+def _load_ai_settings() -> dict:
+    """Load v4.2 extraction settings from mm_settings.json."""
+    data = _default_settings()
+    if MM_SETTINGS_PATH.exists():
+        with open(MM_SETTINGS_PATH, 'r', encoding='utf-8-sig') as f:
+            stored = json.load(f)
+        for section, defaults in list(data.items()):
+            merged = dict(defaults)
+            merged.update(stored.get(section, {}))
+            data[section] = merged
+        if 'nemotron_ocr' in stored and 'legacy_nemotron' not in stored:
+            legacy = dict(data['legacy_nemotron'])
+            legacy.update(stored.get('nemotron_ocr', {}))
+            legacy['enabled'] = False
+            data['legacy_nemotron'] = legacy
+
+    layout = data.get('layout', {})
+    rapid = data.get('rapidocr', {})
+    legacy = data.get('legacy_nemotron', {})
+    image_dpi = int(layout.get('image_dpi') or legacy.get('image_dpi') or 200)
+    return {
+        'layout_enabled': bool(layout.get('enabled', True)),
+        'layout_min_valid_rows': int(layout.get('min_valid_rows', 5)),
+        'layout_min_accept_rows': int(layout.get('min_accept_rows', 30)),
+        'image_dpi': image_dpi,
+        'rapidocr_enabled': bool(rapid.get('enabled', True)),
+        'rapidocr_det_model_path': rapid.get('det_model_path', ''),
+        'rapidocr_rec_model_path': rapid.get('rec_model_path', ''),
+        'rapidocr_rec_keys_path': rapid.get('rec_keys_path', ''),
+        'rapidocr_lang': rapid.get('lang', 'english'),
+        'rapidocr_device': rapid.get('device', 'cpu'),
+        'legacy_nemotron_enabled': bool(legacy.get('enabled', False)),
+        'nemotron_model_path': legacy.get('model_path', ''),
+        'nemotron_device': legacy.get('device', 'auto'),
         'nemotron_api_url': '',
         'nemotron_api_key': '',
         'nemotron_model_id': 'nvidia/llama-3.1-nemotron-nano-vl-8b-v1',
-        'page_timeout': int(s.get('page_timeout', 120)),
+        'page_timeout': int(legacy.get('page_timeout', 120)),
     }
 
 
 @router.get('/settings')
 def get_settings():
-    """현재 mm_settings.json 내용 반환."""
-    if not MM_SETTINGS_PATH.exists():
-        return {'nemotron_ocr': {'model_path': 'C:/models/Nemotron-Nano-VL-8B', 'device': 'auto', 'image_dpi': 200}}
-    with open(MM_SETTINGS_PATH, 'r', encoding='utf-8') as f:
-        return json.load(f)
-
+    """Return current mm_settings.json content with v4.2 defaults."""
+    data = _default_settings()
+    if MM_SETTINGS_PATH.exists():
+        with open(MM_SETTINGS_PATH, 'r', encoding='utf-8-sig') as f:
+            stored = json.load(f)
+        for section, defaults in list(data.items()):
+            merged = dict(defaults)
+            merged.update(stored.get(section, {}))
+            data[section] = merged
+    return data
 
 @router.post('/settings')
 def save_settings(body: dict = Body(...)):
@@ -224,10 +259,14 @@ def save_settings(body: dict = Body(...)):
 
 @router.get('/ai/status')
 async def ai_status():
-    """Nemotron OCR 모델 로드 상태 + GPU 메모리 반환."""
-    from .pipeline.ai_nemotron_ocr import get_nemotron_status
+    """v4.2 extractor status plus legacy Nemotron/debug status."""
+    from .pipeline.rapidocr_adapter import get_rapidocr_status
 
-    nemotron_status = get_nemotron_status()
+    try:
+        from .pipeline.ai_nemotron_ocr import get_nemotron_status
+        nemotron_status = get_nemotron_status()
+    except Exception as e:
+        nemotron_status = {'loaded': False, 'error': str(e)}
 
     gpu_info = {}
     try:
@@ -240,6 +279,9 @@ async def ai_status():
         pass
 
     return {
+        'layout': {'loaded': True, 'engine': 'PyMuPDF', 'default_mode': 'layout_first'},
+        'rapidocr': get_rapidocr_status(),
+        'legacy_nemotron': nemotron_status,
         'nemotron': nemotron_status,
         'gpu_memory_gb': gpu_info,
     }
@@ -247,43 +289,31 @@ async def ai_status():
 
 @router.post('/ai/load')
 async def ai_load(body: dict = Body(default={})):
-    """Nemotron OCR 모델 백그라운드 로드.
-
-    body: {
-        session_id?: str  (WebSocket 진행 스트리밍용)
-    }
-    """
+    """Preload optional RapidOCR. Nemotron is legacy/debug and is not loaded by default."""
     cfg = _load_ai_settings()
-    nem_path = cfg.get('nemotron_model_path', '')
-    nem_device = cfg.get('nemotron_device', 'auto')
-    nem_api_url = cfg.get('nemotron_api_url', '')
-    nem_api_key = cfg.get('nemotron_api_key', '')
-    nem_model_id = cfg.get('nemotron_model_id', 'nvidia/llama-3.1-nemotron-nano-vl-8b-v1')
     sid = body.get('session_id')
 
-    if not nem_path and not nem_api_url:
-        msg = 'Nemotron OCR 미설정 — 웹 UI 설정에서 model_path (로컬) 또는 NIM API URL 중 하나를 입력 후 저장하세요.'
-        return {'status': 'not_configured', 'msg': msg}
-
     async def _do_load():
-        from .pipeline.ai_nemotron_ocr import get_nemotron_model, get_nemotron_status
-        loop = asyncio.get_event_loop()
-
         if sid:
-            mode_label = 'NIM API' if nem_api_url else 'local'
-            await ws_manager.send_json(sid, {'event': 'log', 'msg': f'[AI] Nemotron OCR 로드 중 ({mode_label})...'})
-
-        await loop.run_in_executor(
-            None, get_nemotron_model, nem_path, nem_device, nem_api_url, nem_api_key, nem_model_id
-        )
-
-        if sid:
-            await ws_manager.send_json(sid, {'event': 'log', 'msg': f'[AI] Nemotron OCR 로드 완료: {get_nemotron_status()}'})
-            await ws_manager.send_json(sid, {'event': 'ai_load_done'})
+            await ws_manager.send_json(sid, {'event': 'log', 'msg': '[AI] layout_first is ready; RapidOCR optional preload start...'})
+        try:
+            if cfg.get('rapidocr_enabled', True):
+                from .pipeline.rapidocr_adapter import get_rapidocr_engine, get_rapidocr_status
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(None, get_rapidocr_engine, cfg)
+                status = get_rapidocr_status()
+            else:
+                status = {'loaded': False, 'error': 'rapidocr_disabled'}
+            if sid:
+                await ws_manager.send_json(sid, {'event': 'log', 'msg': f'[AI] RapidOCR status: {status}'})
+                await ws_manager.send_json(sid, {'event': 'ai_load_done'})
+        except Exception as e:
+            if sid:
+                await ws_manager.send_json(sid, {'event': 'log', 'msg': f'[AI] RapidOCR preload skipped: {e}', 'level': 'warn'})
+                await ws_manager.send_json(sid, {'event': 'ai_load_done'})
 
     asyncio.create_task(_do_load())
-    return {'status': 'loading', 'nem_path': nem_path, 'nem_api_url': nem_api_url}
-
+    return {'status': 'loading', 'mode': 'layout_first', 'rapidocr_enabled': cfg.get('rapidocr_enabled', True)}
 
 @router.post('/stage1/run')
 async def stage1_run(body: dict):
@@ -291,7 +321,7 @@ async def stage1_run(body: dict):
     Stage 1 실행
     body: {
         session_id, filename, device_type,
-        ai_mode?: "none" | "nemotron_ocr_en" | "nemotron_ocr_multi"  (기본: "nemotron_ocr_en")
+        ai_mode?: "none" | "rule_only" | "layout_first" | "rapidocr_only" | legacy Nemotron modes  (default: "layout_first")
     }
     """
     sid = body.get('session_id')
@@ -300,7 +330,7 @@ async def stage1_run(body: dict):
         raise HTTPException(404, 'session not found')
 
     device_type = body.get('device_type', 'inverter')
-    ai_mode = body.get('ai_mode', 'nemotron_ocr_en')  # "none" | "nemotron_ocr_en" | "nemotron_ocr_multi"
+    ai_mode = body.get('ai_mode', 'layout_first')  # none/rule_only/layout_first/rapidocr_only/legacy
     uploaded = s.get('uploaded_file')
     if not uploaded or not os.path.exists(uploaded):
         raise HTTPException(400, 'no file uploaded')
@@ -309,7 +339,7 @@ async def stage1_run(body: dict):
 
     # AI 설정 (ai_mode != "none" 일 때만)
     ai_settings = {}
-    if ai_mode != 'none':
+    if ai_mode not in ('none', 'rule_only'):
         ai_settings = _load_ai_settings()
         ai_settings['ai_mode'] = ai_mode
 
@@ -342,7 +372,7 @@ async def stage1_run(body: dict):
             progress = _make_progress_callback(sid, 's1', asyncio.get_running_loop())
             result = await _run_in_thread(
                 run_stage1, uploaded, work_dir, device_type, progress,
-                ai_settings if ai_mode != 'none' else None)
+                ai_settings if ai_mode not in ('none', 'rule_only') else None)
 
             # 태스크 취소로 인해 세션이 리셋된 경우 이벤트 전송 생략
             if SessionStore.get(sid) is None:
@@ -1285,3 +1315,5 @@ def _update_review_verdicts(excel_path: str, verdicts: list):
 
     except Exception:
         pass
+
+

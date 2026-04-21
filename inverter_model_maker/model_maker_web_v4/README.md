@@ -1,9 +1,16 @@
 # Model Maker Web v4
 
-인버터 Modbus PDF → RTU 호환 `*_registers.py` 자동 생성 웹 도구.  
-Nemotron OCR(로컬 HuggingFace 모델) 기반 AI 보조 추출 지원.
+Modbus PDF에서 RTU 호환 `*_registers.py`를 생성하는 웹 도구입니다.
 
----
+## v4.2 기본 방향
+
+v4.2의 기본 Stage1 추출 모드는 `layout_first`입니다.
+
+- 디지털 PDF: PyMuPDF/PyMuPDF Layout 계열 구조 추출을 우선 사용합니다.
+- 스캔/이미지 페이지: 텍스트/표 후보가 부족한 페이지에만 RapidOCR ONNX를 fallback으로 사용합니다.
+- Nemotron OCR/Nemotron-Nano-VL-8B는 legacy/debug 전용이며 기본 경로에서 제외되었습니다.
+- 최종 매칭 판단은 계속 `rules + synonym_db + reference map + definitions`가 담당합니다.
+- Model/SN은 프로토콜 맵 대상이 아니므로 검증 실패/x_fields/semantic 매칭 대상에서 제외합니다.
 
 ## 실행
 
@@ -14,124 +21,60 @@ START_모델메이커_WEB_v4.bat
 
 브라우저: http://localhost:8083
 
----
+## 주요 설정
 
-## 설치
-
-### 1. 패키지 설치
-
-```bash
-INSTALL_패키지.bat
-```
-
-`backend/requirements.txt` 기준으로 의존성 설치:
-
-| 패키지 | 버전 |
-|--------|------|
-| fastapi | >=0.110.0 |
-| uvicorn | >=0.29.0 |
-| transformers | >=4.50.0 |
-| torch | >=2.3.0 |
-| huggingface-hub | >=0.24.0 |
-| PyMuPDF | >=1.24.0 |
-| Pillow | >=10.0.0 |
-| accelerate | >=0.33.0 |
-
-### 2. Nemotron 모델 다운로드 (AI 모드 사용 시)
-
-```bash
-INSTALL_Nemotron_Model.bat
-```
-
-- 모델: `nvidia/Llama-3.1-Nemotron-Nano-VL-8B-V1`
-- 저장 위치: `C:\models\Nemotron-Nano-VL-8B`
-- 용량: ~16GB, 30~60분 소요
-
----
-
-## 설정
-
-웹 UI 접속 후 설정 탭에서 변경하거나 `mm_settings.json`을 직접 편집:
+`mm_settings.json`:
 
 ```json
 {
-  "nemotron_ocr": {
+  "layout": {
+    "enabled": true,
+    "min_valid_rows": 5,
+    "image_dpi": 200
+  },
+  "rapidocr": {
+    "enabled": true,
+    "det_model_path": "",
+    "rec_model_path": "",
+    "rec_keys_path": "",
+    "lang": "english",
+    "device": "cpu"
+  },
+  "legacy_nemotron": {
+    "enabled": false,
     "model_path": "C:/models/Nemotron-Nano-VL-8B",
     "device": "auto",
-    "image_dpi": 200
+    "image_dpi": 200,
+    "page_timeout": 120
   }
 }
 ```
 
-| 항목 | 설명 |
-|------|------|
-| `model_path` | 로컬 모델 디렉터리 경로 |
-| `device` | `"auto"` (GPU 자동) 또는 `"cpu"` |
-| `image_dpi` | PDF → 이미지 변환 해상도 (기본 200) |
+## Stage1 모드
 
----
+| Mode | 용도 |
+|------|------|
+| `rule_only` | 기존 rule/table parser만 사용 |
+| `layout_first` | 기본값. PyMuPDF 구조 추출 후 부족한 페이지만 RapidOCR fallback |
+| `rapidocr_only` | 스캔 PDF/이미지 fixture 검증용 |
+| `nemotron_ocr_en`, `nemotron_ocr_multi` | legacy/debug. 8B VLM이라 느릴 수 있음 |
+| `full`, `phi_only` | legacy AI 경로 |
 
 ## 처리 파이프라인
 
-```
-PDF 업로드
-  │
-  ▼
-Stage 1 — 레지스터 주소·이름 추출 (rule_only 또는 nemotron_ocr)
-  │
-  ▼
-Stage 2 — H01/DER-AVM 필드 매핑
-  │
-  ▼
-Stage 3 — *_registers.py 코드 생성 및 저장
+```text
+PDF
+ -> existing rule/table parser
+ -> PyMuPDF layout/table/text extraction
+ -> sparse/scanned page only: render PNG -> RapidOCR ONNX
+ -> register candidates
+ -> rules/synonym/reference matching
+ -> Stage1 Excel
+ -> Stage2/Stage3 unchanged
 ```
 
-### AI 모드
+## 설치 메모
 
-| 모드 | 설명 |
-|------|------|
-| `rule_only` | AI 없음 — 규칙 기반 regex 추출 (빠름) |
-| `nemotron_ocr_en` | Nemotron 로컬 모델 — 영문 프롬프트 |
-| `nemotron_ocr_multi` | Nemotron 로컬 모델 — 한/일 레이블 변환 포함 |
+기본 디지털 PDF 경로는 PyMuPDF만으로 동작합니다. RapidOCR fallback을 사용하려면 `backend/requirements.txt`의 `rapidocr-onnxruntime`, `onnxruntime` 의존성이 필요합니다.
 
----
-
-## 디렉터리 구조
-
-```
-model_maker_web_v4/
-├── backend/
-│   ├── main.py                  # FastAPI 앱 진입점 (포트 8083)
-│   ├── api_routes.py            # REST API 라우터
-│   ├── session_store.py         # 세션 관리
-│   ├── ws_manager.py            # WebSocket 진행상황 푸시
-│   ├── requirements.txt         # Python 의존성
-│   └── pipeline/
-│       ├── stage1.py            # PDF 파싱 + 레지스터 추출
-│       ├── stage2.py            # H01/DER 필드 매핑
-│       ├── stage3.py            # 코드 생성
-│       ├── rules.py             # 규칙 기반 추출 엔진
-│       ├── ai_nemotron_ocr.py   # Nemotron OCR 어댑터
-│       └── definitions/         # 필드 정의 JSON
-├── static/
-│   └── index.html               # 웹 UI (단일 페이지)
-├── mm_settings.json             # 모델 경로 등 로컬 설정
-├── benchmark_stage1.py          # 정확도 벤치마크 스크립트
-├── BENCHMARK_README.md          # 벤치마크 사용법
-├── results/                     # 테스트 PDF 저장
-├── benchmark_results/           # 벤치마크 결과 (자동 생성)
-├── fixtures/                    # 이미지 fixture (자동 생성)
-└── temp/                        # 세션 임시 파일 (자동 정리)
-```
-
----
-
-## 생성 파일 배포
-
-Stage 3에서 저장한 `{protocol}_registers.py`를 RTU에 적용:
-
-```bash
-cp inverter_model_maker/common/{protocol}_registers.py common/
-```
-
-`config/rs485_ch*.ini`에 `protocol = {protocol}` 추가 → RTU 재시작 없이 동적 로딩.
+상용 배포 전에는 PyMuPDF Layout 계열 라이선스를 별도로 확인해야 합니다.

@@ -3163,6 +3163,118 @@ def _classify_pass1_with_rules(candidates: List[Dict], log=None) -> List[Dict]:
     return result
 
 
+def _merge_candidate_lists(primary: List[Dict], secondary: List[Dict]) -> List[Dict]:
+    """Merge extracted candidates by address, preferring later/fallback rows."""
+    merged: Dict[str, Dict] = {}
+    for cand in (primary or []) + (secondary or []):
+        addr = str(cand.get('address', '')).strip().lower()
+        if not addr:
+            continue
+        if not cand.get('name') and cand.get('raw_name'):
+            cand['name'] = cand.get('raw_name')
+        merged[addr] = cand
+    return list(merged.values())
+
+
+def _run_layout_first_extraction(pdf_path: str, ai_settings: dict,
+                                 progress: 'ProgressCallback' = None) -> List[Dict]:
+    """v4.2 fast extractor: PyMuPDF layout first, RapidOCR only for sparse pages."""
+    def log(msg, level='info'):
+        if progress:
+            progress(msg, level)
+
+    min_rows = int(ai_settings.get('layout_min_valid_rows', ai_settings.get('min_valid_rows', 5)))
+    image_dpi = int(ai_settings.get('image_dpi', 200))
+    rapid_enabled = bool(ai_settings.get('rapidocr_enabled', True))
+
+    log('[v4.2] PyMuPDF Layout extraction start')
+    from .pdf_layout_extractor import extract_layout_candidates
+    layout_result = extract_layout_candidates(pdf_path, min_valid_rows=min_rows, log=log)
+    stats = dict(layout_result.stats)
+    candidates = list(layout_result.candidates)
+
+    fallback_candidates: List[Dict] = []
+    if rapid_enabled and layout_result.fallback_pages:
+        try:
+            from .rapidocr_adapter import extract_pdf_pages
+            log(f'[v4.2] RapidOCR fallback pages={len(layout_result.fallback_pages)}')
+            rapid_result = extract_pdf_pages(
+                pdf_path,
+                page_indices=layout_result.fallback_pages,
+                settings=ai_settings,
+                dpi=image_dpi,
+                log=log,
+            )
+            fallback_candidates = rapid_result.candidates
+            stats.update({
+                'rapidocr_used': rapid_result.stats.get('rapidocr_used', False),
+                'rapidocr_pages': rapid_result.stats.get('rapidocr_pages', 0),
+                'ocr_boxes': rapid_result.stats.get('ocr_boxes', 0),
+            })
+        except Exception as e:
+            stats['rapidocr_used'] = False
+            stats['extractor_fallback_reason'] = f"{stats.get('extractor_fallback_reason', '')}; rapidocr_error={type(e).__name__}: {e}".strip('; ')
+            log(f'[RapidOCR] fallback skipped: {e}', 'warn')
+
+    merged = _merge_candidate_lists(candidates, fallback_candidates)
+    stats['valid_register_rows'] = len(merged)
+    ai_settings['_extractor_stats'] = stats
+
+    if not merged:
+        log('[v4.2] no layout/OCR candidates, falling back to rule parser', 'warn')
+        return []
+    final_registers = _classify_pass1_with_rules(merged, log=log)
+    min_accept = int(ai_settings.get('layout_min_accept_rows', 30))
+    if len(final_registers) < min_accept:
+        stats['extractor_fallback_reason'] = f"{stats.get('extractor_fallback_reason', '')}; classified_rows_below_accept={len(final_registers)}/{min_accept}".strip('; ')
+        ai_settings['_extractor_stats'] = stats
+        log(f'[v4.2] classified candidates below accept threshold ({len(final_registers)}/{min_accept}); falling back to rule parser', 'warn')
+        return []
+    log(f'[v4.2] final candidates={len(final_registers)}')
+    return final_registers
+
+
+def _run_rapidocr_extraction(pdf_path: str, ai_settings: dict,
+                             progress: 'ProgressCallback' = None) -> List[Dict]:
+    """v4.2 RapidOCR-only extractor for scanned PDFs and image fixture validation."""
+    def log(msg, level='info'):
+        if progress:
+            progress(msg, level)
+
+    image_dpi = int(ai_settings.get('image_dpi', 200))
+    log('[v4.2] RapidOCR-only extraction start')
+    try:
+        from .rapidocr_adapter import extract_pdf_pages
+        rapid_result = extract_pdf_pages(pdf_path, page_indices=None, settings=ai_settings, dpi=image_dpi, log=log)
+        stats = dict(rapid_result.stats)
+        candidates = rapid_result.candidates
+    except Exception as e:
+        stats = {
+            'layout_used': False,
+            'layout_blocks': 0,
+            'layout_tables': 0,
+            'rapidocr_used': False,
+            'rapidocr_pages': 0,
+            'ocr_boxes': 0,
+            'valid_register_rows': 0,
+            'extractor_fallback_reason': f'rapidocr_error={type(e).__name__}: {e}',
+        }
+        ai_settings['_extractor_stats'] = stats
+        log(f'[RapidOCR] extraction failed: {e}', 'warn')
+        return []
+
+    stats.setdefault('layout_used', False)
+    stats.setdefault('layout_blocks', 0)
+    stats.setdefault('layout_tables', 0)
+    stats['valid_register_rows'] = len(candidates)
+    ai_settings['_extractor_stats'] = stats
+
+    if not candidates:
+        log('[RapidOCR] no candidates, falling back to rule parser', 'warn')
+        return []
+    final_registers = _classify_pass1_with_rules(candidates, log=log)
+    log(f'[RapidOCR] final candidates={len(final_registers)}')
+    return final_registers
 def _run_hybrid_ai_extraction(pdf_path: str, ai_settings: dict,
                               progress: 'ProgressCallback' = None) -> List[Dict]:
     """Phi-mini-MoE + Qwen3-VL 하이브리드 레지스터 추출.
@@ -3187,11 +3299,16 @@ def _run_hybrid_ai_extraction(pdf_path: str, ai_settings: dict,
 
     ai_mode = ai_settings.get('ai_mode', 'full')
 
-    # Nemotron OCR 모드 조기 라우팅
+    # v4.2 fast extraction modes. These avoid large generative VLM OCR by default.
+    if ai_mode == 'layout_first':
+        return _run_layout_first_extraction(pdf_path, ai_settings, progress=progress)
+    if ai_mode == 'rapidocr_only':
+        return _run_rapidocr_extraction(pdf_path, ai_settings, progress=progress)
+
+    # Legacy/debug only: Nemotron OCR is an 8B VLM and must not be the default path.
     if ai_mode in ('nemotron_ocr_en', 'nemotron_ocr_multi'):
         lang = 'multi' if ai_mode == 'nemotron_ocr_multi' else 'en'
         return _run_nemotron_ocr_extraction(pdf_path, ai_settings, lang=lang, progress=progress)
-
     phi_path = ai_settings.get('phi_model_path', '')
     phi_device = ai_settings.get('phi_device', 'auto')
     qwen_path = ai_settings.get('qwen_model_path', '')
@@ -3640,12 +3757,18 @@ def run_stage1(
 
     # AI mode: Hybrid (Phi + Qwen-VL) PDF 파싱 (rule-based 건너뜀)
     ai_registers = []
+    extractor_stats = {}
     _ai_mode_active = False
     if ai_settings and os.path.splitext(input_path)[1].lower() == '.pdf':
         try:
             ai_registers = _run_hybrid_ai_extraction(input_path, ai_settings, progress)
-            log(f'[AI] {len(ai_registers)}개 레지스터 추출 완료 — AI 직접 파싱 모드')
-            _ai_mode_active = True
+            extractor_stats = dict(ai_settings.get('_extractor_stats', {}))
+            if ai_registers:
+                log(f'[AI] {len(ai_registers)} registers extracted - AI direct parse mode')
+                _ai_mode_active = True
+            else:
+                log('[AI] no extraction result - fallback to rule-based parser', 'warn')
+                _ai_mode_active = False
         except Exception as e:
             log(f'[AI] AI 추출 실패: {type(e).__name__}: {e}', 'error')
             log('[AI] rule-based 모드로 폴백합니다', 'warn')
@@ -4773,6 +4896,7 @@ def run_stage1(
         'der_match': {'matched': der_matched, 'total': der_total},
         'iv_info': iv_info,
         'info_match': info_match,
+        'extractor_stats': extractor_stats,
         'suggestions': suggestions,
     }
 
@@ -5885,3 +6009,4 @@ def _build_der_match_table(categorized: dict) -> List[dict]:
             'status': 'O', 'group': 'MONITOR',
         })
     return rows
+

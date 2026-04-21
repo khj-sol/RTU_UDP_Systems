@@ -1,5 +1,20 @@
 {
-  "nemotron_ocr": {
+  "layout": {
+    "enabled": true,
+    "min_valid_rows": 5,
+    "image_dpi": 200,
+    "min_accept_rows": 30
+  },
+  "rapidocr": {
+    "enabled": true,
+    "det_model_path": "",
+    "rec_model_path": "",
+    "rec_keys_path": "",
+    "lang": "english",
+    "device": "cpu"
+  },
+  "legacy_nemotron": {
+    "enabled": false,
     "model_path": "C:/models/Nemotron-Nano-VL-8B",
     "device": "auto",
     "image_dpi": 200,

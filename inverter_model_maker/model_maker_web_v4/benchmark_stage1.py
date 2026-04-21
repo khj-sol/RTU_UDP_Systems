@@ -80,12 +80,12 @@ _INFO_FIELDS: frozenset[str] = frozenset({
 })
 
 # ── 모드 분류 ──────────────────────────────────────────────────────────────────
-DEFAULT_MODES:   tuple[str, ...] = ('rule_only', 'nemotron_ocr_en', 'nemotron_ocr_multi')
-CANDIDATE_MODES: tuple[str, ...] = ('nemotron_ocr_en', 'nemotron_ocr_multi')
-LEGACY_MODES:    tuple[str, ...] = ('full', 'phi_only')
-ALL_MODES:       tuple[str, ...] = DEFAULT_MODES + CANDIDATE_MODES + LEGACY_MODES
+DEFAULT_MODES:   tuple[str, ...] = ('rule_only', 'layout_first', 'rapidocr_only')
+CANDIDATE_MODES: tuple[str, ...] = ('layout_first', 'rapidocr_only')
+LEGACY_MODES:    tuple[str, ...] = ('nemotron_ocr_en', 'nemotron_ocr_multi', 'full', 'phi_only')
+ALL_MODES:       tuple[str, ...] = DEFAULT_MODES + LEGACY_MODES
 
-_NOT_IMPLEMENTED_MODES: frozenset[str] = frozenset()  # nemotron_ocr_en/multi implemented
+_NOT_IMPLEMENTED_MODES: frozenset[str] = frozenset()
 
 _DEFAULT_TIMEOUT_SEC = 180
 
@@ -101,10 +101,14 @@ def _collect_x_fields(table: list[dict]) -> str:
     return ', '.join(fields)
 
 
+def _console_safe(value) -> str:
+    return str(value).encode('cp949', errors='replace').decode('cp949')
+
+
 def _make_progress(log: dict):
-    """터미널 출력 + AI fallback/error 캡처 progress callback."""
+    """->->-> ->-> + AI fallback/error ->-> progress callback."""
     def cb(msg: str, level: str = 'info'):
-        print(f"    [{level.upper():5s}] {msg}", flush=True)
+        print(f"    [{level.upper():5s}] {_console_safe(msg)}", flush=True)
         if level == 'error' and '[AI]' in msg:
             log['ai_errors'].append(msg)
         if level == 'warn' and 'rule-based' in msg:
@@ -150,6 +154,14 @@ def _empty_row(pdf_name: str, mode: str, input_type: str = 'original') -> dict:
         'ai_fallback':       None,
         'ai_errors':         None,
         'ocr_regs_extracted': None,
+        'layout_used':       None,
+        'layout_blocks':     None,
+        'layout_tables':     None,
+        'rapidocr_used':     None,
+        'rapidocr_pages':    None,
+        'ocr_boxes':         None,
+        'valid_register_rows': None,
+        'extractor_fallback_reason': None,
         'error':             None,
     }
 
@@ -185,6 +197,7 @@ def _run_one_inner(pdf_path: str, mode: str, temp_base: str) -> dict:
         der        = result.get('der_match', {})
         meta       = result.get('meta', {})
         info_match = result.get('info_match', {})
+        extractor_stats = result.get('extractor_stats', {}) or {}
 
         row.update({
             'elapsed_sec':  round(elapsed, 2),
@@ -200,6 +213,14 @@ def _run_one_inner(pdf_path: str, mode: str, temp_base: str) -> dict:
             'info_sn':      info_match.get('sn'),      # 참고용
             'ai_fallback':  ai_log['ai_fallback'],
             'ai_errors':    '; '.join(ai_log['ai_errors']) if ai_log['ai_errors'] else '',
+            'layout_used':   extractor_stats.get('layout_used'),
+            'layout_blocks': extractor_stats.get('layout_blocks'),
+            'layout_tables': extractor_stats.get('layout_tables'),
+            'rapidocr_used': extractor_stats.get('rapidocr_used'),
+            'rapidocr_pages': extractor_stats.get('rapidocr_pages'),
+            'ocr_boxes': extractor_stats.get('ocr_boxes'),
+            'valid_register_rows': extractor_stats.get('valid_register_rows'),
+            'extractor_fallback_reason': extractor_stats.get('extractor_fallback_reason'),
         })
 
     except NotRegisterMapError as e:
@@ -257,19 +278,18 @@ def _run_one(pdf_path: str, mode: str, temp_base: str, timeout_sec: int) -> dict
 
 # ── image fixture OCR 실행 ───────────────────────────────────────────────────
 
-def _run_nemotron_fixtures_inner(pdf_path: str, mode: str, fixtures_dir: str) -> dict:
-    """PNG fixture 디렉터리에서 직접 nemotron OCR 실행. H01/DER 스코어링 없음."""
-    from model_maker_web_v4.backend.pipeline.ai_nemotron_ocr import get_nemotron_model
+def _run_rapidocr_fixtures_inner(pdf_path: str, mode: str, fixtures_dir: str) -> dict:
+    """Run RapidOCR directly on PNG/JPG fixtures. H01/DER scoring is not available here."""
+    from model_maker_web_v4.backend.pipeline.rapidocr_adapter import extract_fixture_candidates
 
-    pdf_name  = os.path.basename(pdf_path)
-    pdf_stem  = os.path.splitext(pdf_name)[0]
-    fix_dir   = os.path.join(fixtures_dir, pdf_stem)
-    lang      = 'multi' if mode == 'nemotron_ocr_multi' else 'en'
-    row       = _empty_row(pdf_name, mode, input_type='image_fixture')
+    pdf_name = os.path.basename(pdf_path)
+    pdf_stem = os.path.splitext(pdf_name)[0]
+    fix_dir = os.path.join(fixtures_dir, pdf_stem)
+    row = _empty_row(pdf_name, mode, input_type='image_fixture')
 
     if not os.path.isdir(fix_dir):
         row['elapsed_sec'] = 0.0
-        row['error']       = f'no_fixtures: {fix_dir}'
+        row['error'] = f'no_fixtures: {fix_dir}'
         return row
 
     ai_settings = _build_ai_settings(mode) or {}
@@ -277,48 +297,38 @@ def _run_nemotron_fixtures_inner(pdf_path: str, mode: str, fixtures_dir: str) ->
         print(f"    [{level.upper():5s}] {msg}", flush=True)
 
     try:
-        nem = get_nemotron_model(
-            model_path=ai_settings.get('nemotron_model_path', ''),
-            device=ai_settings.get('nemotron_device', 'auto'),
-            api_url=ai_settings.get('nemotron_api_url', ''),
-            api_key=ai_settings.get('nemotron_api_key', ''),
-            model_id=ai_settings.get('nemotron_model_id',
-                                     'nvidia/llama-3.1-nemotron-nano-vl-8b-v1'),
-        )
-        if nem is None:
-            import model_maker_web_v4.backend.pipeline.ai_nemotron_ocr as _m
-            raise RuntimeError(
-                f'NemotronOCR 로드 실패: {_m._nemotron_error or "api_url 또는 model_path 미설정"}'
-            )
-        t0   = time.perf_counter()
-        regs = nem.extract_pages_from_dir(fix_dir, lang=lang, log=log)
+        t0 = time.perf_counter()
+        result = extract_fixture_candidates(fix_dir, settings=ai_settings, log=log)
         elapsed = time.perf_counter() - t0
-        row['elapsed_sec']        = round(elapsed, 2)
-        row['ocr_regs_extracted'] = len(regs)
+        row['elapsed_sec'] = round(elapsed, 2)
+        row['ocr_regs_extracted'] = len(result.candidates)
+        row['rapidocr_used'] = result.stats.get('rapidocr_used')
+        row['rapidocr_pages'] = result.stats.get('rapidocr_pages')
+        row['ocr_boxes'] = result.stats.get('ocr_boxes')
+        row['valid_register_rows'] = result.stats.get('valid_register_rows')
+        row['extractor_fallback_reason'] = result.stats.get('extractor_fallback_reason')
     except Exception as e:
         row['error'] = f'{type(e).__name__}: {e}'
 
     return row
 
 
-def _run_nemotron_fixtures(
-    pdf_path: str, mode: str, fixtures_dir: str, timeout_sec: int
-) -> dict:
-    """타임아웃 감시 포함 fixture OCR 실행."""
+def _run_rapidocr_fixtures(pdf_path: str, mode: str, fixtures_dir: str, timeout_sec: int) -> dict:
+    """Run fixture OCR with timeout guard."""
     pdf_name = os.path.basename(pdf_path)
 
     if mode in _NOT_IMPLEMENTED_MODES:
         row = _empty_row(pdf_name, mode, 'image_fixture')
         row['elapsed_sec'] = 0.0
-        row['error']       = 'mode_not_implemented'
+        row['error'] = 'mode_not_implemented'
         return row
 
     result_holder: list = [None]
 
     def worker():
-        result_holder[0] = _run_nemotron_fixtures_inner(pdf_path, mode, fixtures_dir)
+        result_holder[0] = _run_rapidocr_fixtures_inner(pdf_path, mode, fixtures_dir)
 
-    t  = threading.Thread(target=worker, daemon=True)
+    t = threading.Thread(target=worker, daemon=True)
     t0 = time.perf_counter()
     t.start()
     t.join(timeout_sec)
@@ -326,14 +336,13 @@ def _run_nemotron_fixtures(
 
     if t.is_alive():
         row = _empty_row(pdf_name, mode, 'image_fixture')
-        row['timeout']     = True
+        row['timeout'] = True
         row['elapsed_sec'] = round(elapsed, 2)
-        row['error']       = 'timeout'
+        row['error'] = 'timeout'
         print(f"    [WARN ] TIMEOUT ({elapsed:.0f}s)", flush=True)
         return row
 
     return result_holder[0]
-
 
 # ── image fixture PNG 생성 ────────────────────────────────────────────────────
 
@@ -478,14 +487,14 @@ def main():
     # fixture_mode 결정: image/both는 nemotron 모드만 fixture로 실행
     run_original = args.fixture_mode in ('original', 'both')
     run_fixture  = args.fixture_mode in ('image', 'both')
-    nemotron_modes = [m for m in modes if m in CANDIDATE_MODES]
+    fixture_modes = [m for m in modes if m == 'rapidocr_only']
 
     # ── 벤치마크 실행 ────────────────────────────────────────────────────────
     legacy_in_run = [m for m in modes if m in LEGACY_MODES]
 
     # 총 건수 계산
     orig_entries    = len(pdf_paths) * len(modes) if run_original else 0
-    fixture_entries = len(pdf_paths) * len(nemotron_modes) if run_fixture else 0
+    fixture_entries = len(pdf_paths) * len(fixture_modes) if run_fixture else 0
     total           = orig_entries + fixture_entries
 
     print(f'\n=== Stage1 Benchmark ===')
@@ -523,14 +532,14 @@ def main():
                     )
 
     # ── image fixture OCR 실행 (nemotron 모드만) ─────────────────────────────
-    if run_fixture and nemotron_modes:
-        print(f'\n--- Image Fixture OCR ({len(pdf_paths)} PDFs × {len(nemotron_modes)} modes) ---')
+    if run_fixture and fixture_modes:
+        print(f'\n--- Image Fixture OCR ({len(pdf_paths)} PDFs x {len(fixture_modes)} modes) ---')
         for pdf_path in pdf_paths:
-            for mode in nemotron_modes:
+            for mode in fixture_modes:
                 idx     += 1
                 pdf_name = os.path.basename(pdf_path)
                 print(f'[{idx}/{total}] {pdf_name} | mode={mode} | input=image_fixture')
-                row = _run_nemotron_fixtures(pdf_path, mode, fixtures_dir, args.timeout_sec)
+                row = _run_rapidocr_fixtures(pdf_path, mode, fixtures_dir, args.timeout_sec)
                 rows.append(row)
 
                 if row.get('timeout'):
@@ -552,3 +561,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+
