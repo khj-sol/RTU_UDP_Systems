@@ -214,10 +214,11 @@ class NemotronOCRModel:
         # transformers>=4.47 호환: PreTrainedModel 베이스에 all_tied_weights_keys 주입
         # trust_remote_code로 동적 로드된 클래스는 MODEL_FOR_CAUSAL_LM_MAPPING에 없으므로
         # 베이스 클래스에 패치해야 모든 서브클래스에 상속됨
+        # dict 타입 필수: transformers 5.5.4+에서 .keys()/.update() 호출
         try:
             from transformers import PreTrainedModel
             if not hasattr(PreTrainedModel, "all_tied_weights_keys"):
-                PreTrainedModel.all_tied_weights_keys = []
+                PreTrainedModel.all_tied_weights_keys = {}
         except Exception:
             pass
 
