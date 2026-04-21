@@ -28,7 +28,6 @@ def _snapshot(repo_id: str, local_dir: str, revision: str):
         repo_id=repo_id,
         local_dir=local_dir,
         revision=revision,
-        local_dir_use_symlinks=False,
         ignore_patterns=["*.msgpack", "flax_model*", "tf_model*", "rust_model*"],
     )
 
