@@ -7,7 +7,7 @@
   <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0" />
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
-  <title>Model Maker Web V4 — Nemotron OCR</title>
+  <title>Model Maker Web V4.2 - Layout First OCR</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'Segoe UI', sans-serif; background: #0f1117; color: #e0e0e0; }
@@ -230,7 +230,7 @@
 <body>
 
 <header>
-  <h1>Model Maker V4 — Nemotron OCR</h1>
+  <h1>Model Maker V4.2 - Layout First OCR</h1>
   <span>Inverter Modbus PDF → RTU Register Map  |  Stage 1 → 2 → 3</span>
   <span id="ollama-badge" style="display:none; margin-left:16px; padding:2px 10px; border-radius:4px; font-size:12px; font-weight:600;"></span>
 </header>
@@ -255,26 +255,50 @@
         <option value="relay">보호계전기</option>
         <option value="weather">기상대/환경센서</option>
       </select>
-      <label>AI 모드</label>
-      <select id="ai-mode-select" onchange="onAiModeChange()" style="border-color:#4c1d95;">
-        <option value="off">AI 사용 안 함 (Rule-based)</option>
-        <option value="nemotron_ocr_en" selected>Nemotron OCR — 영문 (권장)</option>
-        <option value="nemotron_ocr_multi">Nemotron OCR — 다국어 (한/일/중)</option>
+      <label>Extraction Mode</label>
+      <select id="ai-mode-select" onchange="onAiModeChange()" style="border-color:#2563eb;">
+        <option value="layout_first" selected>Layout-first recommended</option>
+        <option value="off">Rule-only, no extractor</option>
+        <option value="rapidocr_only">RapidOCR only, scanned/image PDF test</option>
+        <option value="nemotron_ocr_en">Legacy Nemotron OCR EN, slow/debug</option>
+        <option value="nemotron_ocr_multi">Legacy Nemotron OCR multi, slow/debug</option>
       </select>
-      <div id="hf-settings" style="margin-top:8px; padding:10px; background:#12151f; border:1px solid #4c1d95; border-radius:6px;">
-        <div style="font-size:11px; font-weight:700; color:#a78bfa; margin-bottom:8px;">⚙ Nemotron OCR 설정</div>
-        <label style="margin-top:6px;">로컬 모델 경로</label>
-        <input type="text" id="nem-model-path" placeholder="C:/models/Nemotron-Nano-VL-8B" />
-        <label style="margin-top:6px;">이미지 DPI <span style="color:#6b7280;">(기본값: 200)</span></label>
+      <div id="hf-settings" style="margin-top:8px; padding:10px; background:#101820; border:1px solid #2563eb; border-radius:6px;">
+        <div style="font-size:11px; font-weight:700; color:#93c5fd; margin-bottom:8px;">v4.2 Extractor Settings</div>
+        <label style="margin-top:6px;">Layout min valid rows</label>
+        <input type="number" id="layout-min-valid-rows" placeholder="5" min="0" max="100" style="width:90px;" />
+        <label style="margin-top:6px;">Layout accept threshold <span style="color:#6b7280;">fallback below this count</span></label>
+        <input type="number" id="layout-min-accept-rows" placeholder="30" min="0" max="300" style="width:90px;" />
+        <label style="margin-top:6px;">Image DPI <span style="color:#6b7280;">RapidOCR fallback/render</span></label>
         <input type="number" id="nem-image-dpi" placeholder="200" min="72" max="400" style="width:90px;" />
-        <button onclick="saveAiSettings()" style="margin-top:10px; width:100%; padding:6px; background:#1e3a5f; color:#93c5fd; border:1px solid #3b82f6; border-radius:4px; font-size:12px; cursor:pointer;">💾 설정 저장</button>
-        <div id="settings-save-msg" style="font-size:10px; color:#4ade80; margin-top:4px; display:none;">✓ 저장됨</div>
-        <div style="font-size:11px; margin-top:8px; padding:6px; background:#1f2937; border-radius:4px; display:flex; justify-content:space-between; align-items:center;">
-          <span style="color:#d1d5db;">상태:</span>
-          <span id="nemotron-status-badge" style="padding:2px 8px; border-radius:3px; font-size:10px; background:#374151; color:#9ca3af;">[미로드]</span>
+        <label style="margin-top:6px;">RapidOCR language</label>
+        <select id="rapidocr-lang" style="width:140px;">
+          <option value="english">english</option>
+          <option value="korean">korean</option>
+          <option value="latin">latin</option>
+          <option value="chinese">chinese</option>
+        </select>
+        <label style="margin-top:6px;">RapidOCR det model path <span style="color:#6b7280;">optional</span></label>
+        <input type="text" id="rapidocr-det-model-path" placeholder="optional ONNX det model path" />
+        <label style="margin-top:6px;">RapidOCR rec model path <span style="color:#6b7280;">optional</span></label>
+        <input type="text" id="rapidocr-rec-model-path" placeholder="optional ONNX rec model path" />
+        <label style="margin-top:6px;">RapidOCR rec keys path <span style="color:#6b7280;">optional</span></label>
+        <input type="text" id="rapidocr-rec-keys-path" placeholder="optional keys txt path" />
+        <details id="legacy-nemotron-details" style="margin-top:10px; padding:8px; background:#171923; border:1px solid #374151; border-radius:5px;">
+          <summary style="cursor:pointer; color:#9ca3af; font-size:11px; font-weight:700;">Legacy Nemotron debug settings</summary>
+          <label style="margin-top:8px;">Legacy model path</label>
+          <input type="text" id="nem-model-path" placeholder="C:/models/Nemotron-Nano-VL-8B" />
+        </details>
+        <button onclick="saveAiSettings()" style="margin-top:10px; width:100%; padding:6px; background:#1e3a5f; color:#93c5fd; border:1px solid #3b82f6; border-radius:4px; font-size:12px; cursor:pointer;">Save extractor settings</button>
+        <div id="settings-save-msg" style="font-size:10px; color:#4ade80; margin-top:4px; display:none;">saved</div>
+        <div style="font-size:11px; margin-top:8px; padding:6px; background:#1f2937; border-radius:4px; display:flex; justify-content:space-between; align-items:center; gap:8px;">
+          <span style="color:#d1d5db;">Layout:</span>
+          <span id="layout-status-badge" style="padding:2px 8px; border-radius:3px; font-size:10px; background:#14532d; color:#4ade80;">ready</span>
+          <span style="color:#d1d5db;">RapidOCR:</span>
+          <span id="rapidocr-status-badge" style="padding:2px 8px; border-radius:3px; font-size:10px; background:#374151; color:#9ca3af;">not loaded</span>
         </div>
         <div style="font-size:11px; color:#9ca3af; margin-top:4px;">GPU: <span id="gpu-memory-display">-</span></div>
-        <button onclick="loadAiModels()" style="margin-top:8px; width:100%; padding:6px; background:#4c1d95; color:#e9d5ff; border:none; border-radius:4px; font-size:12px; cursor:pointer;">📥 AI 모델 로드</button>
+        <button onclick="loadAiModels(event)" style="margin-top:8px; width:100%; padding:6px; background:#0f766e; color:#ccfbf1; border:none; border-radius:4px; font-size:12px; cursor:pointer;">Preload RapidOCR optional</button>
       </div>
       <button class="run-btn" id="btn-s1" disabled onclick="runStage1()">Stage 1 실행</button>
       <div class="log-box" id="log-s1"><span style="color:#ffffff">-- 대기 중 --</span></div>
@@ -414,17 +438,29 @@
   // When proxied, API calls must go through the proxy path, not root /api.
   const _isProxied = window.location.pathname.includes('/mm2-app');
   const API = _isProxied ? '/api/mm2-app/api' : '/api';
-  // AI mode: read from select UI
+  // v4.2 extraction mode helpers
   function _aiMode() { return document.getElementById('ai-mode-select').value !== 'off'; }
   function _aiModeValue() {
     const v = document.getElementById('ai-mode-select').value;
-    if (v === 'nemotron_ocr_en' || v === 'nemotron_ocr_multi') return v;
-    return 'none';
+    if (v === 'off') return 'none';
+    if (['layout_first', 'rapidocr_only', 'nemotron_ocr_en', 'nemotron_ocr_multi'].includes(v)) return v;
+    return 'layout_first';
+  }
+  function _modeLabel(mode) {
+    return {
+      layout_first: 'Layout-first recommended',
+      rapidocr_only: 'RapidOCR only',
+      nemotron_ocr_en: 'Legacy Nemotron OCR EN',
+      nemotron_ocr_multi: 'Legacy Nemotron OCR multi',
+      none: 'Rule-only',
+    }[mode] || mode;
   }
   function onAiModeChange() {
     const mode = document.getElementById('ai-mode-select').value;
     const settings = document.getElementById('hf-settings');
     if (settings) settings.style.display = mode !== 'off' ? 'block' : 'none';
+    const legacy = document.getElementById('legacy-nemotron-details');
+    if (legacy) legacy.open = mode === 'nemotron_ocr_en' || mode === 'nemotron_ocr_multi';
 
     const badge = document.getElementById('ollama-badge');
     if (!badge) return;
@@ -432,10 +468,12 @@
       badge.style.display = 'none';
     } else {
       badge.style.display = 'inline';
+      badge.textContent = _modeLabel(_aiModeValue());
+      badge.style.background = mode.startsWith('nemotron') ? '#713f12' : '#0f766e';
+      badge.style.color = mode.startsWith('nemotron') ? '#fde68a' : '#99f6e4';
       checkAiStatus();
     }
   }
-  // Init: load settings + check AI status on load
   setTimeout(() => {
     loadAiSettingsFromServer();
     onAiModeChange();
@@ -443,55 +481,46 @@
 
   async function checkAiStatus() {
     const badge = document.getElementById('ollama-badge');
-    const nemBadge = document.getElementById('nemotron-status-badge');
+    const layoutBadge = document.getElementById('layout-status-badge');
+    const rapidBadge = document.getElementById('rapidocr-status-badge');
     const gpuDisplay = document.getElementById('gpu-memory-display');
 
-    if (badge) { badge.style.display = 'inline'; badge.textContent = '⏳ AI 상태 확인 중...'; badge.style.background = '#374151'; badge.style.color = '#d1d5db'; }
+    if (badge) { badge.style.display = 'inline'; badge.textContent = 'checking extractor status...'; badge.style.background = '#374151'; badge.style.color = '#d1d5db'; }
 
     try {
       const r = await fetch(`${API}/ai/status`);
       const d = await r.json();
 
-      // Update Nemotron status
-      let nemText = '[미로드]';
-      let nemBg = '#374151';
-      let nemFg = '#9ca3af';
-      if (d.nemotron && d.nemotron.loaded) {
-        const modeLabel = d.nemotron.mode === 'nim_api' ? 'NIM API' : (d.nemotron.mode || 'local');
-        nemText = `[로드됨 — ${modeLabel}]`;
-        nemBg = '#14532d';
-        nemFg = '#4ade80';
+      if (layoutBadge) {
+        layoutBadge.textContent = d.layout && d.layout.loaded ? 'ready' : 'unavailable';
+        layoutBadge.style.background = d.layout && d.layout.loaded ? '#14532d' : '#450a0a';
+        layoutBadge.style.color = d.layout && d.layout.loaded ? '#4ade80' : '#f87171';
       }
-      if (d.nemotron && d.nemotron.error) {
-        nemText = `[오류: ${d.nemotron.error.slice(0, 30)}...]`;
-        nemBg = '#450a0a';
-        nemFg = '#f87171';
-      }
-      if (nemBadge) { nemBadge.textContent = nemText; nemBadge.style.background = nemBg; nemBadge.style.color = nemFg; }
 
-      // Update GPU memory
+      const rapidLoaded = d.rapidocr && d.rapidocr.loaded;
+      const rapidErr = d.rapidocr && d.rapidocr.error;
+      if (rapidBadge) {
+        rapidBadge.textContent = rapidLoaded ? 'loaded' : (rapidErr ? 'optional missing' : 'lazy');
+        rapidBadge.title = rapidErr || '';
+        rapidBadge.style.background = rapidLoaded ? '#14532d' : '#374151';
+        rapidBadge.style.color = rapidLoaded ? '#4ade80' : '#9ca3af';
+      }
+
       if (gpuDisplay && d.gpu_memory_gb && d.gpu_memory_gb.total !== undefined) {
         gpuDisplay.textContent = `${d.gpu_memory_gb.used}GB / ${d.gpu_memory_gb.total}GB`;
       } else if (gpuDisplay) {
         gpuDisplay.textContent = '-';
       }
 
-      // Update main badge
-      const loaded = d.nemotron && d.nemotron.loaded;
       if (badge) {
-        if (loaded) {
-          badge.textContent = 'AI 모델 로드됨';
-          badge.style.background = '#14532d';
-          badge.style.color = '#4ade80';
-        } else {
-          badge.textContent = 'AI 모델 미로드';
-          badge.style.background = '#374151';
-          badge.style.color = '#9ca3af';
-        }
+        const mode = _aiModeValue();
+        badge.textContent = _modeLabel(mode);
+        badge.style.background = mode.startsWith('nemotron') ? '#713f12' : '#0f766e';
+        badge.style.color = mode.startsWith('nemotron') ? '#fde68a' : '#99f6e4';
       }
     } catch (err) {
-      if (badge) { badge.textContent = 'AI 상태 확인 오류'; badge.style.background = '#450a0a'; badge.style.color = '#f87171'; }
-      appendLog('s1', `AI 상태 확인 오류: ${err.message}`, 'err');
+      if (badge) { badge.textContent = 'extractor status error'; badge.style.background = '#450a0a'; badge.style.color = '#f87171'; }
+      appendLog('s1', `Extractor status error: ${err.message}`, 'err');
     }
   }
 
@@ -500,18 +529,42 @@
       const r = await fetch(`${API}/settings`);
       if (!r.ok) return;
       const d = await r.json();
-      const s = d.nemotron_ocr || {};
-      document.getElementById('nem-model-path').value = s.model_path || 'C:/models/Nemotron-Nano-VL-8B';
-      document.getElementById('nem-image-dpi').value  = s.image_dpi  || 200;
+      const layout = d.layout || {};
+      const rapid = d.rapidocr || {};
+      const legacy = d.legacy_nemotron || d.nemotron_ocr || {};
+      document.getElementById('layout-min-valid-rows').value = layout.min_valid_rows ?? 5;
+      document.getElementById('layout-min-accept-rows').value = layout.min_accept_rows ?? 30;
+      document.getElementById('nem-image-dpi').value = layout.image_dpi || legacy.image_dpi || 200;
+      document.getElementById('rapidocr-lang').value = rapid.lang || 'english';
+      document.getElementById('rapidocr-det-model-path').value = rapid.det_model_path || '';
+      document.getElementById('rapidocr-rec-model-path').value = rapid.rec_model_path || '';
+      document.getElementById('rapidocr-rec-keys-path').value = rapid.rec_keys_path || '';
+      document.getElementById('nem-model-path').value = legacy.model_path || 'C:/models/Nemotron-Nano-VL-8B';
     } catch (_) {}
   }
 
   async function saveAiSettings() {
     const body = {
-      nemotron_ocr: {
+      layout: {
+        enabled: true,
+        min_valid_rows: parseInt(document.getElementById('layout-min-valid-rows').value) || 5,
+        min_accept_rows: parseInt(document.getElementById('layout-min-accept-rows').value) || 30,
+        image_dpi: parseInt(document.getElementById('nem-image-dpi').value) || 200,
+      },
+      rapidocr: {
+        enabled: true,
+        det_model_path: document.getElementById('rapidocr-det-model-path').value.trim(),
+        rec_model_path: document.getElementById('rapidocr-rec-model-path').value.trim(),
+        rec_keys_path: document.getElementById('rapidocr-rec-keys-path').value.trim(),
+        lang: document.getElementById('rapidocr-lang').value || 'english',
+        device: 'cpu',
+      },
+      legacy_nemotron: {
+        enabled: false,
         model_path: document.getElementById('nem-model-path').value.trim(),
-        device:     'auto',
-        image_dpi:  parseInt(document.getElementById('nem-image-dpi').value) || 200,
+        device: 'auto',
+        image_dpi: parseInt(document.getElementById('nem-image-dpi').value) || 200,
+        page_timeout: 120,
       }
     };
     try {
@@ -520,40 +573,41 @@
         const msg = document.getElementById('settings-save-msg');
         msg.style.display = 'block';
         setTimeout(() => { msg.style.display = 'none'; }, 2000);
+        await checkAiStatus();
       }
     } catch (e) {
-      alert('설정 저장 실패: ' + e.message);
+      alert('Settings save failed: ' + e.message);
     }
   }
 
-  async function loadAiModels() {
+  async function loadAiModels(ev) {
     const badge = document.getElementById('ollama-badge');
-    const btn = event.target;
+    const btn = ev ? ev.target : event.target;
     const btnText = btn.textContent;
     btn.disabled = true;
-    
-    appendLog('s1', '[AI] AI 모델 로드 중...', 'info');
-    if (badge) { badge.style.display = 'inline'; badge.textContent = '⏳ 모델 로드 중...'; badge.style.background = '#374151'; badge.style.color = '#d1d5db'; }
-    
+
+    appendLog('s1', '[v4.2] RapidOCR optional preload requested. Layout-first works without it.', 'info');
+    if (badge) { badge.style.display = 'inline'; badge.textContent = 'preloading optional RapidOCR...'; badge.style.background = '#374151'; badge.style.color = '#d1d5db'; }
+
     try {
       const r = await fetch(`${API}/ai/load`, { method: 'POST' });
       const d = await r.json();
-      
-      if (d.status === 'not_configured') {
-        appendLog('s1', `[AI] ⚠ ${d.msg}`, 'err');
-      } else if (d.status === 'loading') {
-        appendLog('s1', '[AI] Nemotron OCR 모델 로드 시작됨...', 'ok');
-        await new Promise(resolve => setTimeout(resolve, 3000));
+      if (d.status === 'loading') {
+        appendLog('s1', '[v4.2] RapidOCR preload started. If package is missing, layout-first still runs.', 'ok');
+        await new Promise(resolve => setTimeout(resolve, 1500));
         await checkAiStatus();
+      } else if (d.msg) {
+        appendLog('s1', `[v4.2] ${d.msg}`, 'warn');
       }
     } catch (err) {
-      appendLog('s1', `[AI] 모델 로드 오류: ${err.message}`, 'err');
+      appendLog('s1', `[v4.2] preload error: ${err.message}`, 'err');
     } finally {
       btn.textContent = btnText;
       btn.disabled = false;
       await checkAiStatus();
     }
   }
+
   let sessionId = null;
   let ws = null;
   let uploadedFilename = null;
@@ -681,34 +735,38 @@
     const origText = btn.textContent;
     btn.disabled = true;
     clearLog('s1');
-    // Show AI mode status immediately in log
+    // Show extraction mode status immediately in log
     const aiMode = _aiModeValue();
     if (aiMode !== 'none') {
-      const modeName = aiMode === 'nemotron_ocr_multi' ? 'Nemotron OCR (다국어)' : 'Nemotron OCR (영문)';
-      appendLog('s1', `🤖 AI Mode — ${modeName} 추출 시작`, 'ok');
-      appendLog('s1', '  1. PDF 텍스트/표 추출 → 2. Regex 후보 추출 → 3. Nemotron OCR 이미지 파싱 → 4. 결과 병합', 'info');
-      btn.textContent = '🤖 AI 분석 중...';
-      btn.style.background = '#7c3aed';
-      // Periodic progress indicator (AI can take 1-5min)
+      appendLog('s1', `Extractor Mode - ${_modeLabel(aiMode)} start`, 'ok');
+      if (aiMode === 'layout_first') {
+        appendLog('s1', '  Flow: PyMuPDF layout/table/text -> sparse pages RapidOCR optional -> rules/reference matching', 'info');
+        btn.textContent = 'Layout-first running...';
+        btn.style.background = '#0f766e';
+      } else if (aiMode === 'rapidocr_only') {
+        appendLog('s1', '  Flow: render pages -> RapidOCR ONNX -> bbox row reconstruction -> rules/reference matching', 'info');
+        btn.textContent = 'RapidOCR running...';
+        btn.style.background = '#2563eb';
+      } else {
+        appendLog('s1', '  Legacy Nemotron path can be slow and is debug-only.', 'warn');
+        btn.textContent = 'Legacy AI running...';
+        btn.style.background = '#92400e';
+      }
       let dots = 0;
       let elapsed = 0;
       _s1ProgressTimer = setInterval(() => {
         dots = (dots + 1) % 4;
         elapsed += 5;
-        const phases = [
-          [0,   'PDF 텍스트/표 추출 중'],
-          [10,  '[Rule] Regex 후보 추출 중...'],
-          [30,  '[Nemotron OCR] 이미지 페이지 파싱 중...'],
-          [70,  '[Hybrid] 결과 병합 + H01 필드 매핑 중'],
-          [100, '거의 완료... 결과 처리 중'],
-        ];
+        const phases = aiMode === 'layout_first'
+          ? [[0, 'layout extraction'], [10, 'optional OCR fallback'], [20, 'rule matching'], [40, 'Excel writing']]
+          : [[0, 'page rendering'], [10, 'OCR extraction'], [30, 'row reconstruction'], [50, 'rule matching']];
         let phase = phases[0][1];
         for (const [t, msg] of phases) { if (elapsed >= t) phase = msg; }
-        btn.textContent = `🤖 ${phase}${'.'.repeat(dots)}`;
+        btn.textContent = `${_modeLabel(aiMode)} - ${phase}${'.'.repeat(dots)}`;
       }, 5000);
     } else {
-      appendLog('s1', 'Rule-based 파싱 모드 (AI Mode OFF)', 'info');
-      btn.textContent = '실행 중...';
+      appendLog('s1', 'Rule-only parsing mode', 'info');
+      btn.textContent = 'Running...';
     }
     appendLog('s1', `Stage 1 실행 중... (${uploadedFilename})`, 'info');
     try {
