@@ -164,27 +164,42 @@ class NemotronOCRModel:
         if not model_path:
             raise ValueError("[NemotronOCR] api_url 또는 model_path 중 하나가 필요합니다.")
 
+        # 가중치 파일 사전 확인
+        import glob as _glob
+        _weights = (
+            _glob.glob(os.path.join(model_path, "*.safetensors"))
+            + _glob.glob(os.path.join(model_path, "*.bin"))
+        )
+        if not _weights:
+            raise FileNotFoundError(
+                f"모델 가중치 파일 없음: {model_path}\n"
+                "HuggingFace에서 전체 모델을 다운로드하세요 (*.safetensors 필요).\n"
+                "  huggingface-cli download nvidia/llama-3.1-nemotron-nano-vl-8b-v1"
+                f" --local-dir \"{model_path}\""
+            )
+
         logger.info("[NemotronOCR] 로컬 모델 로드 중: %s (device=%s)", model_path, device)
-        import transformers as _tf
 
-        _model_cls = None
-        for _cls_name in (
-            "LlavaNextForConditionalGeneration",
-            "LlavaForConditionalGeneration",
-            "AutoModelForVision2Seq",
-        ):
-            _cls = getattr(_tf, _cls_name, None)
-            if _cls is not None:
-                _model_cls = _cls
-                break
-
-        if _model_cls is None:
-            from transformers import AutoModelForVision2Seq
-            _model_cls = AutoModelForVision2Seq
-
+        # 프로세서 로드: AutoProcessor 실패 시 image_processing.py 직접 로드
         from transformers import AutoProcessor
-        self.processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
-        self.model = _model_cls.from_pretrained(
+        try:
+            self.processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
+        except Exception:
+            import importlib.util as _ilu
+            _ip_path = os.path.join(model_path, "image_processing.py")
+            if os.path.exists(_ip_path):
+                _spec = _ilu.spec_from_file_location("_nemotron_ip", _ip_path)
+                _mod = _ilu.module_from_spec(_spec)
+                _spec.loader.exec_module(_mod)
+                _proc_cls = getattr(_mod, "LlamaNemotronNanoVLImageProcessor", None)
+                if _proc_cls is None:
+                    raise RuntimeError("image_processing.py에서 프로세서 클래스를 찾을 수 없습니다.")
+                self.processor = _proc_cls.from_pretrained(model_path)
+            else:
+                raise
+
+        from transformers import AutoModelForCausalLM
+        self.model = AutoModelForCausalLM.from_pretrained(
             model_path,
             device_map=device,
             torch_dtype="auto",
