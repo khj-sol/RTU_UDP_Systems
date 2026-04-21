@@ -470,8 +470,10 @@
       if (nemBadge) { nemBadge.textContent = nemText; nemBadge.style.background = nemBg; nemBadge.style.color = nemFg; }
 
       // Update GPU memory
-      if (gpuDisplay && d.gpu_memory_gb) {
-        gpuDisplay.textContent = `GPU: ${d.gpu_memory_gb.used}GB / ${d.gpu_memory_gb.total}GB`;
+      if (gpuDisplay && d.gpu_memory_gb && d.gpu_memory_gb.total !== undefined) {
+        gpuDisplay.textContent = `${d.gpu_memory_gb.used}GB / ${d.gpu_memory_gb.total}GB`;
+      } else if (gpuDisplay) {
+        gpuDisplay.textContent = '-';
       }
 
       // Update main badge
