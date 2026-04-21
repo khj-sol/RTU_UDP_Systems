@@ -231,6 +231,8 @@ class NemotronOCRModel:
             attn_implementation="eager",
         )
         self.model.eval()
+        # generate() 호출 전 img_context_token_id 필수 — chat()을 거치지 않으므로 직접 설정
+        self.model.img_context_token_id = self.processor.tokenizer.convert_tokens_to_ids("<image>")
         logger.info("[NemotronOCR] 로드 완료")
 
     # ── 내부 헬퍼 ─────────────────────────────────────────────────────────────
