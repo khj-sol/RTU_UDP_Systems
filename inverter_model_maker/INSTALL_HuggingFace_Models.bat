@@ -29,9 +29,8 @@ echo.
 echo ================================================
 echo   Setup Complete!
 echo.
-echo   Set in config\ai_settings.ini:
-echo     [nemotron_ocr]
-echo     model_path = C:/models/Nemotron-Nano-VL-8B
+echo   모델 경로(C:\models\Nemotron-Nano-VL-8B)가 mm_settings.json에 기본 설정됩니다.
+echo   웹 UI에서 경로 확인/변경 후 사용하세요.
 echo.
 echo   Now run: START_모델메이커_WEB_v4.bat
 echo ================================================
