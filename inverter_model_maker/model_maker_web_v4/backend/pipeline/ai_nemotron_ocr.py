@@ -183,7 +183,9 @@ class NemotronOCRModel:
         # 프로세서 로드: AutoProcessor 실패 시 image_processing.py 직접 로드
         from transformers import AutoProcessor
         try:
-            self.processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
+            self.processor = AutoProcessor.from_pretrained(
+                model_path, trust_remote_code=True, fix_mistral_regex=True
+            )
         except Exception:
             import importlib.util as _ilu
             _ip_path = os.path.join(model_path, "image_processing.py")
@@ -198,12 +200,33 @@ class NemotronOCRModel:
             else:
                 raise
 
-        from transformers import AutoModelForCausalLM
+        from transformers import AutoConfig, AutoModelForCausalLM
+
+        config = AutoConfig.from_pretrained(model_path, trust_remote_code=True)
+
+        # config.json에 flash_attention_2가 하드코딩되어 있어 eager로 강제 덮어쓰기
+        config._attn_implementation = "eager"
+        for _sub_attr in ("text_config", "vision_config", "llm_config", "vit_config", "language_config"):
+            _sub = getattr(config, _sub_attr, None)
+            if _sub is not None:
+                _sub._attn_implementation = "eager"
+
+        # transformers>=4.50 호환: 커스텀 클래스에 all_tied_weights_keys 주입
+        try:
+            from transformers.models.auto.modeling_auto import MODEL_FOR_CAUSAL_LM_MAPPING
+            _cls = MODEL_FOR_CAUSAL_LM_MAPPING.get(type(config))
+            if _cls is not None and not hasattr(_cls, "all_tied_weights_keys"):
+                _cls.all_tied_weights_keys = []
+        except Exception:
+            pass
+
         self.model = AutoModelForCausalLM.from_pretrained(
             model_path,
+            config=config,
             device_map=device,
-            torch_dtype="auto",
+            dtype="auto",
             trust_remote_code=True,
+            attn_implementation="eager",
         )
         self.model.eval()
         logger.info("[NemotronOCR] 로드 완료")
