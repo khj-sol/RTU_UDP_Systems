@@ -9,6 +9,7 @@ import shutil
 import asyncio
 import traceback
 import json
+from pathlib import Path
 
 from .session_store import SessionStore
 from .ws_manager import ws_manager
@@ -19,6 +20,7 @@ import hashlib
 import threading
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+MM_SETTINGS_PATH = Path(__file__).parent.parent / 'mm_settings.json'
 COMMON_DIR = os.path.join(PROJECT_ROOT, 'common')
 RESULTS_DIR = os.path.join(os.path.dirname(__file__), '..', 'results')
 DEFINITIONS_DIR = os.path.join(os.path.dirname(__file__), 'pipeline', 'definitions')
@@ -186,37 +188,37 @@ async def stage1_upload(
 
 
 def _load_ai_settings() -> dict:
-    """HuggingFace 모델 설정 로드 from config/ai_settings.ini [phi] + [qwen_vl] 섹션.
-
-    Searches two locations: PROJECT_ROOT/config/ (inverter_model_maker/) and
-    the parent RTU project root (config/).
-    """
-    import configparser
-    rtu_root = os.path.abspath(os.path.join(PROJECT_ROOT, '..'))
-    candidates = [
-        os.path.join(PROJECT_ROOT, 'config', 'ai_settings.ini'),
-        os.path.join(rtu_root, 'config', 'ai_settings.ini'),
-    ]
-    cfg_path = next((p for p in candidates if os.path.exists(p)), candidates[0])
-    cp = configparser.ConfigParser()
-    cp.read(cfg_path, encoding='utf-8')
+    """Nemotron OCR 설정 로드 from mm_settings.json."""
+    if not MM_SETTINGS_PATH.exists():
+        return {}
+    with open(MM_SETTINGS_PATH, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    s = data.get('nemotron_ocr', {})
     return {
-        'phi_model_path': cp.get('phi', 'model_path', fallback=''),
-        'phi_device': cp.get('phi', 'device', fallback='auto'),
-        'phi_enabled': cp.getboolean('phi', 'enabled', fallback=True),
-        'qwen_model_path': cp.get('qwen_vl', 'model_path', fallback=''),
-        'qwen_device': cp.get('qwen_vl', 'device', fallback='auto'),
-        'qwen_enabled': cp.getboolean('qwen_vl', 'enabled', fallback=True),
-        'qwen_wsl_url': cp.get('qwen_vl', 'wsl_server_url', fallback=''),
-        'image_dpi': cp.getint('qwen_vl', 'image_dpi', fallback=200),
-        'sparse_threshold': cp.getint('qwen_vl', 'sparse_threshold', fallback=3),
-        'nemotron_model_path': cp.get('nemotron_ocr', 'model_path', fallback=''),
-        'nemotron_device': cp.get('nemotron_ocr', 'device', fallback='auto'),
-        'nemotron_api_url': cp.get('nemotron_ocr', 'api_url', fallback=''),
-        'nemotron_api_key': cp.get('nemotron_ocr', 'api_key', fallback=''),
-        'nemotron_model_id': cp.get('nemotron_ocr', 'model_id',
-                                    fallback='nvidia/llama-3.1-nemotron-nano-vl-8b-v1'),
+        'nemotron_model_path': s.get('model_path', ''),
+        'nemotron_device': s.get('device', 'auto'),
+        'image_dpi': s.get('image_dpi', 200),
+        'nemotron_api_url': '',
+        'nemotron_api_key': '',
+        'nemotron_model_id': 'nvidia/llama-3.1-nemotron-nano-vl-8b-v1',
     }
+
+
+@router.get('/settings')
+def get_settings():
+    """현재 mm_settings.json 내용 반환."""
+    if not MM_SETTINGS_PATH.exists():
+        return {'nemotron_ocr': {'model_path': 'C:/models/Nemotron-Nano-VL-8B', 'device': 'auto', 'image_dpi': 200}}
+    with open(MM_SETTINGS_PATH, 'r', encoding='utf-8') as f:
+        return json.load(f)
+
+
+@router.post('/settings')
+def save_settings(body: dict = Body(...)):
+    """설정을 mm_settings.json에 저장."""
+    with open(MM_SETTINGS_PATH, 'w', encoding='utf-8') as f:
+        json.dump(body, f, ensure_ascii=False, indent=2)
+    return {'status': 'ok'}
 
 
 @router.get('/ai/status')
@@ -259,8 +261,7 @@ async def ai_load(body: dict = Body(default={})):
     sid = body.get('session_id')
 
     if not nem_path and not nem_api_url:
-        msg = ('Nemotron OCR 미설정 — config/ai_settings.ini [nemotron_ocr] 섹션에 '
-               'model_path (로컬) 또는 api_url (NIM API) 중 하나를 설정하세요.')
+        msg = 'Nemotron OCR 미설정 — 웹 UI 설정에서 model_path (로컬) 또는 NIM API URL 중 하나를 입력 후 저장하세요.'
         return {'status': 'not_configured', 'msg': msg}
 
     async def _do_load():

@@ -1,0 +1,7 @@
+{
+  "nemotron_ocr": {
+    "model_path": "C:/models/Nemotron-Nano-VL-8B",
+    "device": "auto",
+    "image_dpi": 200
+  }
+}

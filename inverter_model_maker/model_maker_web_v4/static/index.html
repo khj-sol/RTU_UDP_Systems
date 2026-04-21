@@ -262,17 +262,19 @@
         <option value="nemotron_ocr_multi">Nemotron OCR — 다국어 (한/일/중)</option>
       </select>
       <div id="hf-settings" style="margin-top:8px; padding:10px; background:#12151f; border:1px solid #4c1d95; border-radius:6px;">
-        <div style="font-size:11px; font-weight:700; color:#a78bfa; margin-bottom:8px;">⚙ AI 모델 설정</div>
-        <div style="font-size:11px; margin-bottom:6px; padding:6px; background:#1f2937; border-radius:4px;">
-          <div style="display:flex; justify-content:space-between; align-items:center;">
-            <span style="color:#d1d5db;">Nemotron-Nano-VL-8B:</span>
-            <span id="nemotron-status-badge" style="padding:2px 8px; border-radius:3px; font-size:10px; background:#374151; color:#9ca3af;">[로딩 중...]</span>
-          </div>
+        <div style="font-size:11px; font-weight:700; color:#a78bfa; margin-bottom:8px;">⚙ Nemotron OCR 설정</div>
+        <label style="margin-top:6px;">로컬 모델 경로</label>
+        <input type="text" id="nem-model-path" placeholder="C:/models/Nemotron-Nano-VL-8B" />
+        <label style="margin-top:6px;">이미지 DPI <span style="color:#6b7280;">(기본값: 200)</span></label>
+        <input type="number" id="nem-image-dpi" placeholder="200" min="72" max="400" style="width:90px;" />
+        <button onclick="saveAiSettings()" style="margin-top:10px; width:100%; padding:6px; background:#1e3a5f; color:#93c5fd; border:1px solid #3b82f6; border-radius:4px; font-size:12px; cursor:pointer;">💾 설정 저장</button>
+        <div id="settings-save-msg" style="font-size:10px; color:#4ade80; margin-top:4px; display:none;">✓ 저장됨</div>
+        <div style="font-size:11px; margin-top:8px; padding:6px; background:#1f2937; border-radius:4px; display:flex; justify-content:space-between; align-items:center;">
+          <span style="color:#d1d5db;">상태:</span>
+          <span id="nemotron-status-badge" style="padding:2px 8px; border-radius:3px; font-size:10px; background:#374151; color:#9ca3af;">[미로드]</span>
         </div>
-        <div style="font-size:11px; color:#9ca3af; margin-bottom:6px;">
-          <span>GPU 메모리: <span id="gpu-memory-display">-</span></span>
-        </div>
-        <button onclick="loadAiModels()" style="margin-top:6px; width:100%; padding:6px; background:#4c1d95; color:#e9d5ff; border:none; border-radius:4px; font-size:12px; cursor:pointer;">📥 AI 모델 로드</button>
+        <div style="font-size:11px; color:#9ca3af; margin-top:4px;">GPU: <span id="gpu-memory-display">-</span></div>
+        <button onclick="loadAiModels()" style="margin-top:8px; width:100%; padding:6px; background:#4c1d95; color:#e9d5ff; border:none; border-radius:4px; font-size:12px; cursor:pointer;">📥 AI 모델 로드</button>
       </div>
       <button class="run-btn" id="btn-s1" disabled onclick="runStage1()">Stage 1 실행</button>
       <div class="log-box" id="log-s1"><span style="color:#ffffff">-- 대기 중 --</span></div>
@@ -433,8 +435,9 @@
       checkAiStatus();
     }
   }
-  // Init: check AI status on load (full mode selected by default)
+  // Init: load settings + check AI status on load
   setTimeout(() => {
+    loadAiSettingsFromServer();
     onAiModeChange();
   }, 0);
 
@@ -487,6 +490,37 @@
     } catch (err) {
       if (badge) { badge.textContent = 'AI 상태 확인 오류'; badge.style.background = '#450a0a'; badge.style.color = '#f87171'; }
       appendLog('s1', `AI 상태 확인 오류: ${err.message}`, 'err');
+    }
+  }
+
+  async function loadAiSettingsFromServer() {
+    try {
+      const r = await fetch(`${API}/settings`);
+      if (!r.ok) return;
+      const d = await r.json();
+      const s = d.nemotron_ocr || {};
+      document.getElementById('nem-model-path').value = s.model_path || 'C:/models/Nemotron-Nano-VL-8B';
+      document.getElementById('nem-image-dpi').value  = s.image_dpi  || 200;
+    } catch (_) {}
+  }
+
+  async function saveAiSettings() {
+    const body = {
+      nemotron_ocr: {
+        model_path: document.getElementById('nem-model-path').value.trim(),
+        device:     'auto',
+        image_dpi:  parseInt(document.getElementById('nem-image-dpi').value) || 200,
+      }
+    };
+    try {
+      const r = await fetch(`${API}/settings`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+      if (r.ok) {
+        const msg = document.getElementById('settings-save-msg');
+        msg.style.display = 'block';
+        setTimeout(() => { msg.style.display = 'none'; }, 2000);
+      }
+    } catch (e) {
+      alert('설정 저장 실패: ' + e.message);
     }
   }
 
