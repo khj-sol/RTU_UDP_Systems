@@ -33,10 +33,18 @@ def _snapshot(repo_id: str, local_dir: str, revision: str):
     )
 
 
+def _has_weights(path: str) -> bool:
+    import glob
+    return bool(
+        glob.glob(os.path.join(path, "*.safetensors"))
+        + glob.glob(os.path.join(path, "*.bin"))
+    )
+
+
 def download_phi():
     os.makedirs(MODELS_DIR, exist_ok=True)
     phi_path = os.path.join(MODELS_DIR, "Phi-4-mini-instruct")
-    if os.path.exists(phi_path) and os.listdir(phi_path):
+    if os.path.exists(phi_path) and _has_weights(phi_path):
         print("[Skip] Phi-4-mini-instruct already exists")
         return
     print(f"[Downloading] {PHI_REPO} (revision={PHI_REVISION}) ...")
@@ -51,7 +59,7 @@ def download_phi():
 def download_qwen():
     os.makedirs(MODELS_DIR, exist_ok=True)
     qwen_path = os.path.join(MODELS_DIR, "Qwen3-VL-32B-4bit")
-    if os.path.exists(qwen_path) and os.listdir(qwen_path):
+    if os.path.exists(qwen_path) and _has_weights(qwen_path):
         print("[Skip] Qwen3-VL-32B-4bit already exists")
         return
     print(f"[Downloading] {QWEN_REPO} (revision={QWEN_REVISION}) ...")
@@ -64,10 +72,11 @@ def download_qwen():
         print(f"[Info] Try: https://huggingface.co/{QWEN_REPO}")
         sys.exit(1)
 
+
 def download_nemotron():
     os.makedirs(MODELS_DIR, exist_ok=True)
     nem_path = os.path.join(MODELS_DIR, "Nemotron-Nano-VL-8B")
-    if os.path.exists(nem_path) and os.listdir(nem_path):
+    if os.path.exists(nem_path) and _has_weights(nem_path):
         print("[Skip] Nemotron-Nano-VL-8B already exists")
         return
     print(f"[Downloading] {NEMOTRON_REPO} (revision={NEMOTRON_REVISION}) ...")
