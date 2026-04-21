@@ -211,12 +211,13 @@ class NemotronOCRModel:
             if _sub is not None:
                 _sub._attn_implementation = "eager"
 
-        # transformers>=4.50 호환: 커스텀 클래스에 all_tied_weights_keys 주입
+        # transformers>=4.47 호환: PreTrainedModel 베이스에 all_tied_weights_keys 주입
+        # trust_remote_code로 동적 로드된 클래스는 MODEL_FOR_CAUSAL_LM_MAPPING에 없으므로
+        # 베이스 클래스에 패치해야 모든 서브클래스에 상속됨
         try:
-            from transformers.models.auto.modeling_auto import MODEL_FOR_CAUSAL_LM_MAPPING
-            _cls = MODEL_FOR_CAUSAL_LM_MAPPING.get(type(config))
-            if _cls is not None and not hasattr(_cls, "all_tied_weights_keys"):
-                _cls.all_tied_weights_keys = []
+            from transformers import PreTrainedModel
+            if not hasattr(PreTrainedModel, "all_tied_weights_keys"):
+                PreTrainedModel.all_tied_weights_keys = []
         except Exception:
             pass
 
