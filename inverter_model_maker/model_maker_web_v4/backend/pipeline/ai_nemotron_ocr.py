@@ -292,9 +292,16 @@ class NemotronOCRModel:
         text = self.processor.apply_chat_template(
             messages, tokenize=False, add_generation_prompt=True
         )
-        inputs = self.processor(text=[text], images=[image], return_tensors="pt").to(
-            self.model.device
-        )
+
+        # device_map="auto" 모델은 .device 속성이 없음 → 첫 파라미터 device 사용
+        try:
+            first_device = next(self.model.parameters()).device
+        except StopIteration:
+            first_device = torch.device("cpu")
+        logger.debug("[NemotronOCR] 입력 device: %s", first_device)
+
+        inputs = self.processor(text=[text], images=[image], return_tensors="pt").to(first_device)
+
         with torch.no_grad():
             output_ids = self.model.generate(
                 **inputs,
@@ -303,7 +310,10 @@ class NemotronOCRModel:
             )
         input_len = inputs["input_ids"].shape[1] if "input_ids" in inputs else 0
         gen_ids = output_ids[0][input_len:]
-        return self.processor.tokenizer.decode(gen_ids, skip_special_tokens=True).strip()
+
+        # processor가 TokenizersBackend 자체일 수 있으므로 .tokenizer 폴백
+        _tok = getattr(self.processor, "tokenizer", self.processor)
+        return _tok.decode(gen_ids, skip_special_tokens=True).strip()
 
     @staticmethod
     def _extract_json(text: str) -> Any:
