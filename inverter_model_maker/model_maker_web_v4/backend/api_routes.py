@@ -9,15 +9,21 @@ import shutil
 import asyncio
 import traceback
 import json
+import re
+import hashlib
+import threading
+from datetime import date
 from pathlib import Path
+
+try:
+    import openpyxl as _openpyxl
+except ImportError:
+    _openpyxl = None  # type: ignore
 
 from .session_store import SessionStore
 from .ws_manager import ws_manager
 
 router = APIRouter()
-
-import hashlib
-import threading
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 MM_SETTINGS_PATH = Path(__file__).parent.parent / 'mm_settings.json'
@@ -63,7 +69,7 @@ def _record_success(pdf_path: str, manufacturer: str, h01_match: dict,
             'info_match': info_match,
             'max_mppt': meta.get('max_mppt', 0),
             'max_string': meta.get('max_string', 0),
-            'date': __import__('datetime').date.today().isoformat(),
+            'date': date.today().isoformat(),
         }
         with _success_index_lock:
             index = _load_success_index()
@@ -169,7 +175,8 @@ async def stage1_upload(
         raise HTTPException(404, 'session not found')
 
     work_dir = SessionStore.get_work_dir(session_id)
-    dest = os.path.join(work_dir, file.filename)
+    safe_name = os.path.basename(file.filename or 'upload')
+    dest = os.path.join(work_dir, safe_name)
     with open(dest, 'wb') as f:
         shutil.copyfileobj(file.file, f)
 
@@ -184,7 +191,7 @@ async def stage1_upload(
         registers_py=None,
         meta={},
     )
-    return {'saved': dest, 'filename': file.filename}
+    return {'saved': dest, 'filename': safe_name}
 
 
 def _default_settings() -> dict:
@@ -299,7 +306,7 @@ async def ai_load(body: dict = Body(default={})):
         try:
             if cfg.get('rapidocr_enabled', True):
                 from .pipeline.rapidocr_adapter import get_rapidocr_engine, get_rapidocr_status
-                loop = asyncio.get_event_loop()
+                loop = asyncio.get_running_loop()
                 await loop.run_in_executor(None, get_rapidocr_engine, cfg)
                 status = get_rapidocr_status()
             else:
@@ -433,7 +440,7 @@ async def stage1_run(body: dict):
             })
             traceback.print_exc()
 
-    task = asyncio.ensure_future(_run(), loop=asyncio.get_event_loop())
+    task = asyncio.create_task(_run())
     SessionStore.update(sid, _running_task=task)
     return {'status': 'running', 'session_id': sid}
 
@@ -532,7 +539,7 @@ async def apply_suggestion(body: dict):
             })
             import traceback; traceback.print_exc()
 
-    asyncio.ensure_future(_rerun(), loop=asyncio.get_event_loop())
+    asyncio.create_task(_rerun())
     return {'status': 'rerunning', 'session_id': sid}
 
 
@@ -651,7 +658,7 @@ async def stage2_run(body: dict):
             })
             traceback.print_exc()
 
-    asyncio.ensure_future(_run(), loop=asyncio.get_event_loop())
+    asyncio.create_task(_run())
     return {'status': 'running', 'session_id': sid}
 
 
@@ -706,13 +713,13 @@ async def stage3_run(body: dict):
             })
             traceback.print_exc()
 
-    asyncio.ensure_future(_run(), loop=asyncio.get_event_loop())
+    asyncio.create_task(_run())
     return {'status': 'running', 'session_id': sid}
 
 
 # ─── H01 매핑 ────────────────────────────────────────────────────────────────
 
-_RE_CLEAN_REG = __import__('re').compile(r'^([A-Za-z0-9_가-힣]+)')
+_RE_CLEAN_REG = re.compile(r'^([A-Za-z0-9_가-힣]+)')
 
 
 def _parse_reg_display(s: str) -> str:
@@ -736,8 +743,7 @@ def get_h01_mapping(session_id: str):
         raise HTTPException(400, 'Stage 2 not completed')
 
     try:
-        import openpyxl
-        wb = openpyxl.load_workbook(stage2_excel, data_only=True)
+        wb = _openpyxl.load_workbook(stage2_excel, data_only=True)
         if 'H01_MAPPING' not in wb.sheetnames:
             raise HTTPException(404, 'H01_MAPPING sheet not found')
 
@@ -876,8 +882,7 @@ def save_h01_mapping(session_id: str, body: dict):
     fc_map = body.get('fc', {})  # {h01_field: 3 or 4}
 
     try:
-        import openpyxl
-        wb = openpyxl.load_workbook(stage2_excel)
+        wb = _openpyxl.load_workbook(stage2_excel)
         if 'H01_MAPPING' not in wb.sheetnames:
             raise HTTPException(404, 'H01_MAPPING sheet not found')
 
@@ -919,8 +924,7 @@ def get_mppt_mapping(session_id: str):
         raise HTTPException(400, 'Stage 2 not completed')
 
     try:
-        import openpyxl
-        wb = openpyxl.load_workbook(stage2_excel, data_only=True)
+        wb = _openpyxl.load_workbook(stage2_excel, data_only=True)
         if 'MPPT_MAPPING' not in wb.sheetnames:
             raise HTTPException(404, 'MPPT_MAPPING sheet not found')
 
@@ -1021,8 +1025,7 @@ def save_mppt_mapping(session_id: str, body: dict):
 
     mappings = body.get('mappings', {})
     try:
-        import openpyxl
-        wb = openpyxl.load_workbook(stage2_excel)
+        wb = _openpyxl.load_workbook(stage2_excel)
         if 'MPPT_MAPPING' not in wb.sheetnames:
             raise HTTPException(404, 'MPPT_MAPPING sheet not found')
         ws = wb['MPPT_MAPPING']
@@ -1060,8 +1063,7 @@ def get_info_mapping(session_id: str):
         raise HTTPException(400, 'Stage 1 not completed')
 
     try:
-        import openpyxl
-        wb = openpyxl.load_workbook(stage1_excel, data_only=True)
+        wb = _openpyxl.load_workbook(stage1_excel, data_only=True)
         if 'INFO_MAPPING' not in wb.sheetnames:
             raise HTTPException(404, 'INFO_MAPPING sheet not found')
 
@@ -1158,8 +1160,7 @@ def save_info_mapping(session_id: str, body: dict):
     mappings = body.get('mappings', {})
 
     try:
-        import openpyxl
-        wb = openpyxl.load_workbook(stage1_excel)
+        wb = _openpyxl.load_workbook(stage1_excel)
         if 'INFO_MAPPING' not in wb.sheetnames:
             raise HTTPException(404, 'INFO_MAPPING sheet not found')
 
@@ -1190,11 +1191,13 @@ def save_info_mapping(session_id: str, body: dict):
 
 @router.get('/download/{session_id}/{filename}')
 def download_file(session_id: str, filename: str):
-    work_dir = SessionStore.get_work_dir(session_id)
-    path = os.path.join(work_dir, filename)
+    work_dir = os.path.realpath(SessionStore.get_work_dir(session_id))
+    path = os.path.realpath(os.path.join(work_dir, os.path.basename(filename)))
+    if not path.startswith(work_dir + os.sep) and path != work_dir:
+        raise HTTPException(400, 'invalid filename')
     if not os.path.exists(path):
         raise HTTPException(404, 'file not found')
-    return FileResponse(path, filename=filename)
+    return FileResponse(path, filename=os.path.basename(path))
 
 
 @router.get('/download-stage/{session_id}/{stage}')
@@ -1244,8 +1247,7 @@ async def websocket_endpoint(ws: WebSocket, session_id: str):
 def _update_review_verdicts(excel_path: str, verdicts: list):
     """Stage 2 Excel REVIEW 시트에 사용자 판정 기록 + review_history 저장"""
     try:
-        import openpyxl
-        wb = openpyxl.load_workbook(excel_path)
+        wb = _openpyxl.load_workbook(excel_path)
 
         # V2: 2_REVIEW 또는 REVIEW 시트
         review_sheet = '2_REVIEW' if '2_REVIEW' in wb.sheetnames else 'REVIEW'
